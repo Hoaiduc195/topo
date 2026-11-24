@@ -1,0 +1,43 @@
+name: A map is wrong
+description: A box, a connection or a flow says something the code doesn't do.
+labels: ["wrong map"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you: wrong maps are the bugs Topo cares about most. Please don't paste code you can't share; a public repository, or the shape of the problem, is enough.
+  - type: input
+    id: repository
+    attributes:
+      label: Repository mapped
+      description: A public repository and commit if you can share them, or "private".
+    validations:
+      required: true
+  - type: input
+    id: box
+    attributes:
+      label: The box, connection or flow
+      description: Its id (shown in the box's card), such as f:src/app.py#main.
+    validations:
+      required: true
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What the map says, and what the code does
+      description: Point at the file and line that show it.
+    validations:
+      required: true
+  - type: dropdown
+    id: depth
+    attributes:
+      label: Depth the map was made at
+      options: [overview, standard, deep, one of my own, not sure]
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and model
+      description: Claude Code, Codex or another, and the model if you know it.
+  - type: input
+    id: version
+    attributes:
+      label: Topo version or commit

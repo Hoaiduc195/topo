@@ -1,0 +1,43 @@
+name: Install or first run failed
+description: Topo didn't install, or /topo:map stopped before a map.
+labels: ["install"]
+body:
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      options: [Claude Code, Codex, another agent]
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: macOS, Linux or Windows (WSL), with its version.
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: The output of python3 --version.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you ran
+      description: The commands, in order.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: What it printed
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Topo version or commit

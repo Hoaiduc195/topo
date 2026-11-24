@@ -9,7 +9,11 @@ A zoomable map of a software system, read from its code. Topo shows a set of app
 whole system down to single functions, with every connection between them, and checks every claim on
 the map against the code it cites.
 
-![The Saleor example map at its top level: three applications, the outside services they use, and the connections between them](docs/saleor-overview.jpg)
+![Topo in 16 seconds: from the whole system down to one function, the code it cites, what calls what, and the one command that starts a map](docs/topo-16s.gif)
+
+**What it costs.** Topo is free and open source. A map runs on your own Claude Code or Codex plan: about
+4 US dollars for a small repository, and for werkzeug (about 180 code files) from 13 as an overview to
+36 at full depth.
 
 Codebases grow until nobody can draw the whole system, and the documents drift from what the code
 does. Topo is a way to get the real picture back: agents read the code in parallel and write
@@ -18,10 +22,14 @@ shared.
 
 ## See an example
 
-Clone this repository and **open `maps/saleor/dist/index.html` in a browser**: Saleor, the open-source
-commerce platform (its API, its Dashboard and four of its apps), mapped from source in about 30
-minutes by eleven agents. 2,120 boxes, 2,763 connections and four guided flows that cross all three
-applications. Its analysis is in [`maps/saleor/ANALYSIS.md`](maps/saleor/ANALYSIS.md).
+**Open the example in your browser** from the website link under *About* on this repository's page
+(GitHub Pages hosts it), or clone the repository and open `maps/saleor/dist/index.html`: Saleor, the
+open-source commerce platform (its API, its Dashboard and four of its apps), mapped from source in
+about 30 minutes by eleven agents. 2,120 boxes, 2,763 connections and four guided flows that cross all
+three applications, with every one of its 835 function-level boxes citing a line that matches. Its
+analysis is in [`maps/saleor/ANALYSIS.md`](maps/saleor/ANALYSIS.md).
+
+![The Saleor example map at its top level: three applications, the outside services they use, and the connections between them](docs/saleor-overview.jpg)
 
 ## Map your own repository
 
