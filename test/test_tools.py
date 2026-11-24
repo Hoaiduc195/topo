@@ -99,6 +99,48 @@ class Tools(unittest.TestCase):
         self.assertIn(["GET", "/health", "app/api/main.py:4"], rows)
         self.assertIn(["POST", "/v1/items/{key}", "app/api/items.py:3"], rows)
 
+    def test_routes_go_servers(self):
+        self.repo.write(
+            "srv/nethttp.go",
+            'package main\nfunc main() {\n'
+            '\thttp.HandleFunc("/health", health)\n'
+            '\thttp.HandleFunc("POST /webhooks", hook)\n'
+            '}\n',
+        )
+        self.repo.write(
+            "srv/gin_echo.go",
+            'package main\nfunc mount(r *gin.Engine) {\n'
+            '\tapi := r.Group("/api")\n'
+            '\tv1 := api.Group("/v1")\n'
+            '\tv1.GET("/orders", listOrders)\n'
+            '\tv1.POST("/orders", createOrder)\n'
+            '}\n',
+        )
+        self.repo.write(
+            "srv/chi.go",
+            'package main\nfunc routes(r chi.Router) {\n'
+            '\tr.Route("/items", func(r chi.Router) {\n'
+            '\t\tr.Get("/{id}", getItem)\n'
+            '\t\tr.Delete("/{id}", deleteItem)\n'
+            '\t})\n'
+            '}\n',
+        )
+        self.repo.write(
+            "srv/routes_test.go",
+            'package main\nfunc TestX() { http.HandleFunc("/ignored", nil) }\n',
+        )
+        out = os.path.join(self.t, "go-routes.json")
+        r = tool("routes.py", self.repo.root, "srv", "--out", out)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(Path(out).read_text())
+        self.assertIn(["ANY", "/health", "srv/nethttp.go:3"], rows)
+        self.assertIn(["POST", "/webhooks", "srv/nethttp.go:4"], rows)
+        self.assertIn(["GET", "/api/v1/orders", "srv/gin_echo.go:5"], rows)
+        self.assertIn(["POST", "/api/v1/orders", "srv/gin_echo.go:6"], rows)
+        self.assertIn(["GET", "/items/{id}", "srv/chi.go:4"], rows)
+        self.assertIn(["DELETE", "/items/{id}", "srv/chi.go:5"], rows)
+        self.assertFalse(any(p == "/ignored" for _, p, _ in rows))
+
     def test_brief_catches_double_ownership(self):
         areas = {"map": self.map, "checkout": self.repo.root, "out": os.path.join(self.t, "briefs"),
                  "slices": os.path.join(self.t, "slices"), "areas": {
