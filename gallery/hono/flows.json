@@ -1,0 +1,9 @@
+{
+  "feature": [
+    ["flow.core.request-lifecycle", "Request lifecycle"],
+    ["flow.adapters.cloudflare-workers-request", "Edge runtime entry"],
+    ["flow.middleware.cors-then-jwt", "Middleware chain"],
+    ["flow.helpers.rpc-call", "Typed RPC client"],
+    ["flow.jsx.server-render", "JSX server render"]
+  ]
+}

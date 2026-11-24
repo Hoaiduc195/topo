@@ -1,0 +1,873 @@
+{
+  "area": "routing",
+  "nodes": [
+    {
+      "id": "f:fastapi/routing.py",
+      "parent": "fastapi.routing",
+      "name": "Routing engine",
+      "kind": "module",
+      "summary": "Defines APIRoute, APIRouter, and all helpers that turn a path operation into a live Asynchronous Server Gateway Interface (ASGI) handler.",
+      "detail": "fastapi/routing.py is the core of the request lifecycle. APIRouter collects APIRoute and APIWebSocketRoute objects; get_request_handler() builds the per-route async coroutine that reads the body, calls solve_dependencies (fastapi.di), runs the endpoint via run_endpoint_function, serializes the result with serialize_response, and returns a Response. Sync endpoints are pushed into a worker threadpool via run_in_threadpool from Starlette/AnyIO. The module also contains the included-router machinery (_IncludedRouter, _EffectiveRouteContext, RouteContext) that lets sub-routers share prefixes, tags, and dependency lists without copying routes; the frontend static-file routing system (_FrontendStaticFiles, _FrontendRoute, _FrontendRouteGroup) for serving single-page-app builds; Server-Sent Events (SSE) streaming via EventSourceResponse; JSONL streaming for generator endpoints; and body-size limiting wrappers delegated to fastapi._body_limit. The file is 6963 lines.",
+      "paths": ["fastapi/routing.py"],
+      "status": "live",
+      "tech": ["Python", "FastAPI", "ASGI", "Starlette", "AnyIO", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/background.py",
+      "parent": "fastapi.routing",
+      "name": "Background tasks",
+      "kind": "module",
+      "summary": "Extends Starlette's BackgroundTasks with OpenTelemetry tracing so each task is wrapped in an _operation span.",
+      "detail": "BackgroundTasks subclasses StarletteBackgroundTasks and overrides add_task (typed with ParamSpec for IDE completion) and __call__. When __call__ is invoked by Starlette after the response is sent, it iterates self.tasks and wraps each call in a telemetry _operation context manager, attributing the span to the task's function.",
+      "paths": ["fastapi/background.py"],
+      "status": "live",
+      "tech": ["Python", "FastAPI"]
+    },
+    {
+      "id": "f:fastapi/concurrency.py",
+      "parent": "fastapi.routing",
+      "name": "Concurrency helpers",
+      "kind": "module",
+      "summary": "Wraps sync context managers for use in async code and manages per-dependency concurrency semaphores.",
+      "detail": "contextmanager_in_threadpool runs __enter__ and __exit__ of a synchronous context manager in a worker thread via AnyIO, using a fresh CapacityLimiter(1) so __exit__ never waits for thread capacity. _asynccontextmanager_with_shielded_exit shields an AsyncExitStack's cleanup scope during teardown of async generator dependencies. _DependencyConcurrency holds a max_concurrency int and lazily creates a per-runner Semaphore (stored in a RunVar-keyed WeakKeyDictionary). _contextmanager_with_concurrency_limit wraps an async context manager with a semaphore. run_in_threadpool and iterate_in_threadpool are re-exported from starlette.concurrency.",
+      "paths": ["fastapi/concurrency.py"],
+      "status": "live",
+      "tech": ["Python", "AnyIO", "asyncio"]
+    },
+    {
+      "id": "f:fastapi/websockets.py",
+      "parent": "fastapi.routing",
+      "name": "WebSocket re-exports",
+      "kind": "module",
+      "summary": "Re-exports WebSocket, WebSocketDisconnect, and WebSocketState from Starlette so user code imports them from fastapi.",
+      "detail": "This file is a thin re-export shim. All three symbols come from starlette.websockets and are re-exported with the noqa marker so they appear in the fastapi public namespace without being unused imports.",
+      "paths": ["fastapi/websockets.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "routing.handlers",
+      "parent": "f:fastapi/routing.py",
+      "name": "Request handlers",
+      "kind": "group",
+      "summary": "Functions that build the ASGI callables for HTTP routes and WebSocket routes.",
+      "detail": "get_request_handler returns the per-route async coroutine app(request). get_websocket_app returns its WebSocket equivalent. run_endpoint_function runs the endpoint (async or sync). serialize_response validates and encodes the return value. request_response and websocket_session wrap those callables as ASGI apps and inject two AsyncExitStack scopes into the request scope (fastapi_inner_astack for dependencies, fastapi_function_astack for the endpoint function)."
+    },
+    {
+      "id": "routing.route_classes",
+      "parent": "f:fastapi/routing.py",
+      "name": "Route classes",
+      "kind": "group",
+      "summary": "APIRoute and APIWebSocketRoute: the objects stored in a router's route list.",
+      "detail": "APIRoute extends starlette.routing.Route and adds FastAPI-specific fields: response_model, dependant, body_field, response_field, stream_item_field, is_sse_stream, is_json_stream, form_limits and max_body_size. Its __init__ delegates state setup to _populate_api_route_state and wraps the ASGI app with wrap_app_with_body_limit. APIWebSocketRoute extends starlette.routing.WebSocketRoute and builds get_websocket_app immediately on construction."
+    },
+    {
+      "id": "routing.router",
+      "parent": "f:fastapi/routing.py",
+      "name": "APIRouter",
+      "kind": "group",
+      "summary": "The router class applications and sub-modules use to declare path operations.",
+      "detail": "APIRouter extends starlette.routing.Router with prefix, tags, dependencies, response handling fields, and a _routes_version counter. add_api_route constructs an APIRoute and appends it. add_api_websocket_route constructs an APIWebSocketRoute. include_router creates a _RouterIncludeContext, wraps the included router in an _IncludedRouter and appends it, then merges lifespan contexts. The HTTP-verb decorators (get, post, put, delete, patch, options, head, trace) all call add_api_route via api_route. frontend() registers a _FrontendRouteGroup as a low-priority route."
+    },
+    {
+      "id": "routing.include_machinery",
+      "parent": "f:fastapi/routing.py",
+      "name": "Include router machinery",
+      "kind": "group",
+      "summary": "The lazy, version-tracked objects that compute effective routes when a router is included.",
+      "detail": "_RouterIncludeContext is a dataclass that freezes prefix/tags/dependencies/etc at the moment include_router is called. _IncludedRouter implements BaseRoute and uses a version counter to lazily recompute _effective_candidates when the source router changes. _EffectiveRouteContext is a dataclass that holds the fully-combined state (prefix applied, tags merged) for a single route inside an inclusion; it implements matches() and url_path_for() using the combined path_regex. RouteContext is a frozen public wrapper returned by iter_route_contexts."
+    },
+    {
+      "id": "routing.frontend",
+      "parent": "f:fastapi/routing.py",
+      "name": "Frontend static routing",
+      "kind": "group",
+      "summary": "Low-priority routes that serve single-page-app static files after all API routes are checked.",
+      "detail": "_FrontendStaticFiles extends Starlette's StaticFiles to add fallback logic (index.html for client-side navigation, 404.html for missing assets) and reads the path to serve from the fastapi ASGI scope key instead of the raw path. _FrontendRoute is a single path prefix entry with a _FrontendStaticFiles app. _FrontendRouteGroup collects multiple _FrontendRoute entries, selects the most specific match by path length, and optionally solves a dependency chain before serving the file. The group is stored in APIRouter._low_priority_routes and checked only after normal route matching fails."
+    },
+
+    {
+      "id": "f:fastapi/routing.py#request_response",
+      "parent": "routing.handlers",
+      "name": "request_response()",
+      "kind": "function",
+      "summary": "Wraps a request-to-response callable as an ASGI app, injecting two AsyncExitStack scopes.",
+      "detail": "Modified copy of starlette.routing.request_response. The inner app creates fastapi_inner_astack (for dependency cleanup) and fastapi_function_astack in the ASGI scope, then awaits the wrapped function. If the response was not awaited (indicating a bare-except in a yield dependency swallowed the exception), it raises FastAPIError. The outer app delegates exception wrapping to starlette's wrap_app_handling_exceptions.",
+      "paths": ["fastapi/routing.py:137"],
+      "status": "live",
+      "tech": ["Python", "ASGI"],
+      "signature": "def request_response(func: Callable[[Request], Awaitable[Response] | Response]) -> ASGIApp",
+      "code": "async def app(scope: Scope, receive: Receive, send: Send) -> None:\n    response_awaited = False\n    async with AsyncExitStack() as request_stack:\n        scope[\"fastapi_inner_astack\"] = request_stack\n        async with AsyncExitStack() as function_stack:\n            scope[\"fastapi_function_astack\"] = function_stack\n            response = await f(request)\n        await response(scope, receive, send)\n        response_awaited = True\n    if not response_awaited:\n        raise FastAPIError(\n            \"Response not awaited...\"\n        )"
+    },
+    {
+      "id": "f:fastapi/routing.py#websocket_session",
+      "parent": "routing.handlers",
+      "name": "websocket_session()",
+      "kind": "function",
+      "summary": "Wraps a WebSocket coroutine as an ASGI app, mirroring the same two AsyncExitStack scope injection as request_response.",
+      "paths": ["fastapi/routing.py:181"],
+      "status": "live",
+      "signature": "def websocket_session(func: Callable[[WebSocket], Awaitable[None]]) -> ASGIApp"
+    },
+    {
+      "id": "f:fastapi/routing.py#serialize_response",
+      "parent": "routing.handlers",
+      "name": "serialize_response()",
+      "kind": "function",
+      "summary": "Validates the endpoint return value against the response ModelField, then encodes it via Pydantic serialization or jsonable_encoder.",
+      "detail": "If a ModelField is supplied, it calls field.validate() (or run_in_threadpool(field.validate) for sync endpoints) and raises ResponseValidationError on any errors. The serializer used is field.serialize_json when dump_json=True (the fast path that avoids a Python dict round-trip and uses Pydantic's Rust core directly) or field.serialize otherwise. Without a field, it falls back to jsonable_encoder. Called from the inner app closure built by get_request_handler.",
+      "paths": ["fastapi/routing.py:329"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "async def serialize_response(*, field, response_content, include, exclude, by_alias, exclude_unset, exclude_defaults, exclude_none, is_coroutine, endpoint_ctx, dump_json) -> Any",
+      "code": "if field:\n    if is_coroutine:\n        value, errors = field.validate(response_content, {}, loc=(\"response\",))\n    else:\n        value, errors = await run_in_threadpool(\n            field.validate, response_content, {}, loc=(\"response\",)\n        )\n    if errors:\n        raise ResponseValidationError(errors=errors, body=response_content, endpoint_ctx=ctx)\n    serializer = field.serialize_json if dump_json else field.serialize\n    return serializer(value, include=include, ...)\nelse:\n    return jsonable_encoder(response_content)"
+    },
+    {
+      "id": "f:fastapi/routing.py#run_endpoint_function",
+      "parent": "routing.handlers",
+      "name": "run_endpoint_function()",
+      "kind": "function",
+      "summary": "Calls the endpoint directly when async, or via run_in_threadpool and _run_sync_endpoint when sync.",
+      "detail": "Split out from get_request_handler to make the function easier to profile (inner closures are harder to profile). For coroutines it awaits dependant.call(**values) inside an _operation telemetry span. For sync callables it calls run_in_threadpool(_run_sync_endpoint, function=dependant.call, arguments=values) which runs the function in an AnyIO worker thread.",
+      "paths": ["fastapi/routing.py:372"],
+      "status": "live",
+      "tech": ["Python", "AnyIO"],
+      "signature": "async def run_endpoint_function(*, dependant: Dependant, values: dict[str, Any], is_coroutine: bool) -> Any",
+      "code": "if is_coroutine:\n    with _operation(name=\"endpoint\", function=dependant.call):\n        return await dependant.call(**values)\nelse:\n    return await run_in_threadpool(\n        _run_sync_endpoint, function=dependant.call, arguments=values\n    )"
+    },
+    {
+      "id": "f:fastapi/routing.py#get_request_handler",
+      "parent": "routing.handlers",
+      "name": "get_request_handler()",
+      "kind": "function",
+      "summary": "Builds and returns the per-route async coroutine that handles one HTTP request end-to-end.",
+      "detail": "Takes all route metadata (dependant, body_field, status_code, response_class, response_field, form limits, etc.) as arguments and captures them in the closure of the returned app(request) coroutine. The coroutine: (1) extracts endpoint context for error messages; (2) reads the request body (form via request.form(), JSON/bytes via request.body()) checking Content-Type when strict_content_type is True; (3) calls solve_dependencies inside an _operation span; (4) if no errors, dispatches to the SSE stream path, the JSONL stream path, the raw generator path, or runs run_endpoint_function and calls serialize_response; (5) raises RequestValidationError on dependency errors. Uses dump_json fast path when the response class is the default JSONResponse and a response_field is set.",
+      "paths": ["fastapi/routing.py:406"],
+      "status": "live",
+      "tech": ["Python", "FastAPI"],
+      "signature": "def get_request_handler(dependant, body_field, status_code, response_class, response_field, ...) -> Callable[[Request], Coroutine[Any, Any, Response]]",
+      "code": "solved_result = await solve_dependencies(\n    request=request, dependant=dependant, body=body,\n    dependency_overrides_provider=dependency_overrides_provider,\n    async_exit_stack=async_exit_stack,\n    embed_body_fields=embed_body_fields,\n)\nraw_response = await run_endpoint_function(\n    dependant=dependant, values=solved_result.values,\n    is_coroutine=is_coroutine,\n)\ncontent = await serialize_response(\n    field=response_field, response_content=raw_response, ...)\nreturn response"
+    },
+    {
+      "id": "f:fastapi/routing.py#get_websocket_app",
+      "parent": "routing.handlers",
+      "name": "get_websocket_app()",
+      "kind": "function",
+      "summary": "Builds the WebSocket handler coroutine: solves dependencies, raises WebSocketRequestValidationError on errors, calls the endpoint.",
+      "paths": ["fastapi/routing.py:824"],
+      "status": "live",
+      "signature": "def get_websocket_app(dependant, dependency_overrides_provider, embed_body_fields) -> Callable[[WebSocket], Coroutine[Any, Any, Any]]",
+      "code": "async def app(websocket: WebSocket) -> None:\n    solved_result = await solve_dependencies(\n        request=websocket, dependant=dependant, ...)\n    if solved_result.errors:\n        raise WebSocketRequestValidationError(solved_result.errors, ...)\n    with _operation(name=\"endpoint\", function=dependant.call):\n        await dependant.call(**solved_result.values)"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRoute",
+      "parent": "routing.route_classes",
+      "name": "APIRoute",
+      "kind": "class",
+      "summary": "A Starlette Route subclass that holds all FastAPI path-operation metadata and builds the ASGI handler on construction.",
+      "detail": "Extends starlette.routing.Route. __init__ calls _populate_api_route_state to set response_model, status_code, dependant, body_field, response_field, stream_item_field, is_sse_stream, is_json_stream, etc., then wraps the ASGI app with wrap_app_with_body_limit. get_route_handler() reads the ContextVar _effective_route_context_var so that an _IncludedRouter can inject a merged context before the handler is built. matches() checks the scope's effective route context so included routes use the prefixed path regex rather than the original.",
+      "paths": ["fastapi/routing.py:1216"],
+      "status": "live",
+      "tech": ["Python", "FastAPI", "Starlette"],
+      "signature": "class APIRoute(routing.Route)"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRoute.get_route_handler",
+      "parent": "f:fastapi/routing.py#APIRoute",
+      "name": "APIRoute.get_route_handler()",
+      "kind": "function",
+      "summary": "Returns the request handler coroutine by calling get_request_handler with the route's (or effective context's) fields.",
+      "paths": ["fastapi/routing.py:1322"],
+      "status": "live",
+      "signature": "def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]",
+      "code": "effective_context = _effective_route_context_var.get()\nif effective_context is not None and effective_context.original_route is self:\n    route = cast(_APIRouteLike, effective_context)\nreturn get_request_handler(\n    dependant=route.dependant,\n    body_field=route.body_field,\n    status_code=route.status_code,\n    response_class=route.response_class,\n    response_field=route.response_field,\n    ...)"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIWebSocketRoute",
+      "parent": "routing.route_classes",
+      "name": "APIWebSocketRoute",
+      "kind": "class",
+      "summary": "A Starlette WebSocketRoute subclass that solves FastAPI dependencies and calls get_websocket_app on construction.",
+      "paths": ["fastapi/routing.py:871"],
+      "status": "live",
+      "signature": "class APIWebSocketRoute(routing.WebSocketRoute)"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRouter",
+      "parent": "routing.router",
+      "name": "APIRouter",
+      "kind": "class",
+      "summary": "Groups path operations with shared prefix, tags, dependencies, and response settings; supports nested includes and frontend static routes.",
+      "detail": "Extends starlette.routing.Router. Constructor accepts prefix, tags, dependencies, default_response_class, responses, callbacks, route_class, on_startup/on_shutdown (kept for backward compatibility), lifespan, deprecated, include_in_schema, generate_unique_id_function, strict_content_type, max_body_size, and form_limits. It initializes _routes_version=0 for lazy recomputation of included routes, _low_priority_routes for frontend routes, and _frontend_routes for the _FrontendRouteGroup. add_api_route creates and appends an APIRoute. include_router wraps the included router in a _IncludedRouter and merges lifespan contexts.",
+      "paths": ["fastapi/routing.py:2412"],
+      "status": "live",
+      "tech": ["Python", "FastAPI", "Starlette"],
+      "signature": "class APIRouter(routing.Router)"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRouter.add_api_route",
+      "parent": "f:fastapi/routing.py#APIRouter",
+      "name": "APIRouter.add_api_route()",
+      "kind": "function",
+      "summary": "Merges router-level tags, dependencies, callbacks, and response class with per-route settings, constructs an APIRoute, and appends it.",
+      "paths": ["fastapi/routing.py:3115"],
+      "status": "live",
+      "signature": "def add_api_route(self, path, endpoint, *, response_model, status_code, tags, dependencies, ...) -> None",
+      "code": "current_tags = self.tags.copy()\nif tags:\n    current_tags.extend(tags)\ncurrent_dependencies = self.dependencies.copy()\nif dependencies:\n    current_dependencies.extend(dependencies)\nroute = route_class(\n    self.prefix + path, endpoint=endpoint,\n    tags=current_tags, dependencies=current_dependencies,\n    ...\n)\nself.routes.append(route)\nself._mark_routes_changed()"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRouter.add_api_websocket_route",
+      "parent": "f:fastapi/routing.py#APIRouter",
+      "name": "APIRouter.add_api_websocket_route()",
+      "kind": "function",
+      "summary": "Merges router-level dependencies with per-route dependencies, constructs an APIWebSocketRoute, and appends it.",
+      "paths": ["fastapi/routing.py:3317"],
+      "status": "live",
+      "signature": "def add_api_websocket_route(self, path, endpoint, name, *, dependencies) -> None"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRouter.include_router",
+      "parent": "f:fastapi/routing.py#APIRouter",
+      "name": "APIRouter.include_router()",
+      "kind": "function",
+      "summary": "Includes another APIRouter by wrapping it in an _IncludedRouter with a merged context, and merges lifespan events.",
+      "detail": "Builds a _RouterIncludeContext.for_include() that combines the parent router's prefix/tags/dependencies with the include-time overrides. Appends an _IncludedRouter to self.routes, increments _routes_version, forwards on_startup/on_shutdown handlers, and merges lifespan_context using _merge_lifespan_context.",
+      "paths": ["fastapi/routing.py:3415"],
+      "status": "live",
+      "signature": "def include_router(self, router, *, prefix, tags, dependencies, default_response_class, responses, callbacks, deprecated, include_in_schema, generate_unique_id_function, max_body_size, form_limits) -> None",
+      "code": "include_context = _RouterIncludeContext.for_include(\n    parent_router=self, included_router=router,\n    prefix=prefix, tags=tags, ...)\nself.routes.append(\n    _IncludedRouter(original_router=router, include_context=include_context)\n)\nself._mark_routes_changed()\nfor handler in router.on_startup:\n    self.add_event_handler(\"startup\", handler)\nself.lifespan_context = _merge_lifespan_context(\n    self.lifespan_context, router.lifespan_context)"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRouter.frontend",
+      "parent": "f:fastapi/routing.py#APIRouter",
+      "name": "APIRouter.frontend()",
+      "kind": "function",
+      "summary": "Registers a directory of frontend static files as a low-priority route at the given path prefix.",
+      "paths": ["fastapi/routing.py:2819"],
+      "status": "live",
+      "signature": "def frontend(self, path, *, directory, fallback, check_dir) -> None"
+    },
+    {
+      "id": "f:fastapi/routing.py#APIRouter.app",
+      "parent": "f:fastapi/routing.py#APIRouter",
+      "name": "APIRouter.app()",
+      "kind": "function",
+      "summary": "The core ASGI dispatch method: iterates routes for a full or partial match, then checks low-priority routes, then delegates to self.default.",
+      "detail": "Applies form limits from the router scope key, then iterates self.routes calling route.matches(scope). On Match.FULL, calls _route_selected telemetry and route.handle(). On no match, checks redirect_slashes, then calls _match_low_priority for frontend routes. If nothing matches, calls self.default (which typically returns 404).",
+      "paths": ["fastapi/routing.py:2908"],
+      "status": "live",
+      "signature": "async def app(self, scope: Scope, receive: Receive, send: Send) -> None"
+    },
+    {
+      "id": "f:fastapi/routing.py#_populate_api_route_state",
+      "parent": "routing.route_classes",
+      "name": "_populate_api_route_state()",
+      "kind": "function",
+      "summary": "Shared initializer for APIRoute and _EffectiveRouteContext: sets all path-operation fields including dependant, body_field, response_field, and stream detection.",
+      "detail": "Shared by both APIRoute.__init__ and _EffectiveRouteContext.from_api_route to avoid duplication. Compiles path regex, normalizes IntEnum status codes, builds per-additional-status-code response fields, calls get_dependant and _get_body_field, detects SSE/JSONL generator endpoints, and resolves the response_model (including stream item type extraction for generator endpoints that return a typed AsyncGenerator).",
+      "paths": ["fastapi/routing.py:1048"],
+      "status": "live",
+      "signature": "def _populate_api_route_state(route: _APIRouteLike, path, endpoint, *, response_model, ...) -> None"
+    },
+    {
+      "id": "f:fastapi/routing.py#_IncludedRouter",
+      "parent": "routing.include_machinery",
+      "name": "_IncludedRouter",
+      "kind": "class",
+      "summary": "A BaseRoute that wraps an included APIRouter, lazily computing effective route contexts and versioning them against the source router.",
+      "detail": "Stored in the parent router's routes list. effective_candidates() returns a list of _EffectiveRouteContext | _IncludedRouter, recomputing only when the source router's _routes_version has changed (double-checked locking with threading.Lock). _build_effective_context dispatches on route type (APIRoute, _FrontendRouteGroup, starlette Route/WebSocket/Mount/Host). _match() iterates candidates, sets the effective-route-context scope key for APIRoute matching, and returns the best match. handle() injects form limits and delegates to original_router.handle() after setting the included_router scope key so the router calls _handle_selected.",
+      "paths": ["fastapi/routing.py:1715"],
+      "status": "live",
+      "signature": "@dataclass class _IncludedRouter(BaseRoute)"
+    },
+    {
+      "id": "f:fastapi/routing.py#_EffectiveRouteContext",
+      "parent": "routing.include_machinery",
+      "name": "_EffectiveRouteContext",
+      "kind": "class",
+      "summary": "A dataclass that holds the fully merged (prefix + tags + dependencies) state of a route inside an inclusion, implementing matches() and url_path_for().",
+      "detail": "Built by _IncludedRouter._build_effective_context. Implements the _APIRouteLike protocol so it can be passed to get_request_handler in place of the original APIRoute. from_api_route calls _populate_api_route_state to compute the prefixed path_regex and merged dependant. The app field is set to wrap_app_with_body_limit(request_response(original_route.get_route_handler()), context.max_body_size), built once per inclusion context. The ContextVar _effective_route_context_var is set around the get_route_handler() call so the handler can read the merged context.",
+      "paths": ["fastapi/routing.py:1486"],
+      "status": "live",
+      "signature": "@dataclass class _EffectiveRouteContext"
+    },
+    {
+      "id": "f:fastapi/routing.py#_RouterIncludeContext",
+      "parent": "routing.include_machinery",
+      "name": "_RouterIncludeContext",
+      "kind": "class",
+      "summary": "A dataclass capturing the merged prefix/tags/dependencies/etc for one include_router call.",
+      "detail": "Built by _RouterIncludeContext.for_include() which inherits the parent router's settings and applies the include-time overrides. combine() merges two contexts for deeply nested routers. path_for() prepends the accumulated prefix to a route's path.",
+      "paths": ["fastapi/routing.py:1378"],
+      "status": "live",
+      "signature": "@dataclass class _RouterIncludeContext"
+    },
+    {
+      "id": "f:fastapi/routing.py#RouteContext",
+      "parent": "routing.include_machinery",
+      "name": "RouteContext",
+      "kind": "class",
+      "summary": "A frozen public wrapper returned by iter_route_contexts that exposes the original route and effective route context via properties.",
+      "paths": ["fastapi/routing.py:1672"],
+      "status": "live",
+      "signature": "@dataclass(frozen=True) class RouteContext"
+    },
+    {
+      "id": "f:fastapi/routing.py#iter_route_contexts",
+      "parent": "routing.include_machinery",
+      "name": "iter_route_contexts()",
+      "kind": "function",
+      "summary": "Public generator that yields RouteContext for every route in a router's route list, expanding _IncludedRouter trees.",
+      "paths": ["fastapi/routing.py:1978"],
+      "status": "live",
+      "signature": "def iter_route_contexts(routes: Sequence[BaseRoute | RouteContext]) -> Iterator[RouteContext]"
+    },
+    {
+      "id": "f:fastapi/routing.py#_FrontendStaticFiles",
+      "parent": "routing.frontend",
+      "name": "_FrontendStaticFiles",
+      "kind": "class",
+      "summary": "StaticFiles subclass that serves index.html or 404.html as fallbacks for single-page-app navigation and reads the path from the fastapi ASGI scope key.",
+      "detail": "Overrides get_path to read the path from the fastapi scope dict (set by _FrontendRoute.matches_with_path) rather than from the raw URL path. get_response checks the fallback setting: 'auto' detects index.html/404.html in the directory at request time; 'index.html' always falls back for navigation requests (Accept: text/html); '404.html' always serves 404.html on missing paths. Only GET and HEAD are allowed; other methods raise 405 or 404.",
+      "paths": ["fastapi/routing.py:2049"],
+      "status": "live",
+      "signature": "class _FrontendStaticFiles(StaticFiles)"
+    },
+    {
+      "id": "f:fastapi/routing.py#_FrontendRouteGroup",
+      "parent": "routing.frontend",
+      "name": "_FrontendRouteGroup",
+      "kind": "class",
+      "summary": "Groups multiple _FrontendRoute entries, selects the most specific match by path length, and optionally solves a dependency chain.",
+      "detail": "_match iterates child _FrontendRoute entries and picks the most specific full match (longest path). handle() solves dependencies via _solve_dependencies (a local async context manager that injects AsyncExitStack scopes) if the group has any, then calls route.app.get_response_for_scope.",
+      "paths": ["fastapi/routing.py:2256"],
+      "status": "live",
+      "signature": "class _FrontendRouteGroup(BaseRoute)"
+    },
+
+    {
+      "id": "f:fastapi/routing.py#BackgroundTasks",
+      "parent": "f:fastapi/background.py",
+      "name": "BackgroundTasks",
+      "kind": "class",
+      "summary": "Starlette's BackgroundTasks subclass that wraps each task execution in an OpenTelemetry operation span.",
+      "detail": "add_task is re-declared with ParamSpec so type checkers can verify the arguments passed. __call__ iterates self.tasks from the base class and wraps each task() call in a _operation(name='background_task', function=task.func) context manager. The base class __call__ is not called; this override replaces it entirely.",
+      "paths": ["fastapi/background.py:12"],
+      "status": "live",
+      "tech": ["Python", "FastAPI", "OpenTelemetry"],
+      "signature": "class BackgroundTasks(StarletteBackgroundTasks)",
+      "code": "async def __call__(self) -> None:\n    for task in self.tasks:\n        with _operation(name=\"background_task\", function=task.func):\n            await task()"
+    },
+    {
+      "id": "f:fastapi/routing.py#_build_response_args",
+      "parent": "routing.handlers",
+      "name": "_build_response_args()",
+      "kind": "function",
+      "summary": "Builds the keyword arguments dict used to construct the endpoint's Response.",
+      "detail": "Takes the solved dependency result and an optional status_code and returns a response_args dict. It always sets 'background' to solved_result.background_tasks so the constructed Response carries the BackgroundTasks instance, and sets 'status_code' from the explicit argument or the response class default. get_request_handler calls it on each request before instantiating the response class.",
+      "paths": ["fastapi/routing.py:388"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _build_response_args(*, status_code: int | None, solved_result: Any) -> dict[str, Any]"
+    },
+    {
+      "id": "f:fastapi/background.py#BackgroundTasks.add_task",
+      "parent": "f:fastapi/routing.py#BackgroundTasks",
+      "name": "BackgroundTasks.add_task()",
+      "kind": "function",
+      "summary": "Queues a function (sync or async) to run after the HTTP response is sent.",
+      "paths": ["fastapi/background.py:41"],
+      "status": "live",
+      "signature": "def add_task(self, func: Callable[P, Any], *args: P.args, **kwargs: P.kwargs) -> None"
+    },
+
+    {
+      "id": "f:fastapi/concurrency.py#contextmanager_in_threadpool",
+      "parent": "f:fastapi/concurrency.py",
+      "name": "contextmanager_in_threadpool()",
+      "kind": "function",
+      "summary": "Runs a synchronous context manager's __enter__ and __exit__ in a worker thread while keeping async cancellation safe.",
+      "detail": "Uses run_in_threadpool(__enter__) then anyio.to_thread.run_sync(__exit__, limiter=CapacityLimiter(1)) inside a CancelScope(shield=True) so cancellation cannot interrupt __exit__. This avoids race conditions when the context manager holds its own connection pool and __exit__ must run regardless of cancellation state.",
+      "paths": ["fastapi/concurrency.py:25"],
+      "status": "live",
+      "tech": ["Python", "AnyIO"],
+      "signature": "@asynccontextmanager async def contextmanager_in_threadpool(cm: AbstractContextManager[_T]) -> AsyncGenerator[_T, None]",
+      "code": "exit_limiter = CapacityLimiter(1)\nvalue = await run_in_threadpool(cm.__enter__)\ntry:\n    yield value\nexcept BaseException as e:\n    with CancelScope(shield=True):\n        ok = bool(await anyio.to_thread.run_sync(\n            cm.__exit__, type(e), e, e.__traceback__,\n            limiter=exit_limiter))\n    if not ok:\n        raise\nelse:\n    with CancelScope(shield=True):\n        await anyio.to_thread.run_sync(\n            cm.__exit__, None, None, None, limiter=exit_limiter)"
+    },
+    {
+      "id": "f:fastapi/concurrency.py#_DependencyConcurrency",
+      "parent": "f:fastapi/concurrency.py",
+      "name": "_DependencyConcurrency",
+      "kind": "class",
+      "summary": "Holds a max_concurrency limit and lazily creates a per-runner AnyIO Semaphore to cap concurrent executions of one dependency.",
+      "paths": ["fastapi/concurrency.py:75"],
+      "status": "live",
+      "tech": ["Python", "AnyIO"],
+      "signature": "class _DependencyConcurrency"
+    },
+    {
+      "id": "f:fastapi/concurrency.py#_contextmanager_with_concurrency_limit",
+      "parent": "f:fastapi/concurrency.py",
+      "name": "_contextmanager_with_concurrency_limit()",
+      "kind": "function",
+      "summary": "Wraps an async context manager with a semaphore to enforce the _DependencyConcurrency limit.",
+      "paths": ["fastapi/concurrency.py:92"],
+      "status": "live",
+      "signature": "@asynccontextmanager async def _contextmanager_with_concurrency_limit(cm, semaphore) -> AsyncGenerator[_T, None]"
+    },
+    {
+      "id": "f:fastapi/concurrency.py#_asynccontextmanager_with_shielded_exit",
+      "parent": "f:fastapi/concurrency.py",
+      "name": "_asynccontextmanager_with_shielded_exit()",
+      "kind": "function",
+      "summary": "Shields a cleanup scope during the exit of an async context manager so cancellation does not abort dependency teardown mid-flight.",
+      "paths": ["fastapi/concurrency.py:57"],
+      "status": "live",
+      "signature": "@asynccontextmanager async def _asynccontextmanager_with_shielded_exit(cm, cleanup_scope) -> AsyncGenerator[_T, None]"
+    },
+
+    {
+      "id": "f:fastapi/routing.py#_DefaultLifespan",
+      "parent": "f:fastapi/routing.py",
+      "name": "_DefaultLifespan",
+      "kind": "class",
+      "summary": "Lifespan context manager that runs the router's on_startup and on_shutdown handlers when no lifespan= is provided.",
+      "detail": "Kept for backward compatibility after Starlette removed support for on_startup/on_shutdown event handlers (ref: Starlette PR 3117). __aenter__ calls router._startup(), __aexit__ calls router._shutdown(). __call__ returns self so it satisfies the Lifespan[AppType] protocol.",
+      "paths": ["fastapi/routing.py:267"],
+      "status": "live",
+      "signature": "class _DefaultLifespan"
+    },
+    {
+      "id": "f:fastapi/routing.py#_merge_lifespan_context",
+      "parent": "f:fastapi/routing.py",
+      "name": "_merge_lifespan_context()",
+      "kind": "function",
+      "summary": "Returns a new async context manager that nests two lifespan contexts, merging their state dicts.",
+      "paths": ["fastapi/routing.py:250"],
+      "status": "live",
+      "signature": "def _merge_lifespan_context(original_context: Lifespan[Any], nested_context: Lifespan[Any]) -> Lifespan[Any]"
+    },
+    {
+      "id": "f:fastapi/routing.py#_build_dependant_with_parameterless_dependencies",
+      "parent": "f:fastapi/routing.py",
+      "name": "_build_dependant_with_params()",
+      "kind": "function",
+      "summary": "Calls get_dependant on a path+callable, prepends router-level parameterless dependencies, then computes embed_body_fields.",
+      "paths": ["fastapi/routing.py:926"],
+      "status": "live",
+      "signature": "def _build_dependant_with_parameterless_dependencies(*, path, call, dependencies) -> tuple[Dependant, list[ModelField], bool]"
+    },
+    {
+      "id": "f:fastapi/routing.py#_normalize_non_finite_floats",
+      "parent": "f:fastapi/routing.py",
+      "name": "_normalize_non_finite_floats()",
+      "kind": "function",
+      "summary": "Recursively replaces NaN, +Inf, and -Inf float values with None in a JSON-compatible data structure.",
+      "paths": ["fastapi/routing.py:318"],
+      "status": "live",
+      "signature": "def _normalize_non_finite_floats(data: Any) -> Any"
+    },
+
+    {
+      "id": "routing.test.concurrency",
+      "parent": "f:fastapi/concurrency.py",
+      "name": "test_concurrency.py",
+      "kind": "test",
+      "summary": "Tests for contextmanager_in_threadpool and threadpool helpers in fastapi/concurrency.py.",
+      "paths": ["tests/test_concurrency.py"],
+      "status": "live"
+    },
+    {
+      "id": "routing.test.dep-concurrency",
+      "parent": "f:fastapi/concurrency.py",
+      "name": "test_dependency_concurrency.py",
+      "kind": "test",
+      "summary": "Tests for _DependencyConcurrency semaphore limiting in fastapi/concurrency.py.",
+      "paths": ["tests/test_dependency_concurrency.py"],
+      "status": "live"
+    },
+    {
+      "id": "routing.test.background",
+      "parent": "f:fastapi/background.py",
+      "name": "test_telemetry/test_background.py",
+      "kind": "test",
+      "summary": "Tests that BackgroundTasks emits telemetry spans via _operation for each queued task.",
+      "paths": ["tests/test_telemetry/test_background.py"],
+      "status": "live"
+    },
+    {
+      "id": "routing.test.websockets",
+      "parent": "f:fastapi/routing.py",
+      "name": "test_telemetry/test_websockets.py",
+      "kind": "test",
+      "summary": "Tests WebSocket route handling including dependency injection and telemetry in fastapi/routing.py.",
+      "paths": ["tests/test_telemetry/test_websockets.py"],
+      "status": "live"
+    }
+  ],
+  "edges": [
+    {
+      "from": "f:fastapi/routing.py#get_request_handler",
+      "to": "f:fastapi/routing.py#serialize_response",
+      "kind": "calls",
+      "label": "encodes the endpoint return value",
+      "evidence": "fastapi/routing.py:784"
+    },
+    {
+      "from": "f:fastapi/routing.py#get_request_handler",
+      "to": "f:fastapi/routing.py#run_endpoint_function",
+      "kind": "calls",
+      "label": "runs the endpoint (async or threadpool)",
+      "evidence": "fastapi/routing.py:762"
+    },
+    {
+      "from": "f:fastapi/routing.py#get_request_handler",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "calls",
+      "label": "solve_dependencies resolves the dependency tree",
+      "evidence": "fastapi/routing.py:528"
+    },
+    {
+      "from": "f:fastapi/routing.py#serialize_response",
+      "to": "f:fastapi/encoders.py",
+      "kind": "calls",
+      "label": "jsonable_encoder fallback when no response field",
+      "evidence": "fastapi/routing.py:369"
+    },
+    {
+      "from": "f:fastapi/routing.py#run_endpoint_function",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "run_in_threadpool offloads sync endpoints",
+      "evidence": "fastapi/routing.py:383"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRoute",
+      "to": "f:fastapi/routing.py#get_request_handler",
+      "kind": "calls",
+      "label": "get_route_handler builds the request handler",
+      "evidence": "fastapi/routing.py:1329"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIWebSocketRoute",
+      "to": "f:fastapi/routing.py#get_websocket_app",
+      "kind": "calls",
+      "label": "builds websocket handler on construction",
+      "evidence": "fastapi/routing.py:895"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter.add_api_route",
+      "to": "f:fastapi/routing.py#APIRoute",
+      "kind": "calls",
+      "label": "constructs and appends a route",
+      "evidence": "fastapi/routing.py:3193"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter.add_api_websocket_route",
+      "to": "f:fastapi/routing.py#APIWebSocketRoute",
+      "kind": "calls",
+      "label": "constructs and appends a websocket route",
+      "evidence": "fastapi/routing.py:3329"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter.include_router",
+      "to": "f:fastapi/routing.py#_IncludedRouter",
+      "kind": "calls",
+      "label": "wraps included router with merged context",
+      "evidence": "fastapi/routing.py:3617"
+    },
+    {
+      "from": "f:fastapi/routing.py#_IncludedRouter",
+      "to": "f:fastapi/routing.py#_EffectiveRouteContext",
+      "kind": "calls",
+      "label": "_build_effective_context creates per-route merged context",
+      "evidence": "fastapi/routing.py:1792"
+    },
+    {
+      "from": "f:fastapi/routing.py#_EffectiveRouteContext",
+      "to": "f:fastapi/routing.py#APIRoute.get_route_handler",
+      "kind": "calls",
+      "label": "from_api_route calls get_route_handler under ContextVar",
+      "evidence": "fastapi/routing.py:1601"
+    },
+    {
+      "from": "f:fastapi/routing.py#_populate_api_route_state",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "calls",
+      "label": "get_dependant analyzes the endpoint signature",
+      "evidence": "fastapi/routing.py:1148"
+    },
+    {
+      "from": "f:fastapi/routing.py#_build_dependant_with_parameterless_dependencies",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "calls",
+      "label": "get_dependant and get_parameterless_sub_dependant",
+      "evidence": "fastapi/routing.py:932"
+    },
+    {
+      "from": "f:fastapi/routing.py#request_response",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "wrap_app_handling_exceptions wraps the inner app",
+      "evidence": "fastapi/routing.py:174"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.routing.Router",
+      "evidence": "fastapi/routing.py:2412"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRoute",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.routing.Route",
+      "evidence": "fastapi/routing.py:1216"
+    },
+    {
+      "from": "f:fastapi/concurrency.py#contextmanager_in_threadpool",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "run_sync for __exit__ inside CancelScope shield",
+      "evidence": "fastapi/concurrency.py:43"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter.frontend",
+      "to": "f:fastapi/routing.py#_FrontendRouteGroup",
+      "kind": "calls",
+      "label": "creates or reuses the frontend route group",
+      "evidence": "fastapi/routing.py:2894"
+    },
+    {
+      "from": "f:fastapi/routing.py#_FrontendRouteGroup",
+      "to": "f:fastapi/routing.py#_FrontendStaticFiles",
+      "kind": "calls",
+      "label": "get_response_for_scope serves the matched file",
+      "evidence": "fastapi/routing.py:2358"
+    },
+    {
+      "from": "f:fastapi/routing.py#_FrontendStaticFiles",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.staticfiles.StaticFiles",
+      "evidence": "fastapi/routing.py:2049"
+    },
+    {
+      "from": "f:fastapi/routing.py#BackgroundTasks",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.background.BackgroundTasks",
+      "evidence": "fastapi/background.py:12"
+    },
+    {
+      "from": "f:fastapi/routing.py#get_request_handler",
+      "to": "f:fastapi/routing.py#BackgroundTasks",
+      "kind": "calls",
+      "label": "attaches background_tasks from solved_result to response",
+      "evidence": "fastapi/routing.py:388"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter.include_router",
+      "to": "f:fastapi/routing.py#_merge_lifespan_context",
+      "kind": "calls",
+      "label": "merges lifespan contexts when including a router",
+      "evidence": "fastapi/routing.py:3625"
+    },
+    {
+      "from": "routing.test.concurrency",
+      "to": "f:fastapi/concurrency.py",
+      "kind": "tests",
+      "label": "tests contextmanager_in_threadpool",
+      "evidence": "tests/test_concurrency.py:1"
+    },
+    {
+      "from": "routing.test.dep-concurrency",
+      "to": "f:fastapi/concurrency.py",
+      "kind": "tests",
+      "label": "tests _DependencyConcurrency semaphore",
+      "evidence": "tests/test_dependency_concurrency.py:1"
+    },
+    {
+      "from": "routing.test.background",
+      "to": "f:fastapi/background.py",
+      "kind": "tests",
+      "label": "tests BackgroundTasks telemetry spans",
+      "evidence": "tests/test_telemetry/test_background.py:1"
+    },
+    {
+      "from": "routing.test.websockets",
+      "to": "f:fastapi/routing.py",
+      "kind": "tests",
+      "label": "tests WebSocket route handling and telemetry",
+      "evidence": "tests/test_telemetry/test_websockets.py:1"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIWebSocketRoute",
+      "to": "f:fastapi/routing.py#websocket_session",
+      "kind": "calls",
+      "label": "wraps websocket handler as an ASGI app",
+      "evidence": "fastapi/routing.py:895"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter.include_router",
+      "to": "f:fastapi/routing.py#_RouterIncludeContext",
+      "kind": "calls",
+      "label": "for_include() merges parent and override settings",
+      "evidence": "fastapi/routing.py:3602"
+    },
+    {
+      "from": "f:fastapi/routing.py#_IncludedRouter",
+      "to": "f:fastapi/routing.py#_RouterIncludeContext",
+      "kind": "reads",
+      "label": "holds include_context to combine nested routers",
+      "evidence": "fastapi/routing.py:1718"
+    },
+    {
+      "from": "f:fastapi/routing.py#iter_route_contexts",
+      "to": "f:fastapi/routing.py#RouteContext",
+      "kind": "calls",
+      "label": "yields RouteContext for every route in the router tree",
+      "evidence": "fastapi/routing.py:1987"
+    },
+    {
+      "from": "f:fastapi/routing.py#_EffectiveRouteContext",
+      "to": "f:fastapi/routing.py#_RouterIncludeContext",
+      "kind": "reads",
+      "label": "from_api_route reads include_context to merge prefix/tags",
+      "evidence": "fastapi/routing.py:1545"
+    },
+    {
+      "from": "f:fastapi/routing.py#RouteContext",
+      "to": "f:fastapi/routing.py#_EffectiveRouteContext",
+      "kind": "reads",
+      "label": "wraps _EffectiveRouteContext to expose public properties",
+      "evidence": "fastapi/routing.py:1675"
+    },
+    {
+      "from": "f:fastapi/routing.py#APIRouter",
+      "to": "f:fastapi/routing.py#_DefaultLifespan",
+      "kind": "calls",
+      "label": "uses _DefaultLifespan when no lifespan= argument is given",
+      "evidence": "fastapi/routing.py:2705"
+    },
+    {
+      "from": "f:fastapi/routing.py#get_request_handler",
+      "to": "f:fastapi/routing.py#_normalize_non_finite_floats",
+      "kind": "calls",
+      "label": "sanitizes NaN/Inf before JSON encoding",
+      "evidence": "fastapi/routing.py:568"
+    },
+    {
+      "from": "f:fastapi/routing.py#get_request_handler",
+      "to": "f:fastapi/routing.py#_build_response_args",
+      "kind": "calls",
+      "label": "builds response kwargs incl. background tasks",
+      "evidence": "fastapi/routing.py:691"
+    },
+    {
+      "from": "f:fastapi/background.py#BackgroundTasks.add_task",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "delegates to StarletteBackgroundTasks.add_task via super()",
+      "evidence": "fastapi/background.py:62"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py",
+      "to": "f:fastapi/concurrency.py#_DependencyConcurrency",
+      "kind": "reads",
+      "label": "reads concurrency limit to acquire semaphore",
+      "evidence": "fastapi/dependencies/utils.py:655"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py",
+      "to": "f:fastapi/concurrency.py#_contextmanager_with_concurrency_limit",
+      "kind": "calls",
+      "label": "wraps dependency context manager with concurrency semaphore",
+      "evidence": "fastapi/dependencies/utils.py:656"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py",
+      "to": "f:fastapi/concurrency.py#_asynccontextmanager_with_shielded_exit",
+      "kind": "calls",
+      "label": "shields cleanup scope for async generator dependencies",
+      "evidence": "fastapi/dependencies/utils.py:652"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow.routing.http-request",
+      "name": "HTTP request through an APIRoute",
+      "summary": "An HTTP request is matched, its dependencies solved, the endpoint called, and the response serialized and sent.",
+      "steps": [
+        {
+          "node": "f:fastapi/routing.py#APIRouter.app",
+          "text": "APIRouter.app() iterates its routes. For each _IncludedRouter it delegates to _IncludedRouter.matches() which lazily builds the effective candidate list (prefix-applied path regexes). On Match.FULL, it calls _route_selected to record the telemetry route label and calls route.handle()."
+        },
+        {
+          "node": "f:fastapi/routing.py#request_response",
+          "text": "request_response() wraps the handler. It opens two AsyncExitStack contexts in the ASGI scope (fastapi_inner_astack for dependency cleanup, fastapi_function_astack for the endpoint function), then awaits the inner app closure built by get_request_handler."
+        },
+        {
+          "node": "f:fastapi/routing.py#get_request_handler",
+          "text": "get_request_handler's inner app reads the request body (JSON or form), calls solve_dependencies (fastapi.di) which resolves the dependency tree and collects validation errors, then calls run_endpoint_function with the solved values."
+        },
+        {
+          "node": "f:fastapi/routing.py#run_endpoint_function",
+          "text": "run_endpoint_function awaits the coroutine directly for async endpoints, or calls run_in_threadpool(_run_sync_endpoint, ...) for sync endpoints, offloading to an AnyIO worker thread to avoid blocking the event loop."
+        },
+        {
+          "node": "f:fastapi/routing.py#serialize_response",
+          "text": "serialize_response validates the return value against the response ModelField (raising ResponseValidationError on failure), then serializes it via field.serialize_json (fast path using Pydantic's Rust core) or jsonable_encoder as a fallback. The response is returned to Starlette which sends it to the client."
+        }
+      ]
+    },
+    {
+      "id": "flow.routing.sync-threadpool",
+      "name": "Sync endpoint offloaded to threadpool",
+      "summary": "A synchronous endpoint function is detected, wrapped, and run in an AnyIO worker thread without blocking the event loop.",
+      "steps": [
+        {
+          "node": "f:fastapi/routing.py#APIRoute",
+          "text": "During APIRoute construction _is_coroutine_callable(endpoint) returns False. get_request_handler captures is_coroutine=False in its closure."
+        },
+        {
+          "node": "f:fastapi/routing.py#run_endpoint_function",
+          "text": "run_endpoint_function branches on is_coroutine=False and calls run_in_threadpool(_run_sync_endpoint, function=dependant.call, arguments=values). run_in_threadpool is re-exported from starlette.concurrency and uses anyio.to_thread.run_sync internally."
+        },
+        {
+          "node": "f:fastapi/concurrency.py#contextmanager_in_threadpool",
+          "text": "If the endpoint or a dependency uses a synchronous context manager (yield dependency), contextmanager_in_threadpool in fastapi/concurrency.py runs __enter__ in a thread and runs __exit__ in a separate thread inside CancelScope(shield=True), preventing cancellation from aborting teardown."
+        },
+        {
+          "node": "f:fastapi/routing.py#serialize_response",
+          "text": "Back on the async event-loop thread, serialize_response receives the return value. Because is_coroutine=False it calls run_in_threadpool(field.validate, ...) to avoid blocking validation for Pydantic models with slow validators."
+        }
+      ]
+    },
+    {
+      "id": "flow.routing.background-tasks",
+      "name": "Background tasks queued and run after response",
+      "summary": "An endpoint queues tasks on BackgroundTasks; Starlette runs them after the response bytes are sent.",
+      "steps": [
+        {
+          "node": "f:fastapi/routing.py#get_request_handler",
+          "text": "solve_dependencies creates a BackgroundTasks instance that is available as a dependency. The endpoint receives it and calls background_tasks.add_task(func, ...) which appends a BackgroundTask to self.tasks."
+        },
+        {
+          "node": "f:fastapi/routing.py#_build_response_args",
+          "text": "_build_response_args attaches solved_result.background_tasks to the response_args dict under the 'background' key, so the constructed Response (JSONResponse or custom) holds the BackgroundTasks instance."
+        },
+        {
+          "node": "f:fastapi/routing.py#request_response",
+          "text": "After the inner app closure returns the Response, request_response awaits response(scope, receive, send). Starlette's response sends the headers and body, then calls response.background() — which is the BackgroundTasks instance."
+        },
+        {
+          "node": "f:fastapi/routing.py#BackgroundTasks",
+          "text": "BackgroundTasks.__call__ iterates self.tasks and for each task enters an _operation(name='background_task', function=task.func) telemetry span before calling await task(), which dispatches to the task function (sync or async via run_in_threadpool)."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+ "nodes": [
+  {
+   "id": "app:python-sdk",
+   "parent": null,
+   "name": "python-sdk",
+   "kind": "app",
+   "summary": "Python implementation of the Model Context Protocol (MCP): build servers that expose tools, resources and prompts to LLM applications, and clients that connect to them, over stdio, Streamable HTTP and SSE.",
+   "repo": "modelcontextprotocol/python-sdk"
+  },
+
+  {
+   "id": "client",
+   "parent": "app:python-sdk",
+   "name": "Client",
+   "kind": "group",
+   "summary": "MCP client: open a session to a server over stdio, Streamable HTTP or SSE, then list and call its tools, resources and prompts."
+  },
+  {
+   "id": "server",
+   "parent": "app:python-sdk",
+   "name": "Server core",
+   "kind": "group",
+   "summary": "Low-level MCP server: the protocol session, request/notification dispatch and the three server transports underneath the high-level API."
+  },
+  {
+   "id": "mcpserver",
+   "parent": "app:python-sdk",
+   "name": "MCPServer (FastMCP)",
+   "kind": "group",
+   "summary": "The decorator API that turns type-hinted Python functions into tools, resources and prompts with JSON schemas derived automatically."
+  },
+  {
+   "id": "auth",
+   "parent": "app:python-sdk",
+   "name": "OAuth 2.0 auth",
+   "kind": "group",
+   "summary": "OAuth 2.0 for both sides: the client's authorization-code and token flow, and the server's bearer-token verification, client registration and metadata endpoints."
+  },
+  {
+   "id": "shared",
+   "parent": "app:python-sdk",
+   "name": "Shared runtime",
+   "kind": "group",
+   "summary": "Runtime shared by client and server: the JSON-RPC dispatcher, the session/peer base, message framing, the in-memory transport and cross-cutting utilities."
+  },
+  {
+   "id": "types",
+   "parent": "app:python-sdk",
+   "name": "Protocol types",
+   "kind": "group",
+   "summary": "The MCP wire protocol as Pydantic models: request, result and notification types, versioned per spec revision (the mcp-types package)."
+  },
+  {
+   "id": "cli",
+   "parent": "app:python-sdk",
+   "name": "CLI",
+   "kind": "group",
+   "summary": "The `mcp` command-line tool: dev, run and install for running a server and registering it with Claude Desktop."
+  },
+
+  {
+   "id": "ext",
+   "parent": null,
+   "name": "Outside services and people",
+   "kind": "group",
+   "summary": "The libraries, runtime, protocol and peers the SDK depends on."
+  },
+  {
+   "id": "ext.providers",
+   "parent": "ext",
+   "name": "Libraries & runtime",
+   "kind": "group",
+   "summary": "Third-party packages the SDK builds on and the protocol it implements."
+  },
+  {
+   "id": "ext.peers",
+   "parent": "ext",
+   "name": "Peers & hosts",
+   "kind": "group",
+   "summary": "The processes and people at the other end of an MCP connection."
+  },
+
+  {
+   "id": "x:anyio",
+   "parent": "ext.providers",
+   "name": "anyio",
+   "kind": "external",
+   "summary": "Async runtime providing structured concurrency, task groups and memory object streams used throughout the SDK."
+  },
+  {
+   "id": "x:httpx",
+   "parent": "ext.providers",
+   "name": "httpx",
+   "kind": "external",
+   "summary": "HTTP client (httpx2) used for outbound Streamable HTTP/SSE connections and OAuth token requests."
+  },
+  {
+   "id": "x:starlette",
+   "parent": "ext.providers",
+   "name": "Starlette",
+   "kind": "external",
+   "summary": "ASGI framework the HTTP transports and OAuth routes mount into."
+  },
+  {
+   "id": "x:uvicorn",
+   "parent": "ext.providers",
+   "name": "uvicorn",
+   "kind": "external",
+   "summary": "ASGI server that runs a Streamable HTTP or SSE MCP server."
+  },
+  {
+   "id": "x:pydantic",
+   "parent": "ext.providers",
+   "name": "Pydantic",
+   "kind": "external",
+   "summary": "Validation library (Pydantic v2) behind every wire type and the tool and argument schemas."
+  },
+  {
+   "id": "x:jsonschema",
+   "parent": "ext.providers",
+   "name": "jsonschema",
+   "kind": "external",
+   "summary": "JSON Schema validator used to check tool input and output against declared schemas."
+  },
+  {
+   "id": "x:sse-starlette",
+   "parent": "ext.providers",
+   "name": "sse-starlette",
+   "kind": "external",
+   "summary": "Server-Sent Events responses used by the SSE transport."
+  },
+  {
+   "id": "x:mcp-spec",
+   "parent": "ext.providers",
+   "name": "MCP specification",
+   "kind": "external",
+   "summary": "The Model Context Protocol specification whose revisions the wire types implement."
+  },
+  {
+   "id": "x:mcp-host",
+   "parent": "ext.peers",
+   "name": "MCP host / LLM app",
+   "kind": "external",
+   "summary": "The LLM application or host that embeds an MCP client, such as an IDE, chat app or agent."
+  },
+  {
+   "id": "x:mcp-server-peer",
+   "parent": "ext.peers",
+   "name": "Remote MCP server",
+   "kind": "external",
+   "summary": "A server at the other end of a client connection, exposing tools, resources and prompts."
+  },
+  {
+   "id": "x:oauth-server",
+   "parent": "ext.peers",
+   "name": "OAuth authorization server",
+   "kind": "external",
+   "summary": "External OAuth 2.0 authorization server that issues and validates access tokens."
+  },
+  {
+   "id": "x:claude-desktop",
+   "parent": "ext.peers",
+   "name": "Claude Desktop",
+   "kind": "external",
+   "summary": "Desktop host; `mcp install` registers a server into its configuration file."
+  }
+ ]
+}

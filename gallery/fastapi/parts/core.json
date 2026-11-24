@@ -1,0 +1,613 @@
+{
+  "area": "core",
+  "nodes": [
+    {
+      "id": "core.app",
+      "parent": "fastapi.core",
+      "name": "FastAPI application class",
+      "kind": "group",
+      "summary": "The FastAPI class and its initialization, middleware assembly, OpenAPI caching, and ASGI dispatch.",
+      "detail": "fastapi/applications.py defines the FastAPI class as a subclass of Starlette. __init__ creates the root APIRouter (self.router), registers default exception handlers for HTTPException, RequestValidationError and WebSocketRequestValidationError, stores OpenTelemetry telemetry configuration, and immediately calls setup() to mount the OpenAPI JSON, Swagger UI, OAuth2 redirect and ReDoc routes. build_middleware_stack() assembles the layered middleware chain: ServerErrorMiddleware, ExceptionTelemetryMiddleware, AppBodyLimitMiddleware, user middlewares, ExceptionMiddleware, then AsyncExitStackMiddleware at the innermost position. openapi() generates and caches the OpenAPI schema keyed by a routes-version counter; it regenerates when new routes are added. __call__ dispatches lifespan events to the telemetry runtime, wraps HTTP/WebSocket calls with NativeTelemetry when enabled, and falls back to the Starlette base for all other cases.",
+      "paths": ["fastapi/applications.py"],
+      "status": "live",
+      "tech": ["Python", "FastAPI", "ASGI"]
+    },
+    {
+      "id": "core.cli-entry",
+      "parent": "fastapi.core",
+      "name": "CLI and package entry points",
+      "kind": "group",
+      "summary": "The command-line interface shim and the public re-export surface of the fastapi package.",
+      "detail": "fastapi/cli.py is a thin wrapper: it attempts to import main from the separately installed fastapi-cli package and delegates to it; if that package is absent it prints an install message and raises RuntimeError. fastapi/__main__.py imports and calls that same main so that python -m fastapi works. fastapi/__init__.py re-exports the full public API: FastAPI, APIRouter, Depends, Body, Query, Path, Header, Cookie, Form, File, Security, Request, Response, BackgroundTasks, UploadFile, HTTPException, WebSocketException, WebSocket, WebSocketDisconnect, and the starlette.status module. fastapi/logger.py creates a standard logging.Logger named 'fastapi'. fastapi/types.py defines DecoratedCallable (TypeVar for decorator return-type preservation), UnionType (Python 3.10+ types.UnionType or typing.Union fallback), ModelNameMap and DependencyCacheKey type aliases used throughout the codebase.",
+      "paths": ["fastapi/cli.py", "fastapi/__main__.py", "fastapi/__init__.py", "fastapi/logger.py", "fastapi/types.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/applications.py",
+      "parent": "core.app",
+      "name": "Application module",
+      "kind": "module",
+      "summary": "Defines the FastAPI class: a Starlette subclass that holds the root APIRouter, assembles middleware and serves the OpenAPI schema.",
+      "detail": "The file is about 5133 lines, most of which are elaborate Annotated[..., Doc(...)] parameter documentation for the path-operation decorator methods. The core logic fits in a handful of methods: __init__ (lines 70-1059), build_middleware_stack (1061-1113), openapi (1115-1148), setup (1150-1203), __call__ (1205-1235), and the HTTP method decorators (get/put/post/delete/options/head/patch/trace) that all delegate to self.router. add_api_route, include_router, websocket, exception_handler, middleware and on_event are also defined here.",
+      "paths": ["fastapi/applications.py"],
+      "status": "live",
+      "tech": ["Python", "FastAPI"]
+    },
+    {
+      "id": "f:fastapi/__init__.py",
+      "parent": "core.cli-entry",
+      "name": "Public API surface",
+      "kind": "module",
+      "summary": "Re-exports the public API of the fastapi package and declares __version__.",
+      "detail": "Sets __version__ = '0.165.0' and re-exports 20 names with explicit 'as' aliases to satisfy type-checkers: FastAPI, APIRouter, Depends, Body, Cookie, File, Form, Header, Path, Query, Security, Request, Response, BackgroundTasks, UploadFile, HTTPException, WebSocketException, WebSocket, WebSocketDisconnect, and the starlette.status module. All imports are from sibling modules, so this file is the sole public entry point consumers should import from.",
+      "paths": ["fastapi/__init__.py:1-26"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": ["__version__ = '0.165.0'", "20 public names re-exported"]
+    },
+    {
+      "id": "f:fastapi/cli.py",
+      "parent": "core.cli-entry",
+      "name": "CLI shim",
+      "kind": "module",
+      "summary": "Delegates the fastapi command to the separately installed fastapi-cli package or prints an install error.",
+      "detail": "Attempts `from fastapi_cli.cli import main as cli_main` at import time; on ImportError sets cli_main to None. The main() function checks if cli_main is truthy, calls it if so, otherwise prints a pip install message and raises RuntimeError. This design means the fastapi package itself carries no CLI logic: all dev/run/deploy command handling lives in fastapi-cli.",
+      "paths": ["fastapi/cli.py:1-13"],
+      "status": "live",
+      "tech": ["Python"],
+      "code": "try:\n    from fastapi_cli.cli import main as cli_main\nexcept ImportError:  # pragma: no cover\n    cli_main = None\n\ndef main() -> None:\n    if not cli_main:\n        message = 'To use the fastapi command, please install \"fastapi[standard]\"'\n        print(message)\n        raise RuntimeError(message)\n    cli_main()"
+    },
+    {
+      "id": "f:fastapi/__main__.py",
+      "parent": "core.cli-entry",
+      "name": "Module entry point",
+      "kind": "module",
+      "summary": "Allows python -m fastapi by importing and calling cli.main().",
+      "detail": "Three-line file: imports main from fastapi.cli and calls it, so running `python -m fastapi dev ...` goes through the same path as running `fastapi dev ...` via the installed script.",
+      "paths": ["fastapi/__main__.py:1-3"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/logger.py",
+      "parent": "core.cli-entry",
+      "name": "Package logger",
+      "kind": "module",
+      "summary": "Creates the shared logging.Logger instance named 'fastapi' used across the package.",
+      "detail": "Single-purpose two-line file: imports logging and calls getLogger('fastapi'). The resulting logger is imported by other modules that need structured log output, such as the telemetry and routing layers.",
+      "paths": ["fastapi/logger.py:1-3"],
+      "status": "live",
+      "tech": ["Python"],
+      "code": "import logging\nlogger = logging.getLogger(\"fastapi\")"
+    },
+    {
+      "id": "f:fastapi/types.py",
+      "parent": "core.cli-entry",
+      "name": "Shared type aliases",
+      "kind": "module",
+      "summary": "Defines DecoratedCallable, UnionType, ModelNameMap and DependencyCacheKey type aliases used across the codebase.",
+      "detail": "DecoratedCallable is a TypeVar bound to Callable used by all decorator methods to preserve return types. UnionType uses getattr to pick types.UnionType on Python 3.10+ or fall back to typing.Union. ModelNameMap maps Pydantic BaseModel or Enum subclasses to their schema names. DependencyCacheKey is a 3-tuple used by dependency resolution to key solved dependencies in the per-request cache.",
+      "paths": ["fastapi/types.py:1-12"],
+      "status": "live",
+      "tech": ["Python"],
+      "code": "DecoratedCallable = TypeVar(\"DecoratedCallable\", bound=Callable[..., Any])\nUnionType = getattr(types, \"UnionType\", Union)\nModelNameMap = dict[type[BaseModel] | type[Enum], str]\nDependencyCacheKey = tuple[Callable[..., Any] | None, tuple[str, ...], str]"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI",
+      "parent": "f:fastapi/applications.py",
+      "name": "FastAPI class",
+      "kind": "class",
+      "summary": "The main application class: a Starlette subclass that holds a root APIRouter and adds OpenAPI schema generation.",
+      "detail": "Inherits from starlette.applications.Starlette. Overrides __init__ to create self.router (an APIRouter), register default exception handlers, store telemetry config and call setup(). Overrides build_middleware_stack() to inject FastAPI-specific middleware. Overrides __call__ to handle lifespan telemetry and native OpenTelemetry tracing. All HTTP-method decorators (get/post/put/delete/options/head/patch/trace), include_router, exception_handler, middleware and on_event are defined on this class and delegate to self.router.",
+      "paths": ["fastapi/applications.py:54-5132"],
+      "status": "live",
+      "tech": ["Python", "FastAPI", "ASGI"],
+      "signature": "class FastAPI(Starlette)"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.__init__",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.__init__()",
+      "kind": "function",
+      "summary": "Initializes the application: stores config, creates the root APIRouter, registers exception handlers, configures telemetry and calls setup().",
+      "detail": "Accepts about 30 keyword arguments covering OpenAPI metadata (title, description, version, openapi_url, docs_url, redoc_url), middleware, exception_handlers, lifespan hooks, response defaults, security settings (strict_content_type), and body limits (max_body_size, form_limits). Creates self.router as a routing.APIRouter forwarding most of these parameters. Registers three default exception handlers for HTTPException, RequestValidationError and WebSocketRequestValidationError. Builds self._telemetry from TelemetryConfig defaults merged with the caller's telemetry dict; reads FASTAPI_OTEL_AUTO_CONFIGURE env var to decide auto-configure. Creates NativeTelemetry. Sets self.middleware_stack = None (lazy build). Calls self.setup().",
+      "paths": ["fastapi/applications.py:70-1059"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def __init__(self: AppType, *, telemetry, debug, routes, title, ..., form_limits) -> None",
+      "facts": [
+        "Default openapi_url='/openapi.json', docs_url='/docs', redoc_url='/redoc'",
+        "Default openapi_version='3.1.0'",
+        "strict_content_type=True by default (CSRF protection)",
+        "FASTAPI_OTEL_AUTO_CONFIGURE env var controls OTel auto-configure",
+        "root_path parameter is deprecated; configure server instead"
+      ],
+      "code": "self.router: routing.APIRouter = routing.APIRouter(\n    routes=routes,\n    redirect_slashes=redirect_slashes,\n    dependency_overrides_provider=self,\n    on_startup=on_startup,\n    on_shutdown=on_shutdown,\n    lifespan=lifespan,\n    default_response_class=default_response_class,\n    dependencies=dependencies,\n    callbacks=callbacks,\n    deprecated=deprecated,\n    include_in_schema=include_in_schema,\n    strict_content_type=strict_content_type,\n    max_body_size=max_body_size,\n)"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.build_middleware_stack",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.build_middleware_stack()",
+      "kind": "function",
+      "summary": "Builds and returns the layered ASGI middleware chain wrapping the root APIRouter.",
+      "detail": "Overrides the Starlette method to insert FastAPI-specific middleware. The fixed order from outermost to innermost is: ServerErrorMiddleware (handles 500s and debug tracebacks), ExceptionTelemetryMiddleware (OpenTelemetry exception recording), AppBodyLimitMiddleware (enforces max_body_size), all user-registered middlewares, ExceptionMiddleware (maps exception classes to handlers), and AsyncExitStackMiddleware (preserves contextvars context for file-upload cleanup). The method iterates the reversed list and wraps each layer around the next, returning the outermost ASGIApp.",
+      "paths": ["fastapi/applications.py:1061-1113"],
+      "status": "live",
+      "tech": ["Python", "ASGI"],
+      "signature": "def build_middleware_stack(self) -> ASGIApp",
+      "code": "middleware = (\n    [Middleware(ServerErrorMiddleware, handler=error_handler, debug=debug),\n     Middleware(ExceptionTelemetryMiddleware),\n     Middleware(AppBodyLimitMiddleware, max_body_size=self.max_body_size)]\n    + self.user_middleware\n    + [Middleware(ExceptionMiddleware, handlers=exception_handlers, debug=debug),\n       Middleware(AsyncExitStackMiddleware)]\n)\napp = self.router\nfor cls, args, kwargs in reversed(middleware):\n    app = cls(app, *args, **kwargs)\nreturn app"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.openapi",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.openapi()",
+      "kind": "function",
+      "summary": "Returns the cached OpenAPI schema dict, regenerating it when routes have changed.",
+      "detail": "Calls self.router._get_routes_version() to get a monotonic counter that increments each time routes are added. Compares it against self._openapi_routes_version; if they differ (or the schema is None) it calls get_openapi() with all metadata fields and stores the result in self.openapi_schema and updates the version. This means the schema regenerates automatically when include_router() is called after app creation, which is a common pattern for modular apps.",
+      "paths": ["fastapi/applications.py:1115-1148"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def openapi(self) -> dict[str, Any]",
+      "code": "routes_version = self.router._get_routes_version()\nif not self.openapi_schema or self._openapi_routes_version != routes_version:\n    self.openapi_schema = get_openapi(\n        title=self.title,\n        version=self.version,\n        openapi_version=self.openapi_version,\n        summary=self.summary,\n        description=self.description,\n        routes=self.routes,\n        webhooks=self.webhooks.routes,\n        tags=self.openapi_tags,\n        servers=self.servers,\n    )\n    self._openapi_routes_version = routes_version\nreturn self.openapi_schema"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.setup",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.setup()",
+      "kind": "function",
+      "summary": "Mounts the OpenAPI JSON, Swagger UI, OAuth2 redirect and ReDoc routes onto the application.",
+      "detail": "Called at the end of __init__. If openapi_url is set, adds a route that calls self.openapi() and optionally prepends the root_path as a server entry. If docs_url is also set, adds a Swagger UI HTML route and (if swagger_ui_oauth2_redirect_url is set) an OAuth2 redirect route. If redoc_url is set, adds a ReDoc HTML route. All routes are added with include_in_schema=False so they do not appear in the generated schema.",
+      "paths": ["fastapi/applications.py:1150-1203"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def setup(self) -> None",
+      "code": "if self.openapi_url:\n    async def openapi(req: Request) -> JSONResponse:\n        root_path = req.scope.get(\"root_path\", \"\").rstrip(\"/\")\n        schema = self.openapi()\n        if root_path and self.root_path_in_servers:\n            server_urls = {s.get(\"url\") for s in schema.get(\"servers\", [])}\n            if root_path not in server_urls:\n                schema = dict(schema)\n                schema[\"servers\"] = [{\"url\": root_path}] + schema.get(\"servers\", [])\n        return JSONResponse(schema)\n    self.add_route(self.openapi_url, openapi, include_in_schema=False)"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.__call__",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.__call__()",
+      "kind": "function",
+      "summary": "ASGI callable: routes lifespan events to the telemetry runtime and HTTP/WebSocket calls through native OpenTelemetry tracing.",
+      "detail": "For lifespan scope type, imports and calls fastapi.telemetry._runtime.lifespan, which handles auto-configure of the OpenTelemetry SDK before delegating to the base Starlette lifespan. For HTTP and WebSocket scopes, if telemetry is enabled it lazily builds the middleware stack and passes the call through NativeTelemetry; otherwise falls through to super().__call__. Setting 'fastapi.telemetry' in scope allows re-entry without double-instrumentation.",
+      "paths": ["fastapi/applications.py:1205-1235"],
+      "status": "live",
+      "tech": ["Python", "ASGI", "OpenTelemetry"],
+      "signature": "async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None",
+      "code": "async def __call__(self, scope, receive, send):\n    if self.root_path:\n        scope[\"root_path\"] = self.root_path\n    if scope[\"type\"] == \"lifespan\":\n        from fastapi.telemetry._runtime import lifespan\n        await lifespan(config=self._telemetry, app=super().__call__,\n                       scope=scope, receive=receive, send=send)\n        return\n    if (scope[\"type\"] not in (\"http\", \"websocket\")\n            or \"fastapi.telemetry\" in scope\n            or not self._native_telemetry.enabled()):\n        await super().__call__(scope, receive, send)\n        return\n    if self.middleware_stack is None:\n        self.middleware_stack = self.build_middleware_stack()"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.add_api_route",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.add_api_route()",
+      "kind": "function",
+      "summary": "Registers a path operation on the root APIRouter imperatively (without a decorator).",
+      "detail": "Passes all arguments unchanged to self.router.add_api_route(). This is the underlying imperative API; the HTTP method decorators (get, post, put, etc.) are thin wrappers that in turn call self.router.get()/post()/etc. which ultimately call add_api_route on the root router.",
+      "paths": ["fastapi/applications.py:1237-1318"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def add_api_route(self, path: str, endpoint: Callable, *, response_model, status_code, ...) -> None"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.include_router",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.include_router()",
+      "kind": "function",
+      "summary": "Merges a sub-APIRouter's routes into the application's root router with an optional prefix, tags and dependencies.",
+      "detail": "Delegates entirely to self.router.include_router(), passing prefix, tags, dependencies, responses, deprecated, include_in_schema, default_response_class, callbacks, generate_unique_id_function, max_body_size and form_limits. The root APIRouter's include_router method then iterates the sub-router's routes, prepends the prefix to each path, merges tags and dependencies, and appends the resulting routes to the root router. Each call increments the routes-version counter, which causes openapi() to regenerate the schema on next access.",
+      "paths": ["fastapi/applications.py:1565-1794"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def include_router(self, router: APIRouter, *, prefix, tags, dependencies, ...) -> None",
+      "code": "def include_router(self, router, *, prefix=\"\", tags=None,\n                   dependencies=None, responses=None, deprecated=None,\n                   include_in_schema=True,\n                   default_response_class=Default(JSONResponse),\n                   callbacks=None,\n                   generate_unique_id_function=Default(generate_unique_id),\n                   max_body_size=None, form_limits=None) -> None:\n    self.router.include_router(\n        router, prefix=prefix, tags=tags,\n        dependencies=dependencies, responses=responses,\n        deprecated=deprecated, include_in_schema=include_in_schema,\n        default_response_class=default_response_class,\n        callbacks=callbacks,\n        generate_unique_id_function=generate_unique_id_function,\n        max_body_size=max_body_size, form_limits=form_limits)"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.get",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.get()",
+      "kind": "function",
+      "summary": "Decorator that registers the decorated function as a GET path operation on the root router.",
+      "detail": "Returns self.router.get(path, ...) which is itself a decorator factory. The decorated callable is registered as an APIRoute with methods=['GET']. All keyword arguments (response_model, status_code, tags, dependencies, etc.) are forwarded without modification. The same pattern holds for post(), put(), delete(), options(), head(), patch() and trace().",
+      "paths": ["fastapi/applications.py:1796-2193"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get(self, path: str, *, response_model, status_code, ...) -> Callable[[DecoratedCallable], DecoratedCallable]"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.websocket",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.websocket()",
+      "kind": "function",
+      "summary": "Decorator that registers the decorated coroutine as a WebSocket route on the root router.",
+      "detail": "Returns a decorator that calls self.add_api_websocket_route(path, func, name=name, dependencies=dependencies), which in turn calls self.router.add_api_websocket_route(). The decorated function receives a WebSocket object as its first argument.",
+      "paths": ["fastapi/applications.py:1500-1563"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def websocket(self, path: str, name: str | None = None, *, dependencies) -> Callable[[DecoratedCallable], DecoratedCallable]"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.exception_handler",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.exception_handler()",
+      "kind": "function",
+      "summary": "Decorator that registers a handler for a given exception class or HTTP status code.",
+      "detail": "Returns a decorator that calls self.add_exception_handler(exc_class_or_status_code, func), which is inherited from Starlette. The handler is called by ExceptionMiddleware during request processing. HTTPException, RequestValidationError and WebSocketRequestValidationError handlers are pre-registered in __init__; custom handlers added via this decorator override or extend them.",
+      "paths": ["fastapi/applications.py:5087-5132"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def exception_handler(self, exc_class_or_status_code: int | type[Exception]) -> Callable[[DecoratedCallable], DecoratedCallable]",
+      "code": "def exception_handler(self, exc_class_or_status_code):\n    def decorator(func: DecoratedCallable) -> DecoratedCallable:\n        self.add_exception_handler(exc_class_or_status_code, func)\n        return func\n    return decorator"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.middleware",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.middleware()",
+      "kind": "function",
+      "summary": "Decorator that wraps the decorated async function as a BaseHTTPMiddleware and adds it to the user middleware list.",
+      "detail": "Currently only supports middleware_type='http'. Returns a decorator that calls self.add_middleware(BaseHTTPMiddleware, dispatch=func). BaseHTTPMiddleware is from starlette.middleware.base. The middleware runs between the outer ServerErrorMiddleware and the inner ExceptionMiddleware. Because it uses a new AnyIO task group, contextvars set inside it are not visible to the AsyncExitStack placed further inside.",
+      "paths": ["fastapi/applications.py:5041-5085"],
+      "status": "live",
+      "tech": ["Python", "ASGI"],
+      "signature": "def middleware(self, middleware_type: str) -> Callable[[DecoratedCallable], DecoratedCallable]"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.on_event",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.on_event()",
+      "kind": "function",
+      "summary": "Deprecated decorator for startup/shutdown event handlers; use lifespan context managers instead.",
+      "detail": "Marked with @deprecated from typing_extensions. Delegates to self.router.on_event(event_type). The recommended replacement is a lifespan async context manager passed to FastAPI(lifespan=...), which is the idiomatic approach as of Starlette 0.20.",
+      "paths": ["fastapi/applications.py:5012-5039"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def on_event(self, event_type: str) -> Callable[[DecoratedCallable], DecoratedCallable]",
+      "facts": ["Deprecated; use lifespan= parameter instead"]
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.api_route",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.api_route()",
+      "kind": "function",
+      "summary": "Decorator for registering a path operation for one or more HTTP methods simultaneously.",
+      "detail": "Unlike the method-specific decorators, api_route() accepts a methods list, allowing a single function to handle multiple HTTP verbs. The decorator calls self.router.add_api_route() directly. Useful when the same handler processes both GET and HEAD, for instance.",
+      "paths": ["fastapi/applications.py:1399-1483"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def api_route(self, path: str, *, methods: list[str] | None = None, ...) -> Callable[[DecoratedCallable], DecoratedCallable]"
+    },
+    {
+      "id": "f:fastapi/applications.py#FastAPI.frontend",
+      "parent": "f:fastapi/applications.py#FastAPI",
+      "name": "FastAPI.frontend()",
+      "kind": "function",
+      "summary": "Mounts a static frontend build directory as low-priority routes behind the API routes.",
+      "detail": "Resolves the check_dir setting (auto, true or false), then delegates to self.router.frontend(). The router registers the directory as lower-priority than normal APIRoutes, so API path operations always take precedence. The fallback parameter controls how missing paths are handled: 'auto' picks index.html or 404.html based on what exists, 'index.html' always serves the SPA entry point for client-side routing, '404.html' returns a custom not-found page.",
+      "paths": ["fastapi/applications.py:1320-1397"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def frontend(self, path: str, *, directory, fallback='auto', check_dir='auto') -> None"
+    },
+    {
+      "id": "f:fastapi/cli.py#main",
+      "parent": "f:fastapi/cli.py",
+      "name": "main()",
+      "kind": "function",
+      "summary": "Entry point that calls the fastapi-cli package's main() or raises RuntimeError if the package is absent.",
+      "paths": ["fastapi/cli.py:8-13"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def main() -> None"
+    },
+    {
+      "id": "f:fastapi/types.py#DecoratedCallable",
+      "parent": "f:fastapi/types.py",
+      "name": "DecoratedCallable",
+      "kind": "component",
+      "summary": "TypeVar bound to Callable used by all decorator methods to preserve the decorated function's return type.",
+      "paths": ["fastapi/types.py:9"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/types.py#DependencyCacheKey",
+      "parent": "f:fastapi/types.py",
+      "name": "DependencyCacheKey",
+      "kind": "component",
+      "summary": "Tuple type alias used by the dependency injection system to key solved dependencies in the per-request cache.",
+      "paths": ["fastapi/types.py:12"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "core.tests",
+      "parent": "fastapi.core",
+      "name": "Core tests",
+      "kind": "group",
+      "summary": "Test files that exercise the application object and the CLI shim.",
+      "detail": "tests/test_application.py runs integration tests against the FastAPI app object: routing, Swagger UI, ReDoc, OpenAPI JSON and status code handling. tests/test_fastapi_cli.py verifies that the CLI shim delegates to fastapi-cli and prints the correct error when fastapi-cli is not installed.",
+      "paths": ["tests/test_application.py", "tests/test_fastapi_cli.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    }
+  ],
+  "edges": [
+    {
+      "from": "f:fastapi/__init__.py",
+      "to": "f:fastapi/applications.py#FastAPI",
+      "kind": "calls",
+      "label": "re-exports FastAPI as the primary public name",
+      "evidence": "fastapi/__init__.py:7"
+    },
+    {
+      "from": "f:fastapi/__main__.py",
+      "to": "f:fastapi/cli.py#main",
+      "kind": "calls",
+      "label": "calls main() to enable python -m fastapi",
+      "evidence": "fastapi/__main__.py:3"
+    },
+    {
+      "from": "f:fastapi/cli.py#main",
+      "to": "x:fastapi-cli",
+      "kind": "calls",
+      "label": "delegates all CLI handling to fastapi-cli",
+      "evidence": "fastapi/cli.py:2"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "subclasses Starlette for ASGI routing and middleware",
+      "evidence": "fastapi/applications.py:38"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.__init__",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "creates self.router as the root APIRouter",
+      "evidence": "fastapi/applications.py:1008"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.__init__",
+      "to": "fastapi.internals",
+      "kind": "calls",
+      "label": "creates NativeTelemetry and TelemetryConfig",
+      "evidence": "fastapi/applications.py:1040-1053"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.__init__",
+      "to": "f:fastapi/applications.py#FastAPI.setup",
+      "kind": "calls",
+      "label": "calls setup() at the end of initialization",
+      "evidence": "fastapi/applications.py:1059"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.build_middleware_stack",
+      "to": "fastapi.internals",
+      "kind": "calls",
+      "label": "wraps router with telemetry and exit-stack middleware",
+      "evidence": "fastapi/applications.py:1077-1106"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.build_middleware_stack",
+      "to": "fastapi.io",
+      "kind": "calls",
+      "label": "wraps router with AppBodyLimitMiddleware",
+      "evidence": "fastapi/applications.py:1078"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.openapi",
+      "to": "fastapi.openapi",
+      "kind": "calls",
+      "label": "calls get_openapi() to build the OpenAPI document",
+      "evidence": "fastapi/applications.py:1131"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.setup",
+      "to": "fastapi.openapi",
+      "kind": "calls",
+      "label": "calls get_swagger_ui_html and get_redoc_html",
+      "evidence": "fastapi/applications.py:1174-1201"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.setup",
+      "to": "x:docs-cdn",
+      "kind": "http",
+      "label": "HTML pages load Swagger UI and ReDoc assets from CDN",
+      "evidence": "fastapi/applications.py:1174"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.__call__",
+      "to": "fastapi.internals",
+      "kind": "calls",
+      "label": "calls telemetry lifespan and NativeTelemetry per request",
+      "evidence": "fastapi/applications.py:1209-1234"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.__call__",
+      "to": "x:opentelemetry",
+      "kind": "calls",
+      "label": "records traces and spans via OpenTelemetry API",
+      "evidence": "fastapi/applications.py:1229"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.get",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "delegates to self.router.get() -> add_api_route",
+      "evidence": "fastapi/applications.py:2167"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.include_router",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "delegates to self.router.include_router()",
+      "evidence": "fastapi/applications.py:1781"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.exception_handler",
+      "to": "fastapi.io",
+      "kind": "calls",
+      "label": "default handlers for HTTPException registered at init",
+      "evidence": "fastapi/applications.py:1029-1038"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.middleware",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "wraps decorator function with BaseHTTPMiddleware",
+      "evidence": "fastapi/applications.py:5082"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.on_event",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "delegates to self.router.on_event()",
+      "evidence": "fastapi/applications.py:5039"
+    },
+    {
+      "from": "f:fastapi/types.py#DecoratedCallable",
+      "to": "f:fastapi/applications.py#FastAPI.get",
+      "kind": "calls",
+      "label": "TypeVar used in all decorator method signatures",
+      "evidence": "fastapi/applications.py:2151"
+    },
+    {
+      "from": "f:fastapi/types.py#DependencyCacheKey",
+      "to": "fastapi.di",
+      "kind": "calls",
+      "label": "keys the per-request dependency cache",
+      "evidence": "fastapi/types.py:12"
+    },
+    {
+      "from": "core.tests",
+      "to": "f:fastapi/applications.py#FastAPI",
+      "kind": "tests",
+      "label": "tests app routing, docs pages and OpenAPI JSON",
+      "evidence": "tests/test_application.py:7"
+    },
+    {
+      "from": "core.tests",
+      "to": "f:fastapi/cli.py#main",
+      "kind": "tests",
+      "label": "tests CLI delegation and missing-package error",
+      "evidence": "tests/test_fastapi_cli.py:10"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.__init__",
+      "to": "fastapi.di",
+      "kind": "writes",
+      "label": "stores dependency_overrides dict for test injection",
+      "evidence": "fastapi/applications.py:991"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.frontend",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "delegates to self.router.frontend()",
+      "evidence": "fastapi/applications.py:1392"
+    },
+    {
+      "from": "f:fastapi/__init__.py",
+      "to": "fastapi.di",
+      "kind": "calls",
+      "label": "re-exports Depends, Body, Query and other param markers",
+      "evidence": "fastapi/__init__.py:12-20"
+    },
+    {
+      "from": "f:fastapi/__init__.py",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "re-exports APIRouter as the public router class",
+      "evidence": "fastapi/__init__.py:23"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.add_api_route",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "delegates to self.router.add_api_route()",
+      "evidence": "fastapi/applications.py:1291"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.websocket",
+      "to": "f:fastapi/applications.py",
+      "kind": "calls",
+      "label": "calls self.add_api_websocket_route()",
+      "evidence": "fastapi/applications.py:1555"
+    },
+    {
+      "from": "f:fastapi/applications.py#FastAPI.api_route",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "decorator calls self.router.add_api_route() directly",
+      "evidence": "fastapi/applications.py:1453"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow.core.app-creation",
+      "name": "Building a FastAPI app and registering a route",
+      "summary": "How app = FastAPI() leads to a live route on the root APIRouter.",
+      "steps": [
+        {
+          "node": "f:fastapi/applications.py#FastAPI.__init__",
+          "text": "app = FastAPI() runs __init__, which creates self.router as a routing.APIRouter (the root router), registers three default exception handlers, stores the telemetry config and calls setup()."
+        },
+        {
+          "node": "f:fastapi/applications.py#FastAPI.setup",
+          "text": "setup() adds Starlette routes for the OpenAPI JSON endpoint, Swagger UI HTML, OAuth2 redirect and ReDoc HTML. All are hidden from the OpenAPI schema itself."
+        },
+        {
+          "node": "f:fastapi/applications.py#FastAPI.get",
+          "text": "@app.get('/items') calls self.router.get('/items'), which is a decorator factory on the root APIRouter. When the decorated function is passed in, the router calls add_api_route with methods=['GET'], creating an APIRoute and incrementing the routes-version counter."
+        },
+        {
+          "node": "fastapi.routing",
+          "text": "The routing area's APIRouter stores the new APIRoute in its routes list. The routes-version counter is now ahead of _openapi_routes_version, so the next call to app.openapi() will regenerate the schema to include the new route."
+        }
+      ]
+    },
+    {
+      "id": "flow.core.first-request",
+      "name": "First HTTP request and middleware stack build",
+      "summary": "How the first incoming HTTP request triggers middleware stack assembly and optional telemetry.",
+      "steps": [
+        {
+          "node": "f:fastapi/applications.py#FastAPI.__call__",
+          "text": "The ASGI (Asynchronous Server Gateway Interface) server delivers the first HTTP request to app(scope, receive, send). __call__ checks the scope type and finds it is 'http'. Since middleware_stack is None and telemetry is enabled, it calls build_middleware_stack() and stores the result."
+        },
+        {
+          "node": "f:fastapi/applications.py#FastAPI.build_middleware_stack",
+          "text": "build_middleware_stack() assembles the layered chain: ServerErrorMiddleware wraps ExceptionTelemetryMiddleware, which wraps AppBodyLimitMiddleware, which wraps user middlewares, which wrap ExceptionMiddleware, which wraps AsyncExitStackMiddleware, which wraps the root APIRouter. The outermost layer is returned."
+        },
+        {
+          "node": "fastapi.internals",
+          "text": "If FASTAPI_OTEL_AUTO_CONFIGURE was true, the lifespan event (which runs first) already configured the OpenTelemetry SDK. During the HTTP call, ExceptionTelemetryMiddleware records exception spans, and NativeTelemetry creates a server span covering the full request lifecycle."
+        },
+        {
+          "node": "fastapi.routing",
+          "text": "The request reaches the root APIRouter, which matches the path and method to an APIRoute, solves its dependency tree, calls the endpoint, serializes the response and returns it up through the middleware layers."
+        }
+      ]
+    },
+    {
+      "id": "flow.core.include-router",
+      "name": "Including a sub-router",
+      "summary": "How app.include_router() merges a secondary APIRouter's routes into the app.",
+      "steps": [
+        {
+          "node": "f:fastapi/applications.py#FastAPI.include_router",
+          "text": "app.include_router(router, prefix='/api/v1', tags=['items']) calls self.router.include_router() with those arguments, delegating fully to the root APIRouter."
+        },
+        {
+          "node": "fastapi.routing",
+          "text": "The root APIRouter's include_router() iterates the sub-router's routes, prepends the prefix to each path, merges the tags and dependencies lists, and appends the resulting APIRoute objects to its own routes list. It increments the routes-version counter."
+        },
+        {
+          "node": "f:fastapi/applications.py#FastAPI.openapi",
+          "text": "On the next GET /openapi.json request, openapi() finds that _openapi_routes_version does not match the new routes-version counter. It calls get_openapi() with the full routes list, regenerates the schema (now including the sub-router's paths), caches it and returns it."
+        }
+      ]
+    }
+  ]
+}

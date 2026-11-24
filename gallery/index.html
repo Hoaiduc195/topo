@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Topo gallery</title>
+<meta name="description" content="Open-source codebases mapped with Topo: zoom from the whole system to one function, every box citing its line.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Sofia+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root { --paper: #0a0e14; --panel: #131a1d; --panel-2: #192226; --ink: #e4e8e6; --ink-2: #a9b3b0; --ink-3: #7f8a87;
+  --rule: #2a3438; --accent: #8ea4ff; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 "Sofia Sans", system-ui, sans-serif; }
+main { max-width: 1080px; margin: 0 auto; padding: 24px max(16px, env(safe-area-inset-left)) 56px; }
+header img { display: block; width: min(560px, 100%); height: auto; margin: 0 auto; }
+header p { max-width: 62ch; margin: 0 auto 32px; text-align: center; color: var(--ink-2); font-size: 18px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.card { display: grid; gap: 6px; align-content: start; padding: 18px 20px; border: 1px solid var(--rule); border-radius: 12px;
+  background: var(--panel); color: inherit; text-decoration: none; }
+.card:hover, .card:focus-visible { border-color: var(--accent); background: var(--panel-2); outline: none; }
+.name { font-size: 24px; font-weight: 700; }
+.about { color: var(--ink-2); }
+.facts { margin-top: 6px; font-weight: 600; }
+.made, .src { font: 13px "JetBrains Mono", ui-monospace, monospace; color: var(--ink-3); }
+footer { margin-top: 40px; text-align: center; color: var(--ink-3); font-size: 14px; }
+footer a { color: var(--accent); }
+</style>
+<main>
+  <header>
+    <img src="../brand/logo/svg/topo-logo-dark.svg" alt="Topo" width="1200" height="520">
+    <p>Open-source codebases mapped with Topo. Zoom from the whole system to one function: every box cites
+    the file and line it came from, and a script checked each one before the map was published.</p>
+  </header>
+  <div class="grid">
+    <a class="card" href="../maps/saleor/dist/index.html">
+      <span class="name">Saleor</span>
+      <span class="about">The open-source commerce platform: its API, its Dashboard and four of its apps, mapped as one system.</span>
+      <span class="facts">2,120 boxes · 2,763 connections · 35 flows</span>
+      <span class="made">standard depth · 30 minutes</span>
+      <span class="src">github.com/saleor · BSD 3-Clause</span>
+    </a>
+    <a class="card" href="fastapi/dist/index.html">
+      <span class="name">FastAPI</span>
+      <span class="about">The Python web framework: routing, dependency injection, request and response handling, OpenAPI and security.</span>
+      <span class="facts">377 boxes · 334 connections · 21 flows</span>
+      <span class="made">standard depth · about 26 US dollars · 34 minutes</span>
+      <span class="src">github.com/fastapi/fastapi at 05e6df7 · MIT</span>
+    </a>
+    <a class="card" href="hono/dist/index.html">
+      <span class="name">Hono</span>
+      <span class="about">The TypeScript web framework for every JavaScript runtime: its router, middleware, helpers, JSX and runtime adapters.</span>
+      <span class="facts">594 boxes · 434 connections · 16 flows</span>
+      <span class="made">standard depth · about 34 US dollars · 32 minutes</span>
+      <span class="src">github.com/honojs/hono at 79f23af · MIT</span>
+    </a>
+    <a class="card" href="mcp-python-sdk/dist/index.html">
+      <span class="name">MCP Python SDK</span>
+      <span class="about">The Model Context Protocol&#x27;s official Python SDK: clients, servers, the high-level server API, transports and OAuth.</span>
+      <span class="facts">543 boxes · 445 connections · 14 flows</span>
+      <span class="made">standard depth · about 36 US dollars · 33 minutes</span>
+      <span class="src">github.com/modelcontextprotocol/python-sdk at 77001c9 · MIT</span>
+    </a></div>
+  <footer>Each map is one HTML file read from the project's code at the commit shown. The projects' own licenses
+  are in Topo's NOTICE. <a id="repo" href="../README.md">Map your own code with Topo</a>.</footer>
+</main>
+<script>
+// on GitHub Pages (<owner>.github.io/<repository>/), link to the repository itself
+const [owner] = location.hostname.split('.'), repo = location.pathname.split('/')[1];
+if (location.hostname.endsWith('.github.io') && repo) document.getElementById('repo').href = `https://github.com/${owner}/${repo}`;
+</script>
+</html>

@@ -1,0 +1,1485 @@
+{
+  "area": "shared",
+  "nodes": [
+    {
+      "id": "shared.peer",
+      "parent": "shared",
+      "name": "Peer layer",
+      "kind": "group",
+      "summary": "Typed request methods over a raw Outbound channel, plus the DispatchContext back-channel protocols.",
+      "detail": "Contains ClientPeer (typed sampling/elicitation/roots/ping methods), BaseContext (per-request context forwarded to handlers), and the Outbound/DispatchContext Protocol definitions used throughout the dispatcher layer.",
+      "paths": ["src/mcp/shared/peer.py", "src/mcp/shared/context.py", "src/mcp/shared/dispatcher.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "shared.dispatch",
+      "parent": "shared",
+      "name": "JSON-RPC dispatch",
+      "kind": "group",
+      "summary": "JSON-RPC message routing: correlation, request fanout, cancellation, progress, and the in-memory direct path.",
+      "detail": "Three layers: dispatcher.py defines the Outbound/DispatchContext/Dispatcher Protocols and CallOptions TypedDict. jsonrpc_dispatcher.py is the production implementation over SessionMessage streams, owning request-id minting, in-flight tracking, peer cancel, and progress. direct_dispatcher.py is an in-process implementation for testing that calls handlers synchronously without serialization.",
+      "paths": ["src/mcp/shared/jsonrpc_dispatcher.py", "src/mcp/shared/direct_dispatcher.py", "src/mcp/shared/inbound.py"],
+      "status": "live",
+      "tech": ["Python", "anyio"]
+    },
+    {
+      "id": "shared.memory",
+      "parent": "shared",
+      "name": "In-memory transport",
+      "kind": "group",
+      "summary": "In-process client/server stream pairs and context-propagating stream wrappers.",
+      "detail": "memory.py creates two bidirectional anyio memory stream pairs (one per direction) and yields them as (client_streams, server_streams) for use in tests and in-process embedding. _context_streams.py wraps the raw streams to snapshot and restore contextvars across task boundaries. _stream_protocols.py defines ReadStream and WriteStream Protocols that are satisfied by both raw memory streams and the wrappers.",
+      "paths": ["src/mcp/shared/memory.py", "src/mcp/shared/_context_streams.py", "src/mcp/shared/_stream_protocols.py"],
+      "status": "live",
+      "tech": ["Python", "anyio"]
+    },
+    {
+      "id": "shared.utils",
+      "parent": "shared",
+      "name": "Cross-cutting utilities",
+      "kind": "group",
+      "summary": "Standalone helpers used across the client and server: errors, URI templates, path security, tool names, subscriptions, skills, and HTTP utilities.",
+      "detail": "exceptions.py defines MCPError and subclasses. uri_template.py implements RFC 6570 URI Template (Levels 1-3, Level 4 explode for path operators) with both expansion and matching. path_security.py provides safe_join and traversal checks for resource handlers. tool_name_validation.py enforces SEP-986. subscriptions.py models the 2026-07-28 subscriptions/listen event vocabulary. skills.py models the SEP-2640 Skills extension wire types. _httpx_utils.py creates httpx2 clients with MCP defaults and handles origin-bound redirects.",
+      "paths": ["src/mcp/shared/exceptions.py", "src/mcp/shared/uri_template.py", "src/mcp/shared/metadata_utils.py", "src/mcp/shared/path_security.py", "src/mcp/shared/tool_name_validation.py", "src/mcp/shared/subscriptions.py", "src/mcp/shared/skills.py", "src/mcp/shared/_httpx_utils.py", "src/mcp/shared/_request_clock.py", "src/mcp/shared/_callable_inspection.py", "src/mcp/shared/_compat.py", "src/mcp/shared/extension.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "shared.wire",
+      "parent": "shared",
+      "name": "Wire framing",
+      "kind": "group",
+      "summary": "SessionMessage envelope and TransportContext metadata shared by all transports.",
+      "detail": "message.py defines SessionMessage (JSONRPCMessage + MessageMetadata), ClientMessageMetadata (resumption token, per-request headers), and ServerMessageMetadata (related request id, SSE close callbacks, can_send_request verdict). transport_context.py defines the immutable TransportContext base dataclass that all transports subclass, carrying kind, can_send_request, and optional headers.",
+      "paths": ["src/mcp/shared/message.py", "src/mcp/shared/transport_context.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/shared/dispatcher.py#Outbound",
+      "parent": "shared.peer",
+      "name": "Outbound",
+      "kind": "class",
+      "summary": "Protocol for anything that can send requests and notifications to the peer.",
+      "detail": "Runtime-checkable Protocol with two methods: send_raw_request(method, params, opts) -> dict and notify(method, params, opts) -> None. Satisfied by Dispatcher (top-level), DispatchContext (back-channel), and BaseContext (request context). The MCP typed layer builds on top of this raw channel.",
+      "paths": ["src/mcp/shared/dispatcher.py:138"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class Outbound(Protocol)"
+    },
+    {
+      "id": "f:src/mcp/shared/dispatcher.py#DispatchContext",
+      "parent": "shared.peer",
+      "name": "DispatchContext",
+      "kind": "class",
+      "summary": "Per-request context handed to on_request / on_notify with transport metadata and back-channel.",
+      "detail": "Protocol extending Outbound. Carries transport (TransportContext), can_send_request, request_id, message_metadata, cancel_requested (anyio.Event), and progress(). send_raw_request raises NoBackChannelError when can_send_request is False. Concrete implementation is _JSONRPCDispatchContext inside jsonrpc_dispatcher.py.",
+      "paths": ["src/mcp/shared/dispatcher.py:167"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class DispatchContext(Outbound, Protocol[TransportT_co])"
+    },
+    {
+      "id": "f:src/mcp/shared/dispatcher.py#CallOptions",
+      "parent": "shared.peer",
+      "name": "CallOptions",
+      "kind": "class",
+      "summary": "Per-call options TypedDict for send_raw_request: request_id, timeout, cancel_on_abandon, on_progress, resumption_token, headers.",
+      "detail": "Total=False TypedDict. Key fields: request_id (caller-supplied id; collisions raise ValueError), timeout (seconds before REQUEST_TIMEOUT), cancel_on_abandon (whether to send notifications/cancelled on timeout/caller-cancel; default True), on_progress (ProgressFnT callback), resumption_token and on_resumption_token (streamable-HTTP only, 2025-11-25 and earlier), headers (merged by HTTP transports).",
+      "paths": ["src/mcp/shared/dispatcher.py:76"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class CallOptions(TypedDict, total=False)"
+    },
+    {
+      "id": "f:src/mcp/shared/dispatcher.py#Dispatcher",
+      "parent": "shared.dispatch",
+      "name": "Dispatcher",
+      "kind": "class",
+      "summary": "Protocol for a full duplex request/notification channel with call-return semantics.",
+      "detail": "Extends Outbound. Adds run(on_request, on_notify, on_notify_intercept, task_status). Implementations own request-id correlation, the receive loop, per-request concurrency, and cancellation/progress wiring. JSONRPCDispatcher is the production implementation; DirectDispatcher is the in-memory alternative.",
+      "paths": ["src/mcp/shared/dispatcher.py:253"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class Dispatcher(Outbound, Protocol[TransportT_co])"
+    },
+    {
+      "id": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "parent": "shared.dispatch",
+      "name": "JSONRPCDispatcher",
+      "kind": "class",
+      "summary": "Production JSON-RPC dispatcher over the SessionMessage stream pair, owning all correlation and cancel logic.",
+      "detail": "Wraps read_stream/write_stream of SessionMessage. Maintains _pending dict (request_id -> _Pending with response channel) and _in_flight dict (request_id -> _InFlight with cancel scope). run() starts the receive loop in a task group and calls task_status.started(). _dispatch() routes each message: responses resolve _pending waiters; requests spawn _handle_request; notifications intercept progress/cancel then spawn on_notify. send_raw_request mints ids, creates per-request memory streams (buffer=1), injects OTel trace context, writes the request, then awaits the response. Handler exceptions are normalized to MCPError.",
+      "paths": ["src/mcp/shared/jsonrpc_dispatcher.py:264"],
+      "status": "live",
+      "tech": ["Python", "anyio"],
+      "code": "async def _dispatch_request(self, req, metadata, on_request, sender_ctx):\n    progress_token = progress_token_from_params(req.params)\n    dctx = _JSONRPCDispatchContext(\n        transport=transport_ctx,\n        _dispatcher=self,\n        _request_id=req.id,\n        message_metadata=metadata,\n        _progress_token=progress_token,\n    )\n    scope = anyio.CancelScope()\n    self._in_flight[coerce_request_id(req.id)] = _InFlight(scope=scope, dctx=dctx)\n    self._spawn(self._handle_request, req, dctx, scope, on_request, sender_ctx=sender_ctx)"
+    },
+    {
+      "id": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.run",
+      "parent": "shared.dispatch",
+      "name": "JSONRPCDispatcher.run()",
+      "kind": "function",
+      "summary": "Drive the receive loop until the read stream closes, then wake all pending waiters with CONNECTION_CLOSED.",
+      "detail": "Opens a task group; sets _running=True and calls task_status.started(). Iterates the read stream, calling _dispatch() for each item. On EOF or ClosedResourceError, calls _fan_out_closed() to wake _pending waiters. Cancels the task group on exit so in-flight handlers are stopped. Single-shot: cannot be restarted.",
+      "paths": ["src/mcp/shared/jsonrpc_dispatcher.py:493"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def run(self, on_request, on_notify, on_notify_intercept=None, *, task_status=TASK_STATUS_IGNORED) -> None"
+    },
+    {
+      "id": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.send_raw_request",
+      "parent": "shared.dispatch",
+      "name": "JSONRPCDispatcher.send_raw_request()",
+      "kind": "function",
+      "summary": "Send a JSON-RPC request, await its response or timeout, and send a courtesy cancel on abandon.",
+      "detail": "Mints or validates request_id (with coerce_request_id), creates a _Pending with buffer-1 memory stream, writes JSONRPCRequest, starts the request_clock, awaits receive(). On timeout or caller-cancel, sends notifications/cancelled via _final_write (shielded on cancel). Raises MCPError(REQUEST_TIMEOUT) on timeout, MCPError(CONNECTION_CLOSED) on EOF.",
+      "paths": ["src/mcp/shared/jsonrpc_dispatcher.py:319"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def send_raw_request(self, method, params, opts=None, *, _related_request_id=None) -> dict[str, Any]",
+      "code": "send, receive = anyio.create_memory_object_stream[dict[str, Any] | ErrorData](1)\npending = _Pending(send=send, receive=receive, on_progress=on_progress)\nself._pending[pending_key] = pending\nplan = _plan_outbound(_related_request_id, opts)\nrequest_write_started = False\ntimeout_armed = False\nwith otel_span(span_name, kind=SpanKind.CLIENT, ...) as span:\n    inject_trace_context(out_meta)\n    await self._write(msg, plan.metadata)\n    clock.start()\n    timeout_armed = True\n    outcome = await receive.receive()"
+    },
+    {
+      "id": "f:src/mcp/shared/jsonrpc_dispatcher.py#handler_exception_to_error_data",
+      "parent": "shared.dispatch",
+      "name": "handler_exception_to_error_data()",
+      "kind": "function",
+      "summary": "Map MCPError to its ErrorData and ValidationError to INVALID_PARAMS; return None for anything else.",
+      "detail": "Shared by JSONRPCDispatcher and the modern HTTP entry point. MCPError carries its own ErrorData directly. pydantic ValidationError maps to INVALID_PARAMS with empty data (no pydantic text on the wire). Any other exception returns None so each caller applies its own catch-all; JSONRPCDispatcher currently pins code=0 for v1 compat.",
+      "paths": ["src/mcp/shared/jsonrpc_dispatcher.py:92"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def handler_exception_to_error_data(exc: BaseException) -> ErrorData | None"
+    },
+    {
+      "id": "f:src/mcp/shared/jsonrpc_dispatcher.py#coerce_request_id",
+      "parent": "shared.dispatch",
+      "name": "coerce_request_id()",
+      "kind": "function",
+      "summary": "Coerce a stringified integer request id to int so peer-echoed ids still correlate.",
+      "detail": "Shared by JSONRPCDispatcher and DirectDispatcher. The TypeScript SDK may stringify numeric ids; this ensures '7' and 7 hit the same _pending bucket. Applied to both inbound response ids (in _resolve_pending) and to the pending-key for caller-supplied ids.",
+      "paths": ["src/mcp/shared/dispatcher.py:56"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def coerce_request_id(request_id: RequestId) -> RequestId"
+    },
+    {
+      "id": "f:src/mcp/shared/direct_dispatcher.py#DirectDispatcher",
+      "parent": "shared.dispatch",
+      "name": "DirectDispatcher",
+      "kind": "class",
+      "summary": "In-process Dispatcher that calls a peer's on_request directly, with no serialization.",
+      "detail": "Two DirectDispatchers are wired together by create_direct_dispatcher_pair. send_raw_request calls peer._dispatch_request, which invokes the peer's on_request synchronously in-process. run() parks until close() is called. Exception mapping mirrors JSONRPCDispatcher: MCPError passes through, ValidationError -> INVALID_PARAMS, others -> INTERNAL_ERROR (chained when raise_handler_exceptions=True). Used in tests and for in-process server embedding.",
+      "paths": ["src/mcp/shared/direct_dispatcher.py:99"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class DirectDispatcher"
+    },
+    {
+      "id": "f:src/mcp/shared/direct_dispatcher.py#create_direct_dispatcher_pair",
+      "parent": "shared.dispatch",
+      "name": "create_direct_dispatcher_pair()",
+      "kind": "function",
+      "summary": "Create a (client, server) pair of DirectDispatchers wired to each other.",
+      "detail": "Creates one shared TransportContext (kind='direct', can_send_request=can_send_request), two DirectDispatchers sharing it, and cross-wires them with connect_to. The pairing is symmetric: either side can initiate requests. Used by tests that want the dispatcher layer without JSON-RPC overhead.",
+      "paths": ["src/mcp/shared/direct_dispatcher.py:310"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def create_direct_dispatcher_pair(*, can_send_request=True, headers=None, raise_handler_exceptions=True) -> tuple[DirectDispatcher, DirectDispatcher]",
+      "code": "ctx = TransportContext(kind=DIRECT_TRANSPORT_KIND, can_send_request=can_send_request, headers=headers)\nclient = DirectDispatcher(ctx, raise_handler_exceptions=raise_handler_exceptions)\nserver = DirectDispatcher(ctx, raise_handler_exceptions=raise_handler_exceptions)\nclient.connect_to(server)\nserver.connect_to(client)\nreturn client, server"
+    },
+    {
+      "id": "f:src/mcp/shared/memory.py#create_client_server_memory_streams",
+      "parent": "shared.memory",
+      "name": "create_client_server_memory_streams()",
+      "kind": "function",
+      "summary": "Async context manager that yields paired bidirectional memory streams for in-process client/server testing.",
+      "detail": "Creates two pairs of anyio ContextSendStream/ContextReceiveStream (server-to-client and client-to-server). Yields ((client_read, client_write), (server_read, server_write)). All four streams are opened as context managers so they close atomically on exit. Calls resync_tracer() after close to work around the CPython 3.11 tracing bug.",
+      "paths": ["src/mcp/shared/memory.py:16"],
+      "status": "live",
+      "tech": ["Python", "anyio"],
+      "signature": "@asynccontextmanager async def create_client_server_memory_streams() -> AsyncGenerator[tuple[MessageStream, MessageStream], None]",
+      "code": "server_to_client_send, server_to_client_receive = create_context_streams[SessionMessage | Exception](1)\nclient_to_server_send, client_to_server_receive = create_context_streams[SessionMessage | Exception](1)\nclient_streams = (server_to_client_receive, client_to_server_send)\nserver_streams = (client_to_server_receive, server_to_client_send)\nasync with server_to_client_receive, client_to_server_send, client_to_server_receive, server_to_client_send:\n    yield client_streams, server_streams"
+    },
+    {
+      "id": "f:src/mcp/shared/_context_streams.py#ContextSendStream",
+      "parent": "shared.memory",
+      "name": "ContextSendStream",
+      "kind": "class",
+      "summary": "Send-side wrapper that snapshots contextvars.copy_context() on every send().",
+      "detail": "Wraps MemoryObjectSendStream[_Envelope[T]]. Each call to send(item) captures the current context via copy_context() and sends (context, item) as an envelope. The receive side extracts it via last_context. Needed so ASGI middleware contextvars (auth, OTel) set on the writer's task propagate to the spawned handler.",
+      "paths": ["src/mcp/shared/_context_streams.py:28"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class ContextSendStream(Generic[T])"
+    },
+    {
+      "id": "f:src/mcp/shared/_context_streams.py#ContextReceiveStream",
+      "parent": "shared.memory",
+      "name": "ContextReceiveStream",
+      "kind": "class",
+      "summary": "Receive-side wrapper that unpacks the envelope and exposes the sender's context in last_context.",
+      "detail": "Wraps MemoryObjectReceiveStream[_Envelope[T]]. receive() unpacks (ctx, item) and sets self.last_context = ctx, then returns item. Consumers call last_context via getattr to stay duck-type compatible with plain streams. __anext__ raises StopAsyncIteration on EndOfStream for async-for compatibility.",
+      "paths": ["src/mcp/shared/_context_streams.py:61"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class ContextReceiveStream(Generic[T])"
+    },
+    {
+      "id": "f:src/mcp/shared/message.py#SessionMessage",
+      "parent": "shared.wire",
+      "name": "SessionMessage",
+      "kind": "class",
+      "summary": "Transport envelope: a JSONRPCMessage paired with optional MessageMetadata.",
+      "detail": "Dataclass with two fields: message (JSONRPCMessage from mcp_types) and metadata (MessageMetadata = ClientMessageMetadata | ServerMessageMetadata | None). All transports produce and consume this type. The metadata carries transport-specific routing: resumption tokens on the client side, related_request_id and SSE-stream callbacks on the server side.",
+      "paths": ["src/mcp/shared/message.py:59"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass class SessionMessage"
+    },
+    {
+      "id": "f:src/mcp/shared/transport_context.py#TransportContext",
+      "parent": "shared.wire",
+      "name": "TransportContext",
+      "kind": "class",
+      "summary": "Immutable base dataclass for transport-specific metadata attached to each inbound message.",
+      "detail": "Frozen kw_only dataclass. Fields: kind (str, e.g. 'stdio', 'streamable-http', 'direct'), can_send_request (bool - False for three reasons: no room in response, no session, or 2026-07-28 protocol forbids server-initiated requests), headers (Mapping[str, str] | None, populated by HTTP transports). Each transport subclasses this and adds its own fields; the dispatcher passes it opaquely.",
+      "paths": ["src/mcp/shared/transport_context.py:16"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass(kw_only=True, frozen=True) class TransportContext"
+    },
+    {
+      "id": "f:src/mcp/shared/exceptions.py#MCPError",
+      "parent": "shared.utils",
+      "name": "MCPError",
+      "kind": "class",
+      "summary": "Exception raised when an error arrives over an MCP connection; wraps ErrorData.",
+      "detail": "Stores an ErrorData on self.error. Properties code, message, data delegate to it. Factory methods from_jsonrpc_error and from_error_data parse wire errors. __str__ returns message. Raised by dispatchers on peer error responses, timeouts (REQUEST_TIMEOUT), and connection close (CONNECTION_CLOSED).",
+      "paths": ["src/mcp/shared/exceptions.py:19"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class MCPError(Exception)"
+    },
+    {
+      "id": "f:src/mcp/shared/exceptions.py#NoBackChannelError",
+      "parent": "shared.utils",
+      "name": "NoBackChannelError",
+      "kind": "class",
+      "summary": "MCPError subclass raised when a server-initiated request has no channel that can deliver it.",
+      "detail": "Serializes to INVALID_REQUEST. Raised by DispatchContext.send_raw_request when TransportContext.can_send_request is False, and by a connection's standalone channel when it has none. The method name is embedded in the message for diagnostics.",
+      "paths": ["src/mcp/shared/exceptions.py:55"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class NoBackChannelError(MCPError)"
+    },
+    {
+      "id": "f:src/mcp/shared/exceptions.py#UrlElicitationRequiredError",
+      "parent": "shared.utils",
+      "name": "UrlElicitationRequiredError",
+      "kind": "class",
+      "summary": "MCPError for when a tool handler requires URL-mode elicitation(s) before proceeding.",
+      "detail": "Code is URL_ELICITATION_REQUIRED. Carries a list of ElicitRequestURLParams in error.data['elicitations']. from_error() reconstructs from wire ErrorData. Servers raise this from tool handlers; clients detect it and present the URL flows before retrying.",
+      "paths": ["src/mcp/shared/exceptions.py:74"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class UrlElicitationRequiredError(MCPError)"
+    },
+    {
+      "id": "f:src/mcp/shared/peer.py#ClientPeer",
+      "parent": "shared.peer",
+      "name": "ClientPeer",
+      "kind": "class",
+      "summary": "Typed server-to-client request methods (sample, elicit_form, elicit_url, list_roots, ping) over a wrapped Outbound.",
+      "detail": "Wraps any Outbound and exposes typed methods. sample is deprecated as of 2026-07-28 (SEP-2577). list_roots is deprecated similarly. elicit_form sends 'elicitation/create' with ElicitRequestFormParams; elicit_url sends URL-mode elicitation. ping sends a 'ping' request and ignores the result. All methods serialize params via dump_params (which handles _meta merging and alias translation).",
+      "paths": ["src/mcp/shared/peer.py:65"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class ClientPeer"
+    },
+    {
+      "id": "f:src/mcp/shared/peer.py#dump_params",
+      "parent": "shared.peer",
+      "name": "dump_params()",
+      "kind": "function",
+      "summary": "Serialize a params model to a wire dict, merging meta into _meta with alias translation.",
+      "detail": "Shared by ClientPeer and Connection. model_dump(by_alias=True, mode='json', exclude_none=True) produces the wire dict. If meta is provided, it is serialized through RequestParams so Python field names (e.g. progress_token) emit their wire aliases (progressToken). Meta keys take precedence over any existing _meta on the model.",
+      "paths": ["src/mcp/shared/peer.py:44"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def dump_params(model: BaseModel | None, meta: Meta | None = None) -> dict[str, Any] | None"
+    },
+    {
+      "id": "f:src/mcp/shared/context.py#BaseContext",
+      "parent": "shared.peer",
+      "name": "BaseContext",
+      "kind": "class",
+      "summary": "Per-request context wrapping a DispatchContext; exposes transport, cancel_requested, back-channel, and progress.",
+      "detail": "Generic over TransportT (bound TransportContext). Constructed by ServerRunner per inbound request. Properties transport, cancel_requested, can_send_request, meta delegate to self._dctx. send_raw_request and notify proxy to _dctx. report_progress calls _dctx.progress(). Satisfies Outbound so ClientPeer can wrap it. Server's Context extends this with lifespan/connection; ClientContext is an alias.",
+      "paths": ["src/mcp/shared/context.py:27"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class BaseContext(Generic[TransportT])"
+    },
+    {
+      "id": "f:src/mcp/shared/inbound.py#classify_inbound_request",
+      "parent": "shared.dispatch",
+      "name": "classify_inbound_request()",
+      "kind": "function",
+      "summary": "Run the three-rung modern-protocol validation ladder over a decoded JSON-RPC body.",
+      "detail": "Rung 1: params._meta must carry protocol version and client capabilities. Rung 2 (HTTP only): MCP-Protocol-Version header matches body version, Mcp-Method matches method, Mcp-Name matches the name param for tools/call, prompts/get, resources/read. Rung 3: protocol version is a string in supported_modern_versions. Returns InboundModernRoute on success, InboundLadderRejection on the first failure. Method existence is not a rung.",
+      "paths": ["src/mcp/shared/inbound.py:390"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def classify_inbound_request(body, *, headers=None, supported_modern_versions=MODERN_PROTOCOL_VERSIONS) -> InboundModernRoute | InboundLadderRejection",
+      "code": "try:\n    meta_value = body[\"params\"][\"_meta\"]\nexcept (KeyError, TypeError):\n    meta_value = None\nif not isinstance(meta_value, Mapping):\n    return InboundLadderRejection(code=INVALID_PARAMS, message=\"...\")\nmeta = cast(\"Mapping[str, Any]\", meta_value)\nif missing := [key for key in (PROTOCOL_VERSION_META_KEY, CLIENT_CAPABILITIES_META_KEY) if key not in meta]:\n    return InboundLadderRejection(code=INVALID_PARAMS, message=f\"...{', '.join(missing)}\")\nif (unsupported := unsupported_protocol_version_rejection(protocol_version, ...)) is not None:\n    return unsupported\nreturn InboundModernRoute(protocol_version=protocol_version, ...)"
+    },
+    {
+      "id": "f:src/mcp/shared/inbound.py#encode_header_value",
+      "parent": "shared.dispatch",
+      "name": "encode_header_value()",
+      "kind": "function",
+      "summary": "Wrap a value in =?base64?...?= sentinel when it would not survive an HTTP field round-trip.",
+      "detail": "Plain printable ASCII that does not look like the sentinel passes verbatim. Control chars, non-ASCII, edge whitespace, or values that already look like the sentinel are base64-encoded. Inverse is decode_header_value which rejects non-canonical base64 and malformed UTF-8 by returning None.",
+      "paths": ["src/mcp/shared/inbound.py:149"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def encode_header_value(value: str) -> str"
+    },
+    {
+      "id": "f:src/mcp/shared/uri_template.py#UriTemplate",
+      "parent": "shared.utils",
+      "name": "UriTemplate",
+      "kind": "class",
+      "summary": "RFC 6570 URI Template supporting Levels 1-3 and Level 4 explode for path operators, with bidirectional expand/match.",
+      "detail": "expand(variables) substitutes variables and returns the URI string. match(uri) is the inverse: it recovers the variable bindings from a concrete URI. Matching uses a two-ended O(n*v) scan that never backtracks, with at most one multi-segment variable per template (more would be ambiguous). Templates with adjacent unanchored variables are rejected at parse time. Length limits: DEFAULT_MAX_TEMPLATE_LENGTH=8192, DEFAULT_MAX_VARIABLES=256, DEFAULT_MAX_URI_LENGTH=65536.",
+      "paths": ["src/mcp/shared/uri_template.py:286"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": ["Max template length: 8192 chars", "Max variables: 256", "Max URI length: 65536 chars", "RFC 6570 Levels 1-3 fully supported", "Level 4 prefix modifier not supported"]
+    },
+    {
+      "id": "f:src/mcp/shared/path_security.py#safe_join",
+      "parent": "shared.utils",
+      "name": "safe_join()",
+      "kind": "function",
+      "summary": "Join path components onto a base, raising PathEscapeError on null bytes, absolute injection, or symlink escape.",
+      "detail": "Resolves base and target via Path.resolve(), then checks target.is_relative_to(base_resolved). Catches null bytes (rejected before joining), absolute components (would silently discard base in Path's / operator), and post-resolve escapes including symlinks. The symlink check is point-in-time; callers in concurrent trees should use O_NOFOLLOW additionally.",
+      "paths": ["src/mcp/shared/path_security.py:121"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def safe_join(base: str | Path, *parts: str) -> Path"
+    },
+    {
+      "id": "f:src/mcp/shared/subscriptions.py#ServerEvent",
+      "parent": "shared.utils",
+      "name": "ServerEvent",
+      "kind": "data",
+      "summary": "Union type for the four 2026-07-28 subscriptions/listen event kinds: tools, prompts, resources list changes, and resource updated.",
+      "detail": "Four frozen dataclasses: ToolsListChanged, PromptsListChanged, ResourcesListChanged (no fields), ResourceUpdated (uri: str). event_to_notification converts to the wire notification format with _meta stamped. event_from_wire parses raw method+params pairs. event_matches applies a SubscriptionFilter to decide delivery. LISTEN_STREAM_METHODS is the frozenset of notification methods that ride listen streams.",
+      "paths": ["src/mcp/shared/subscriptions.py:62"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/shared/skills.py#Skill",
+      "parent": "shared.utils",
+      "name": "Skill",
+      "kind": "class",
+      "summary": "SEP-2640 Skills extension: one entry returned by skills/list or skills/get, with conformance checks at construction.",
+      "detail": "Model with uri (SKILL.md resource URI), frontmatter (dict), resources (list[SkillResource] | 'dynamic'), _meta. _check_conformance validator ensures frontmatter name matches the URI's skill name, description is 1-1024 chars, all resource URIs are within the skill directory with no duplicates and SKILL.md present. MAX_RESOURCES_PER_SKILL=512 and MAX_TOTAL_SIZE=16MiB are SHOULD NOT limits, not hard caps.",
+      "paths": ["src/mcp/shared/skills.py:92"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": ["MAX_RESOURCES_PER_SKILL = 512 (SHOULD NOT limit)", "MAX_TOTAL_SIZE = 16 MiB (SHOULD NOT limit)", "EXTENSION_ID = io.modelcontextprotocol/skills"]
+    },
+    {
+      "id": "f:src/mcp/shared/_httpx_utils.py#create_mcp_http_client",
+      "parent": "shared.utils",
+      "name": "create_mcp_http_client()",
+      "kind": "function",
+      "summary": "Create an httpx2 AsyncClient with 30s connect/write/pool timeout and 300s read timeout for SSE streams.",
+      "detail": "Default timeout is httpx2.Timeout(30.0, read=300.0). Redirect following is disabled; MCP transports follow redirects themselves via stream_within_origin. Returns an AsyncClient that must be used as a context manager.",
+      "paths": ["src/mcp/shared/_httpx_utils.py:32"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def create_mcp_http_client(headers=None, timeout=None, auth=None) -> httpx2.AsyncClient",
+      "facts": ["MCP_DEFAULT_TIMEOUT = 30.0s", "MCP_DEFAULT_SSE_READ_TIMEOUT = 300.0s"]
+    },
+    {
+      "id": "f:src/mcp/shared/_httpx_utils.py#stream_within_origin",
+      "parent": "shared.utils",
+      "name": "stream_within_origin()",
+      "kind": "function",
+      "summary": "Async context manager streaming a request and following redirects only within the same origin.",
+      "detail": "Builds the request then loops: sends with follow_redirects=False, checks next_request_within_origin. Follows 307/308 and GET redirects within the same scheme+host+port (or http-to-https upgrade on default ports). Any cross-origin redirect, or one past client.max_redirects, yields the redirect response as-is. Used by all MCP HTTP transports.",
+      "paths": ["src/mcp/shared/_httpx_utils.py:112"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@asynccontextmanager async def stream_within_origin(client, method, url, **kwargs) -> AsyncGenerator[httpx2.Response]"
+    },
+    {
+      "id": "f:src/mcp/shared/_request_clock.py#request_clock",
+      "parent": "shared.utils",
+      "name": "request_clock()",
+      "kind": "function",
+      "summary": "Context manager that installs a per-request timeout clock that only runs while waiting on the peer (not on a person).",
+      "detail": "Creates a CancelScope and a RequestClock storing the remaining budget. The clock is placed in a ContextVar so transport code far below send_raw_request can find and pause it (waiting_on_a_person()). The clock starts only after the request write completes (clock.start()). After the scope exits, raises TimeoutError if cancelled_caught. Not public API; may change.",
+      "paths": ["src/mcp/shared/_request_clock.py:48"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@contextmanager def request_clock(timeout: float | None) -> Iterator[RequestClock]"
+    },
+    {
+      "id": "f:src/mcp/shared/_otel.py#otel_span",
+      "parent": "shared.utils",
+      "name": "otel_span()",
+      "kind": "function",
+      "summary": "Create an OpenTelemetry span around outbound MCP requests, injecting W3C trace context into _meta.",
+      "detail": "otel_span creates a span via the shared _tracer ('mcp-python-sdk'). inject_trace_context injects traceparent/tracestate into the outbound _meta dict (SEP-414). extract_trace_context reads the same fields from an inbound _meta and returns a Context if valid. Used by JSONRPCDispatcher for outbound requests.",
+      "paths": ["src/mcp/shared/_otel.py:18"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@contextmanager def otel_span(name, *, kind, attributes=None, context=None, ...) -> Generator[Span]"
+    },
+    {
+      "id": "f:src/mcp/shared/metadata_utils.py#get_display_name",
+      "parent": "shared.utils",
+      "name": "get_display_name()",
+      "kind": "function",
+      "summary": "Return the preferred display name for a Tool, Resource, Prompt, ResourceTemplate, or Implementation.",
+      "detail": "For Tools: title > annotations.title > name. For all other types: title > name. Intended for client UIs; the title field is human-readable while name is the programmatic identifier.",
+      "paths": ["src/mcp/shared/metadata_utils.py:10"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_display_name(obj: Tool | Resource | Prompt | ResourceTemplate | Implementation) -> str"
+    },
+    {
+      "id": "f:src/mcp/shared/tool_name_validation.py#validate_and_warn_tool_name",
+      "parent": "shared.utils",
+      "name": "validate_and_warn_tool_name()",
+      "kind": "function",
+      "summary": "Validate a tool name against SEP-986 and log warnings for non-conforming names; return True if valid.",
+      "detail": "Primary entry point. Calls validate_tool_name which checks: not empty, length <= 128, matches TOOL_NAME_REGEX (^[A-Za-z0-9._-]{1,128}$). Warnings (not failures) for spaces, commas, leading/trailing dash or dot. Invalid characters produce a failure. Calls issue_tool_name_warning to log via the standard logger.",
+      "paths": ["src/mcp/shared/tool_name_validation.py:115"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def validate_and_warn_tool_name(name: str) -> bool",
+      "facts": ["TOOL_NAME_REGEX = ^[A-Za-z0-9._-]{1,128}$", "Max length: 128 chars"]
+    },
+    {
+      "id": "f:src/mcp/shared/extension.py#validate_extension_identifier",
+      "parent": "shared.utils",
+      "name": "validate_extension_identifier()",
+      "kind": "function",
+      "summary": "Raise TypeError unless identifier is a valid vendor-prefix/name string per SEP-2133.",
+      "detail": "Pattern: dot-separated labels (each starting with a letter, ending with letter or digit, hyphens interior) + '/' + name (alphanumeric ends, dots/underscores/hyphens interior). Raises TypeError naming the owner for diagnostics.",
+      "paths": ["src/mcp/shared/extension.py:19"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def validate_extension_identifier(identifier: Any, *, owner: str) -> None"
+    },
+    {
+      "id": "f:src/mcp/shared/_callable_inspection.py#is_async_callable",
+      "parent": "shared.utils",
+      "name": "is_async_callable()",
+      "kind": "function",
+      "summary": "Return True if the callable is a coroutine function or has an async __call__ method.",
+      "detail": "Strips functools.partial wrappers before checking. Checks inspect.iscoroutinefunction on obj and on obj.__call__. Adapted from Starlette's _utils. Used by the high-level server to decide whether to await a handler.",
+      "paths": ["src/mcp/shared/_callable_inspection.py:27"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def is_async_callable(obj: Any) -> bool"
+    },
+    {
+      "id": "f:src/mcp/__init__.py",
+      "parent": "shared",
+      "name": "Package root (mcp)",
+      "kind": "module",
+      "summary": "Public API surface: re-exports wire types from mcp_types, Client, ClientSession, ServerSession, MCPError, UriTemplate, and stdio helpers.",
+      "detail": "__all__ lists 54 names. Wire types (CallToolRequest, ClientCapabilities, Tool, etc.) are re-exported directly from mcp_types. SDK types come from their home modules: Client from client.client, ClientSession from client.session, ServerSession from server.session, MCPError and UrlElicitationRequiredError from shared.exceptions, UriTemplate and InvalidUriTemplate from shared.uri_template, stdio_client and stdio_server from their respective transports. The mcp.types submodule is also bound for v1 backward compat.",
+      "paths": ["src/mcp/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/cli/cli.py",
+      "parent": "cli",
+      "name": "CLI commands",
+      "kind": "module",
+      "summary": "The mcp command: dev (Inspector), run (direct), and install (Claude Desktop registration) subcommands.",
+      "detail": "Built on typer. dev launches npx @modelcontextprotocol/inspector with a uv run command wrapping the server file. run imports and calls server.run(transport=...). install calls claude.update_claude_config to write the server entry into claude_desktop_config.json under mcpServers. All three parse file_spec as path[:object] and import the server via _import_server which looks for mcp/server/app module attributes. dotenv is an optional import for --env-file.",
+      "paths": ["src/mcp/cli/cli.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/cli/cli.py#dev",
+      "parent": "cli",
+      "name": "dev()",
+      "kind": "function",
+      "summary": "Run an MCP server with the MCP Inspector via npx @modelcontextprotocol/inspector.",
+      "detail": "Builds a uv run command (_build_uv_command) that includes mcp[cli] pinned to the running SDK version via mcp_requirement(). Passes it to npx @modelcontextprotocol/inspector. Uses shell=True on Windows. Exits with the subprocess returncode.",
+      "paths": ["src/mcp/cli/cli.py:221"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@app.command() def dev(file_spec, with_editable, with_packages) -> None"
+    },
+    {
+      "id": "f:src/mcp/cli/cli.py#run",
+      "parent": "cli",
+      "name": "run()",
+      "kind": "function",
+      "summary": "Import and run an MCP server directly in the current process.",
+      "detail": "Calls _import_server then server.run(transport=transport). Note: only MCPServer is supported; low-level Server objects are rejected with a warning. No dependency management; callers should use 'mcp install' or 'mcp dev' for that.",
+      "paths": ["src/mcp/cli/cli.py:303"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@app.command() def run(file_spec, transport) -> None"
+    },
+    {
+      "id": "f:src/mcp/cli/cli.py#install",
+      "parent": "cli",
+      "name": "install()",
+      "kind": "function",
+      "summary": "Register an MCP server in Claude Desktop's config file.",
+      "detail": "Resolves the server name, collects packages and env vars (from --env-var flags and optional --env-file via python-dotenv), then calls claude.update_claude_config. Existing env vars are preserved and merged; new values take precedence. Exits with error if Claude Desktop is not found.",
+      "paths": ["src/mcp/cli/cli.py:360"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@app.command() def install(file_spec, server_name, with_editable, with_packages, env_vars, env_file) -> None"
+    },
+    {
+      "id": "f:src/mcp/cli/claude.py",
+      "parent": "cli",
+      "name": "Claude Desktop integration",
+      "kind": "module",
+      "summary": "Utilities to locate and write to Claude Desktop's configuration file (claude_desktop_config.json).",
+      "detail": "get_claude_config_path() finds the config dir per platform: ~/AppData/Roaming/Claude on Windows, ~/Library/Application Support/Claude on macOS, $XDG_CONFIG_HOME/Claude on Linux. update_claude_config writes a mcpServers entry with uv run --frozen and the pinned mcp[cli] requirement. mcp_requirement() pins to the installed SDK version; dev/local versions fall back to unpinned.",
+      "paths": ["src/mcp/cli/claude.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/cli/claude.py#update_claude_config",
+      "parent": "cli",
+      "name": "update_claude_config()",
+      "kind": "function",
+      "summary": "Add or update an MCP server entry in claude_desktop_config.json under mcpServers.",
+      "detail": "Reads existing config JSON, preserves and merges env vars (existing vars kept, new ones take precedence), builds the uv run --frozen command with --with mcp[cli]==<version> and any additional packages (deduplicated), writes config back with json.dumps indent=2. Creates the file if absent. Returns bool success.",
+      "paths": ["src/mcp/cli/claude.py:62"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def update_claude_config(file_spec, server_name, *, with_editable=None, with_packages=None, env_vars=None) -> bool",
+      "code": "config = json.loads(config_file.read_bytes())\nif \"mcpServers\" not in config:\n    config[\"mcpServers\"] = {}\nif server_name in config[\"mcpServers\"] and \"env\" in config[\"mcpServers\"][server_name]:\n    existing_env = config[\"mcpServers\"][server_name][\"env\"]\n    if env_vars:\n        env_vars = {**existing_env, **env_vars}\nargs = [\"run\", \"--frozen\"]\npackages = {mcp_requirement(\"mcp[cli]\")}\nfor pkg in sorted(packages):\n    args.extend([\"--with\", pkg])\nconfig[\"mcpServers\"][server_name] = server_config\nconfig_file.write_text(json.dumps(config, indent=2), encoding=\"utf-8\")"
+    },
+    {
+      "id": "d:src/mcp/os",
+      "parent": "shared",
+      "name": "OS helpers",
+      "kind": "group",
+      "summary": "Platform-specific process and file-handle utilities for the stdio transport.",
+      "detail": "posix/utilities.py: terminate_posix_process_tree sends SIGTERM to the process group, polls for exit, then SIGKILLs survivors after a 2-second timeout. win32/utilities.py: create_windows_process spawns via anyio.open_process (with CREATE_NO_WINDOW) and assigns the process to a Windows Job Object so KILL_ON_JOB_CLOSE reaps the entire tree. FallbackProcess wraps subprocess.Popen for SelectorEventLoop. rebind_std_handle_to_fd syncs the Win32 standard-handle slot after os.dup2 so subprocess handle inheritance sees the right file.",
+      "paths": ["src/mcp/os/__init__.py", "src/mcp/os/posix/__init__.py", "src/mcp/os/posix/utilities.py", "src/mcp/os/win32/__init__.py", "src/mcp/os/win32/utilities.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/os/posix/utilities.py#terminate_posix_process_tree",
+      "parent": "d:src/mcp/os",
+      "name": "terminate_posix_process_tree()",
+      "kind": "function",
+      "summary": "SIGTERM a process group, wait up to 2 seconds, then SIGKILL survivors.",
+      "detail": "Uses os.killpg(pgid, SIGTERM) where pgid=process.pid (the leader; set via start_new_session). Polls _group_alive every 10ms within anyio.move_on_after(timeout_seconds). After the grace period, suppresses ESRCH/EPERM on SIGKILL since the group may have exited.",
+      "paths": ["src/mcp/os/posix/utilities.py:17"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def terminate_posix_process_tree(process: Process, timeout_seconds: float = 2.0) -> None",
+      "facts": ["Default grace period: 2.0 seconds", "Poll interval: 0.01 seconds (_GROUP_POLL_INTERVAL)"]
+    },
+    {
+      "id": "f:src/mcp/os/win32/utilities.py#create_windows_process",
+      "parent": "d:src/mcp/os",
+      "name": "create_windows_process()",
+      "kind": "function",
+      "summary": "Spawn a Windows subprocess with CREATE_NO_WINDOW and assign it to a Job Object for tree termination.",
+      "detail": "Tries anyio.open_process first; falls back to FallbackProcess (Popen-backed) on NotImplementedError (SelectorEventLoop). Creates a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, then assigns the process via OpenProcess + AssignProcessToJobObject. Children spawned before assignment land outside the job; fix is CREATE_SUSPENDED spawn if needed.",
+      "paths": ["src/mcp/os/win32/utilities.py:136"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def create_windows_process(command, args, env=None, errlog=sys.stderr, cwd=None) -> Process | FallbackProcess"
+    },
+    {
+      "id": "f:src/mcp/os/win32/utilities.py#FallbackProcess",
+      "parent": "d:src/mcp/os",
+      "name": "FallbackProcess",
+      "kind": "class",
+      "summary": "Async wrapper around subprocess.Popen for Windows event loops without async subprocess support.",
+      "detail": "wait() polls Popen.poll() every 10ms instead of blocking (blocking defeats anyio cancellation). terminate() and kill() delegate to Popen. stdin and stdout are wrapped as anyio FileWriteStream / FileReadStream. Used when anyio.open_process raises NotImplementedError.",
+      "paths": ["src/mcp/os/win32/utilities.py:84"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class FallbackProcess"
+    },
+    {
+      "id": "f:src/mcp/shared/_compat.py#resync_tracer",
+      "parent": "shared.utils",
+      "name": "resync_tracer()",
+      "kind": "function",
+      "summary": "Workaround for CPython 3.11 coverage tracing desync after a cancelled task-group join.",
+      "detail": "Calls anyio.lowlevel.cancel_shielded_checkpoint() once to force a resume via .send() rather than .throw(), re-stamping the missing 'call' trace events. Needed in JSONRPCDispatcher.run, DirectDispatcher._dispatch_request, and create_client_server_memory_streams. Scheduled for removal when Python 3.11 support ends (EOL 2027-10).",
+      "paths": ["src/mcp/shared/_compat.py:8"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def resync_tracer() -> None"
+    },
+    {
+      "id": "f:src/mcp/shared/inbound.py#validate_mcp_param_headers",
+      "parent": "shared.dispatch",
+      "name": "validate_mcp_param_headers()",
+      "kind": "function",
+      "summary": "Compare Mcp-Param-* headers against body arguments for a tools/call request.",
+      "detail": "For each x-mcp-header annotated property in input_schema, checks that the header and argument agree: present together and equal after sentinel decoding, or absent together. Integer-typed with canonical decimal encoding compares numerically. A schema with an invalid x-mcp-header annotation validates nothing (conforming clients drop the tool). Returns InboundLadderRejection on the first mismatch, None on success.",
+      "paths": ["src/mcp/shared/inbound.py:526"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def validate_mcp_param_headers(input_schema, arguments, headers) -> InboundLadderRejection | None"
+    },
+    {
+      "id": "f:tests/shared/test_jsonrpc_dispatcher.py",
+      "parent": "shared.dispatch",
+      "name": "JSONRPCDispatcher tests",
+      "kind": "test",
+      "summary": "Unit tests for JSONRPCDispatcher: request correlation, cancellation, progress, timeout, and error handling.",
+      "paths": ["tests/shared/test_jsonrpc_dispatcher.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_dispatcher.py",
+      "parent": "shared.dispatch",
+      "name": "Dispatcher protocol tests",
+      "kind": "test",
+      "summary": "Tests for coerce_request_id, as_request_id, and dispatcher protocol conformance.",
+      "paths": ["tests/shared/test_dispatcher.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_context_streams.py",
+      "parent": "shared.memory",
+      "name": "ContextStream tests",
+      "kind": "test",
+      "summary": "Tests for ContextSendStream and ContextReceiveStream context propagation.",
+      "paths": ["tests/shared/test_context_streams.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_peer.py",
+      "parent": "shared.peer",
+      "name": "Peer tests",
+      "kind": "test",
+      "summary": "Tests for ClientPeer typed methods and dump_params alias handling.",
+      "paths": ["tests/shared/test_peer.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_context.py",
+      "parent": "shared.peer",
+      "name": "BaseContext tests",
+      "kind": "test",
+      "summary": "Tests for BaseContext property delegation and report_progress.",
+      "paths": ["tests/shared/test_context.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_exceptions.py",
+      "parent": "shared.utils",
+      "name": "Exception tests",
+      "kind": "test",
+      "summary": "Tests for MCPError, NoBackChannelError, and UrlElicitationRequiredError.",
+      "paths": ["tests/shared/test_exceptions.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_uri_template.py",
+      "parent": "shared.utils",
+      "name": "UriTemplate tests",
+      "kind": "test",
+      "summary": "Tests for RFC 6570 URI Template expansion and bidirectional matching.",
+      "paths": ["tests/shared/test_uri_template.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_path_security.py",
+      "parent": "shared.utils",
+      "name": "Path security tests",
+      "kind": "test",
+      "summary": "Tests for safe_join, contains_path_traversal, and is_absolute_path.",
+      "paths": ["tests/shared/test_path_security.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_inbound.py",
+      "parent": "shared.dispatch",
+      "name": "Inbound classifier tests",
+      "kind": "test",
+      "summary": "Tests for classify_inbound_request, header encode/decode, and Mcp-Param-* validation.",
+      "paths": ["tests/shared/test_inbound.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_skills.py",
+      "parent": "shared.utils",
+      "name": "Skills tests",
+      "kind": "test",
+      "summary": "Tests for Skill model validation, skill_name_from_uri, and directory result validation.",
+      "paths": ["tests/shared/test_skills.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_httpx_utils.py",
+      "parent": "shared.utils",
+      "name": "httpx utils tests",
+      "kind": "test",
+      "summary": "Tests for stream_within_origin redirect logic and RedirectAwareAuth.",
+      "paths": ["tests/shared/test_httpx_utils.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_request_clock.py",
+      "parent": "shared.utils",
+      "name": "Request clock tests",
+      "kind": "test",
+      "summary": "Tests for request_clock timeout and waiting_on_a_person pause/resume.",
+      "paths": ["tests/shared/test_request_clock.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_tool_name_validation.py",
+      "parent": "shared.utils",
+      "name": "Tool name validation tests",
+      "kind": "test",
+      "summary": "Tests for validate_tool_name and validate_and_warn_tool_name against SEP-986.",
+      "paths": ["tests/shared/test_tool_name_validation.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_extension.py",
+      "parent": "shared.utils",
+      "name": "Extension identifier tests",
+      "kind": "test",
+      "summary": "Tests for validate_extension_identifier against valid and invalid patterns.",
+      "paths": ["tests/shared/test_extension.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/shared/test_otel.py",
+      "parent": "shared.utils",
+      "name": "OTel helper tests",
+      "kind": "test",
+      "summary": "Tests for otel_span, inject_trace_context, and extract_trace_context.",
+      "paths": ["tests/shared/test_otel.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/cli/test_claude.py",
+      "parent": "cli",
+      "name": "Claude integration tests",
+      "kind": "test",
+      "summary": "Tests for get_claude_config_path, mcp_requirement, and update_claude_config merging.",
+      "paths": ["tests/cli/test_claude.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/cli/test_utils.py",
+      "parent": "cli",
+      "name": "CLI utility tests",
+      "kind": "test",
+      "summary": "Tests for _parse_file_path, _build_uv_command, and other CLI helpers.",
+      "paths": ["tests/cli/test_utils.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/shared/peer.py#ClientPeer.send_raw_request",
+      "parent": "shared.peer",
+      "name": "ClientPeer.send_raw_request()",
+      "kind": "function",
+      "summary": "Thin pass-through that delegates a raw JSON-RPC request to the wrapped Outbound.",
+      "detail": "Delegates directly to self._outbound.send_raw_request(method, params, opts). Exists so callers can use a ClientPeer anywhere an Outbound is accepted without unpacking the wrapper.",
+      "paths": ["src/mcp/shared/peer.py:76"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def send_raw_request(self, method, params, opts=None) -> dict[str, Any]",
+      "code": "async def send_raw_request(\n    self,\n    method: str,\n    params: Mapping[str, Any] | None,\n    opts: CallOptions | None = None,\n) -> dict[str, Any]:\n    return await self._outbound.send_raw_request(method, params, opts)"
+    },
+    {
+      "id": "f:src/mcp/shared/peer.py#ClientPeer.sample",
+      "parent": "shared.peer",
+      "name": "ClientPeer.sample()",
+      "kind": "function",
+      "summary": "Deprecated sampling/createMessage request with two overloads for tools vs. no-tools responses.",
+      "detail": "Marked deprecated since 2026-07-28 (SEP-2577). Builds CreateMessageRequestParams, calls send_raw_request('sampling/createMessage', ...), and validates the result as CreateMessageResultWithTools when tools or tool_choice is supplied, else CreateMessageResult. Three overload signatures handle the tools=None, tools=list, and tool_choice cases.",
+      "paths": ["src/mcp/shared/peer.py:89"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@deprecated async def sample(self, messages, *, max_tokens, ...) -> CreateMessageResult | CreateMessageResultWithTools",
+      "code": "params = CreateMessageRequestParams(\n    messages=messages,\n    system_prompt=system_prompt,\n    max_tokens=max_tokens,\n    tools=tools,\n    tool_choice=tool_choice,\n)\nresult = await self.send_raw_request(\"sampling/createMessage\", dump_params(params, meta), opts)\nif tools is not None or tool_choice is not None:\n    return CreateMessageResultWithTools.model_validate(result, by_name=False)\nreturn CreateMessageResult.model_validate(result, by_name=False)"
+    },
+    {
+      "id": "f:src/mcp/shared/peer.py#ClientPeer.elicit_url",
+      "parent": "shared.peer",
+      "name": "ClientPeer.elicit_url()",
+      "kind": "function",
+      "summary": "Send a URL-mode elicitation/create request carrying message, url, and elicitation_id.",
+      "detail": "Builds ElicitRequestURLParams and calls send_raw_request('elicitation/create', ...). Returns ElicitResult validated from the peer's raw dict. Raises MCPError on peer error or NoBackChannelError when the transport has no back-channel.",
+      "paths": ["src/mcp/shared/peer.py:201"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def elicit_url(self, message, url, elicitation_id, *, meta=None, opts=None) -> ElicitResult",
+      "code": "async def elicit_url(\n    self,\n    message: str,\n    url: str,\n    elicitation_id: str,\n    *,\n    meta: Meta | None = None,\n    opts: CallOptions | None = None,\n) -> ElicitResult:\n    params = ElicitRequestURLParams(message=message, url=url, elicitation_id=elicitation_id)\n    result = await self.send_raw_request(\"elicitation/create\", dump_params(params, meta), opts)\n    return ElicitResult.model_validate(result, by_name=False)"
+    },
+    {
+      "id": "f:src/mcp/shared/peer.py#ClientPeer.list_roots",
+      "parent": "shared.peer",
+      "name": "ClientPeer.list_roots()",
+      "kind": "function",
+      "summary": "Deprecated roots/list request; returns ListRootsResult.",
+      "detail": "Marked deprecated since 2026-07-28 (SEP-2577). Sends 'roots/list' with no params beyond optional meta, validates result as ListRootsResult. Raises MCPError or NoBackChannelError.",
+      "paths": ["src/mcp/shared/peer.py:222"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@deprecated async def list_roots(self, *, meta=None, opts=None) -> ListRootsResult"
+    },
+    {
+      "id": "f:src/mcp/shared/peer.py#ClientPeer.ping",
+      "parent": "shared.peer",
+      "name": "ClientPeer.ping()",
+      "kind": "function",
+      "summary": "Send a ping request and discard the result.",
+      "detail": "Calls send_raw_request('ping', ...) and ignores the return value. Used as a liveness check. Raises MCPError on peer error or NoBackChannelError when no back-channel exists.",
+      "paths": ["src/mcp/shared/peer.py:233"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def ping(self, *, meta=None, opts=None) -> None",
+      "code": "async def ping(self, *, meta: Meta | None = None, opts: CallOptions | None = None) -> None:\n    await self.send_raw_request(\"ping\", dump_params(None, meta), opts)"
+    },
+    {
+      "id": "f:src/mcp/shared/skills.py#skill_name_from_uri",
+      "parent": "shared.utils",
+      "name": "skill_name_from_uri()",
+      "kind": "function",
+      "summary": "Extract the skill name from a SKILL.md resource URI per SEP-2640.",
+      "detail": "Splits the URI with urlsplit; validates it ends in /SKILL.md and has no query or fragment. For a URI with a path directory (organizational prefix), the name is the final path segment; for a bare skill://<name>/SKILL.md form it uses the hostname. Raises ValueError on malformed or nameless URIs.",
+      "paths": ["src/mcp/shared/skills.py:221"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def skill_name_from_uri(uri: str) -> str",
+      "code": "def skill_name_from_uri(uri: str) -> str:\n    parts = urlsplit(uri)\n    if not parts.scheme or parts.query or parts.fragment:\n        raise ValueError(f\"skill URI {uri!r} is not a valid absolute resource URI\")\n    if not parts.path.endswith(\"/SKILL.md\"):\n        raise ValueError(f\"skill URI {uri!r} must end in /SKILL.md\")\n    directory = parts.path[: -len(\"/SKILL.md\")].strip(\"/\")\n    if directory:\n        name = directory.rsplit(\"/\", 1)[-1]\n    else:\n        name = parts.hostname or \"\"\n    if not name:\n        raise ValueError(f\"skill URI {uri!r} has no skill name\")\n    return name"
+    },
+    {
+      "id": "f:src/mcp/shared/skills.py#parse_directory_uri",
+      "parent": "shared.utils",
+      "name": "parse_directory_uri()",
+      "kind": "function",
+      "summary": "Split a directory resource URI into (scheme, netloc, path), rejecting trailing slashes.",
+      "detail": "Validates no trailing slash and that the URI is absolute (has scheme, no query or fragment). Returns (scheme, netloc, path) for use in validate_directory_result. Raises ValueError on malformed URIs.",
+      "paths": ["src/mcp/shared/skills.py:263"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def parse_directory_uri(uri: str) -> tuple[str, str, str]",
+      "code": "def parse_directory_uri(uri: str) -> tuple[str, str, str]:\n    if uri.endswith(\"/\"):\n        raise ValueError(f\"directory URI {uri!r} must not have a trailing slash\")\n    parts = urlsplit(uri)\n    if not parts.scheme or parts.query or parts.fragment:\n        raise ValueError(f\"directory URI {uri!r} is not a valid absolute resource URI\")\n    return parts.scheme, parts.netloc, parts.path"
+    },
+    {
+      "id": "f:src/mcp/shared/uri_template.py#UriTemplate.expand",
+      "parent": "shared.utils",
+      "name": "UriTemplate.expand()",
+      "kind": "function",
+      "summary": "Substitute variable values into the template and return the expanded URI string.",
+      "detail": "Iterates the parsed _parts list; literal strings are appended verbatim, expression parts call _expand_expression which applies percent-encoding per operator (simple encodes reserved chars; + and # leave them intact). Absent variables are silently omitted per RFC 6570. Raises TypeError for non-string scalar values.",
+      "paths": ["src/mcp/shared/uri_template.py:400"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def expand(self, variables: Mapping[str, str | Sequence[str]]) -> str",
+      "code": "def expand(self, variables: Mapping[str, str | Sequence[str]]) -> str:\n    out: list[str] = []\n    for part in self._parts:\n        if isinstance(part, str):\n            out.append(part)\n        else:\n            out.append(_expand_expression(part, variables))\n    return \"\".join(out)"
+    },
+    {
+      "id": "f:src/mcp/shared/uri_template.py#UriTemplate.match",
+      "parent": "shared.utils",
+      "name": "UriTemplate.match()",
+      "kind": "function",
+      "summary": "Inverse of expand: match a concrete URI and return extracted variable bindings, or None.",
+      "detail": "Uses a two-ended O(n*v) scan anchored on prefix literals and suffix literals, with at most one greedy multi-segment variable. Query variables at the end are matched leniently: order-agnostic, partial, unrecognized params ignored. Oversized inputs (> max_uri_length) return None immediately. Returns dict[str, str | list[str]]; explode variables yield list[str], others str.",
+      "paths": ["src/mcp/shared/uri_template.py:459"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def match(self, uri: str, *, max_uri_length: int = DEFAULT_MAX_URI_LENGTH) -> dict[str, str | list[str]] | None"
+    }
+  ],
+  "edges": [
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "to": "f:src/mcp/shared/dispatcher.py#Dispatcher",
+      "kind": "calls",
+      "label": "implements Dispatcher Protocol",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:264"
+    },
+    {
+      "from": "f:src/mcp/shared/direct_dispatcher.py#DirectDispatcher",
+      "to": "f:src/mcp/shared/dispatcher.py#Dispatcher",
+      "kind": "calls",
+      "label": "implements Dispatcher Protocol",
+      "evidence": "src/mcp/shared/direct_dispatcher.py:99"
+    },
+    {
+      "from": "f:src/mcp/shared/context.py#BaseContext",
+      "to": "f:src/mcp/shared/dispatcher.py#Outbound",
+      "kind": "calls",
+      "label": "satisfies Outbound Protocol",
+      "evidence": "src/mcp/shared/context.py:9"
+    },
+    {
+      "from": "f:src/mcp/shared/context.py#BaseContext",
+      "to": "f:src/mcp/shared/dispatcher.py#DispatchContext",
+      "kind": "calls",
+      "label": "wraps DispatchContext, forwards all calls",
+      "evidence": "src/mcp/shared/context.py:34"
+    },
+    {
+      "from": "f:src/mcp/shared/peer.py#ClientPeer",
+      "to": "f:src/mcp/shared/dispatcher.py#Outbound",
+      "kind": "calls",
+      "label": "wraps Outbound to add typed methods",
+      "evidence": "src/mcp/shared/peer.py:73"
+    },
+    {
+      "from": "f:src/mcp/shared/peer.py#dump_params",
+      "to": "f:src/mcp/shared/peer.py#ClientPeer",
+      "kind": "calls",
+      "label": "used by all typed request methods",
+      "evidence": "src/mcp/shared/peer.py:177"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.run",
+      "to": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "kind": "calls",
+      "label": "drives the receive loop in JSONRPCDispatcher",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:493"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.send_raw_request",
+      "to": "f:src/mcp/shared/_request_clock.py#request_clock",
+      "kind": "calls",
+      "label": "installs per-request timeout clock after write",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:408"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.send_raw_request",
+      "to": "f:src/mcp/shared/_otel.py#otel_span",
+      "kind": "calls",
+      "label": "wraps each outbound request in an OTel span",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:386"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "to": "f:src/mcp/shared/message.py#SessionMessage",
+      "kind": "reads",
+      "label": "reads SessionMessage from read_stream",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:517"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "to": "f:src/mcp/shared/transport_context.py#TransportContext",
+      "kind": "calls",
+      "label": "builds TransportContext via transport_builder per message",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:597"
+    },
+    {
+      "from": "f:src/mcp/shared/memory.py#create_client_server_memory_streams",
+      "to": "f:src/mcp/shared/_context_streams.py#ContextSendStream",
+      "kind": "calls",
+      "label": "creates ContextSendStream pairs for each direction",
+      "evidence": "src/mcp/shared/memory.py:24"
+    },
+    {
+      "from": "f:src/mcp/shared/memory.py#create_client_server_memory_streams",
+      "to": "f:src/mcp/shared/_context_streams.py#ContextReceiveStream",
+      "kind": "calls",
+      "label": "creates ContextReceiveStream pairs for each direction",
+      "evidence": "src/mcp/shared/memory.py:24"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "to": "f:src/mcp/shared/_context_streams.py#ContextReceiveStream",
+      "kind": "reads",
+      "label": "reads last_context to propagate sender contextvars",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:519"
+    },
+    {
+      "from": "f:src/mcp/shared/exceptions.py#MCPError",
+      "to": "f:src/mcp/shared/exceptions.py#NoBackChannelError",
+      "kind": "calls",
+      "label": "NoBackChannelError extends MCPError",
+      "evidence": "src/mcp/shared/exceptions.py:55"
+    },
+    {
+      "from": "f:src/mcp/shared/exceptions.py#MCPError",
+      "to": "f:src/mcp/shared/exceptions.py#UrlElicitationRequiredError",
+      "kind": "calls",
+      "label": "UrlElicitationRequiredError extends MCPError",
+      "evidence": "src/mcp/shared/exceptions.py:74"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#handler_exception_to_error_data",
+      "to": "f:src/mcp/shared/exceptions.py#MCPError",
+      "kind": "calls",
+      "label": "maps MCPError to its ErrorData",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:102"
+    },
+    {
+      "from": "f:src/mcp/cli/cli.py#install",
+      "to": "f:src/mcp/cli/claude.py#update_claude_config",
+      "kind": "calls",
+      "label": "writes server entry to Claude Desktop config",
+      "evidence": "src/mcp/cli/cli.py:476"
+    },
+    {
+      "from": "f:src/mcp/cli/claude.py#update_claude_config",
+      "to": "x:claude-desktop",
+      "kind": "writes",
+      "label": "writes mcpServers entry to claude_desktop_config.json",
+      "evidence": "src/mcp/cli/claude.py:157"
+    },
+    {
+      "from": "f:src/mcp/cli/cli.py#dev",
+      "to": "x:claude-desktop",
+      "kind": "calls",
+      "label": "launches MCP Inspector via npx",
+      "evidence": "src/mcp/cli/cli.py:277"
+    },
+    {
+      "from": "f:src/mcp/shared/_httpx_utils.py#create_mcp_http_client",
+      "to": "x:httpx",
+      "kind": "calls",
+      "label": "creates httpx2 AsyncClient with MCP timeout defaults",
+      "evidence": "src/mcp/shared/_httpx_utils.py:57"
+    },
+    {
+      "from": "f:src/mcp/shared/_httpx_utils.py#stream_within_origin",
+      "to": "x:httpx",
+      "kind": "calls",
+      "label": "sends requests, managing origin-bound redirects manually",
+      "evidence": "src/mcp/shared/_httpx_utils.py:131"
+    },
+    {
+      "from": "f:src/mcp/shared/memory.py#create_client_server_memory_streams",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "uses anyio memory streams for in-process transport",
+      "evidence": "src/mcp/shared/memory.py:24"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.run",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "uses anyio task group for concurrent handler dispatch",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:510"
+    },
+    {
+      "from": "f:src/mcp/shared/_otel.py#otel_span",
+      "to": "ext.providers",
+      "kind": "calls",
+      "label": "uses opentelemetry-api for spans and W3C propagation",
+      "evidence": "src/mcp/shared/_otel.py:1"
+    },
+    {
+      "from": "f:src/mcp/shared/skills.py#Skill",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "Pydantic model with model_validator for SEP-2640 conformance",
+      "evidence": "src/mcp/shared/skills.py:92"
+    },
+    {
+      "from": "f:src/mcp/__init__.py",
+      "to": "types",
+      "kind": "reads",
+      "label": "re-exports wire types from mcp_types via the types area",
+      "evidence": "src/mcp/__init__.py:1"
+    },
+    {
+      "from": "f:src/mcp/__init__.py",
+      "to": "f:src/mcp/shared/exceptions.py#MCPError",
+      "kind": "reads",
+      "label": "re-exports MCPError as public API",
+      "evidence": "src/mcp/__init__.py:71"
+    },
+    {
+      "from": "f:src/mcp/__init__.py",
+      "to": "f:src/mcp/shared/uri_template.py#UriTemplate",
+      "kind": "reads",
+      "label": "re-exports UriTemplate as public API",
+      "evidence": "src/mcp/__init__.py:72"
+    },
+    {
+      "from": "f:src/mcp/os/posix/utilities.py#terminate_posix_process_tree",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "uses anyio.move_on_after for SIGKILL grace period",
+      "evidence": "src/mcp/os/posix/utilities.py:42"
+    },
+    {
+      "from": "f:src/mcp/os/win32/utilities.py#create_windows_process",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "uses anyio.open_process, falls back to Popen",
+      "evidence": "src/mcp/os/win32/utilities.py:156"
+    },
+    {
+      "from": "f:tests/shared/test_jsonrpc_dispatcher.py",
+      "to": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "kind": "tests",
+      "label": "tests JSONRPCDispatcher behavior",
+      "evidence": "tests/shared/test_jsonrpc_dispatcher.py"
+    },
+    {
+      "from": "f:tests/shared/test_dispatcher.py",
+      "to": "f:src/mcp/shared/dispatcher.py#Dispatcher",
+      "kind": "tests",
+      "label": "tests dispatcher protocol utilities",
+      "evidence": "tests/shared/test_dispatcher.py"
+    },
+    {
+      "from": "f:tests/shared/test_context_streams.py",
+      "to": "f:src/mcp/shared/_context_streams.py#ContextSendStream",
+      "kind": "tests",
+      "label": "tests context propagation across stream boundaries",
+      "evidence": "tests/shared/test_context_streams.py"
+    },
+    {
+      "from": "f:tests/shared/test_peer.py",
+      "to": "f:src/mcp/shared/peer.py#ClientPeer",
+      "kind": "tests",
+      "label": "tests ClientPeer typed request methods",
+      "evidence": "tests/shared/test_peer.py"
+    },
+    {
+      "from": "f:tests/shared/test_context.py",
+      "to": "f:src/mcp/shared/context.py#BaseContext",
+      "kind": "tests",
+      "label": "tests BaseContext delegation and progress reporting",
+      "evidence": "tests/shared/test_context.py"
+    },
+    {
+      "from": "f:tests/shared/test_exceptions.py",
+      "to": "f:src/mcp/shared/exceptions.py#MCPError",
+      "kind": "tests",
+      "label": "tests MCPError and subclass construction",
+      "evidence": "tests/shared/test_exceptions.py"
+    },
+    {
+      "from": "f:tests/shared/test_uri_template.py",
+      "to": "f:src/mcp/shared/uri_template.py#UriTemplate",
+      "kind": "tests",
+      "label": "tests RFC 6570 expansion and matching",
+      "evidence": "tests/shared/test_uri_template.py"
+    },
+    {
+      "from": "f:tests/shared/test_path_security.py",
+      "to": "f:src/mcp/shared/path_security.py#safe_join",
+      "kind": "tests",
+      "label": "tests path traversal prevention",
+      "evidence": "tests/shared/test_path_security.py"
+    },
+    {
+      "from": "f:tests/shared/test_inbound.py",
+      "to": "f:src/mcp/shared/inbound.py#classify_inbound_request",
+      "kind": "tests",
+      "label": "tests modern-protocol validation ladder",
+      "evidence": "tests/shared/test_inbound.py"
+    },
+    {
+      "from": "f:tests/shared/test_skills.py",
+      "to": "f:src/mcp/shared/skills.py#Skill",
+      "kind": "tests",
+      "label": "tests Skills conformance validation",
+      "evidence": "tests/shared/test_skills.py"
+    },
+    {
+      "from": "f:tests/shared/test_httpx_utils.py",
+      "to": "f:src/mcp/shared/_httpx_utils.py#stream_within_origin",
+      "kind": "tests",
+      "label": "tests origin-bound redirect logic",
+      "evidence": "tests/shared/test_httpx_utils.py"
+    },
+    {
+      "from": "f:tests/shared/test_request_clock.py",
+      "to": "f:src/mcp/shared/_request_clock.py#request_clock",
+      "kind": "tests",
+      "label": "tests timeout clock pause and resume",
+      "evidence": "tests/shared/test_request_clock.py"
+    },
+    {
+      "from": "f:tests/shared/test_tool_name_validation.py",
+      "to": "f:src/mcp/shared/tool_name_validation.py#validate_and_warn_tool_name",
+      "kind": "tests",
+      "label": "tests SEP-986 tool name validation",
+      "evidence": "tests/shared/test_tool_name_validation.py"
+    },
+    {
+      "from": "f:tests/shared/test_extension.py",
+      "to": "f:src/mcp/shared/extension.py#validate_extension_identifier",
+      "kind": "tests",
+      "label": "tests extension identifier grammar",
+      "evidence": "tests/shared/test_extension.py"
+    },
+    {
+      "from": "f:tests/shared/test_otel.py",
+      "to": "f:src/mcp/shared/_otel.py#otel_span",
+      "kind": "tests",
+      "label": "tests OTel span creation and trace context",
+      "evidence": "tests/shared/test_otel.py"
+    },
+    {
+      "from": "f:tests/cli/test_claude.py",
+      "to": "f:src/mcp/cli/claude.py#update_claude_config",
+      "kind": "tests",
+      "label": "tests Claude Desktop config JSON merging and path handling",
+      "evidence": "tests/cli/test_claude.py"
+    },
+    {
+      "from": "f:tests/cli/test_utils.py",
+      "to": "f:src/mcp/cli/cli.py",
+      "kind": "tests",
+      "label": "tests CLI file parsing and uv command construction",
+      "evidence": "tests/cli/test_utils.py"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "to": "f:src/mcp/shared/exceptions.py#MCPError",
+      "kind": "calls",
+      "label": "raises MCPError for peer errors, timeout, connection close",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:461"
+    },
+    {
+      "from": "f:src/mcp/shared/direct_dispatcher.py#DirectDispatcher",
+      "to": "f:src/mcp/shared/exceptions.py#MCPError",
+      "kind": "calls",
+      "label": "raises MCPError wrapping handler exceptions",
+      "evidence": "src/mcp/shared/direct_dispatcher.py:270"
+    },
+    {
+      "from": "f:src/mcp/shared/inbound.py#classify_inbound_request",
+      "to": "types",
+      "kind": "reads",
+      "label": "reads protocol versions and envelope meta keys",
+      "evidence": "src/mcp/shared/inbound.py:21"
+    },
+    {
+      "from": "f:src/mcp/cli/cli.py#run",
+      "to": "mcpserver",
+      "kind": "calls",
+      "label": "imports MCPServer from mcp.server and calls server.run()",
+      "evidence": "src/mcp/cli/cli.py:11"
+    },
+    {
+      "from": "f:src/mcp/shared/subscriptions.py#ServerEvent",
+      "to": "types",
+      "kind": "reads",
+      "label": "builds ServerNotification subtypes for listen stream events",
+      "evidence": "src/mcp/shared/subscriptions.py:12"
+    },
+    {
+      "from": "f:src/mcp/shared/metadata_utils.py#get_display_name",
+      "to": "types",
+      "kind": "reads",
+      "label": "operates on Tool, Resource, Prompt, ResourceTemplate types",
+      "evidence": "src/mcp/shared/metadata_utils.py:7"
+    },
+    {
+      "from": "f:src/mcp/shared/peer.py#ClientPeer.send_raw_request",
+      "to": "f:src/mcp/shared/dispatcher.py#Outbound",
+      "kind": "calls",
+      "label": "delegates to self._outbound.send_raw_request",
+      "evidence": "src/mcp/shared/peer.py:82"
+    },
+    {
+      "from": "f:src/mcp/shared/peer.py#ClientPeer.sample",
+      "to": "f:src/mcp/shared/peer.py#ClientPeer.send_raw_request",
+      "kind": "calls",
+      "label": "sends sampling/createMessage via send_raw_request",
+      "evidence": "src/mcp/shared/peer.py:177"
+    },
+    {
+      "from": "f:src/mcp/shared/peer.py#ClientPeer.elicit_url",
+      "to": "f:src/mcp/shared/peer.py#ClientPeer.send_raw_request",
+      "kind": "calls",
+      "label": "sends elicitation/create via send_raw_request",
+      "evidence": "src/mcp/shared/peer.py:218"
+    },
+    {
+      "from": "f:src/mcp/shared/peer.py#ClientPeer.list_roots",
+      "to": "f:src/mcp/shared/peer.py#ClientPeer.send_raw_request",
+      "kind": "calls",
+      "label": "sends roots/list via send_raw_request",
+      "evidence": "src/mcp/shared/peer.py:230"
+    },
+    {
+      "from": "f:src/mcp/shared/peer.py#ClientPeer.ping",
+      "to": "f:src/mcp/shared/peer.py#ClientPeer.send_raw_request",
+      "kind": "calls",
+      "label": "sends ping via send_raw_request",
+      "evidence": "src/mcp/shared/peer.py:240"
+    },
+    {
+      "from": "f:src/mcp/shared/skills.py#skill_name_from_uri",
+      "to": "f:src/mcp/shared/skills.py#Skill",
+      "kind": "calls",
+      "label": "used in Skill conformance check",
+      "evidence": "src/mcp/shared/skills.py:92"
+    },
+    {
+      "from": "f:src/mcp/shared/skills.py#parse_directory_uri",
+      "to": "f:src/mcp/shared/skills.py#skill_name_from_uri",
+      "kind": "calls",
+      "label": "used by validate_directory_result to split directory URIs",
+      "evidence": "src/mcp/shared/skills.py:289"
+    },
+    {
+      "from": "f:src/mcp/shared/uri_template.py#UriTemplate.expand",
+      "to": "f:src/mcp/shared/uri_template.py#UriTemplate",
+      "kind": "calls",
+      "label": "method on UriTemplate that iterates _parts",
+      "evidence": "src/mcp/shared/uri_template.py:400"
+    },
+    {
+      "from": "f:src/mcp/shared/uri_template.py#UriTemplate.match",
+      "to": "f:src/mcp/shared/uri_template.py#UriTemplate",
+      "kind": "calls",
+      "label": "method on UriTemplate performing inverse expansion scan",
+      "evidence": "src/mcp/shared/uri_template.py:459"
+    },
+    {
+      "from": "f:src/mcp/shared/dispatcher.py#CallOptions",
+      "to": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.send_raw_request",
+      "kind": "reads",
+      "label": "read by send_raw_request for id/timeout/cancel/progress",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:323"
+    },
+    {
+      "from": "f:src/mcp/shared/jsonrpc_dispatcher.py#coerce_request_id",
+      "to": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+      "kind": "calls",
+      "label": "called for pending-key and in-flight id lookup",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:350"
+    },
+    {
+      "from": "f:src/mcp/shared/direct_dispatcher.py#create_direct_dispatcher_pair",
+      "to": "f:src/mcp/shared/direct_dispatcher.py#DirectDispatcher",
+      "kind": "calls",
+      "label": "constructs two DirectDispatchers and cross-wires them",
+      "evidence": "src/mcp/shared/direct_dispatcher.py:310"
+    },
+    {
+      "from": "f:src/mcp/shared/inbound.py#encode_header_value",
+      "to": "f:src/mcp/shared/inbound.py#classify_inbound_request",
+      "kind": "calls",
+      "label": "called by mcp_param_headers for Mcp-Param-* encoding",
+      "evidence": "src/mcp/shared/inbound.py:292"
+    },
+    {
+      "from": "f:src/mcp/shared/inbound.py#validate_mcp_param_headers",
+      "to": "f:src/mcp/shared/inbound.py#encode_header_value",
+      "kind": "calls",
+      "label": "decodes Mcp-Param-* via decode_header_value",
+      "evidence": "src/mcp/shared/inbound.py:526"
+    },
+    {
+      "from": "f:src/mcp/shared/_callable_inspection.py#is_async_callable",
+      "to": "mcpserver",
+      "kind": "calls",
+      "label": "called by mcpserver handlers to detect async callables",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:86"
+    },
+    {
+      "from": "f:src/mcp/os/win32/utilities.py#FallbackProcess",
+      "to": "f:src/mcp/os/win32/utilities.py#create_windows_process",
+      "kind": "calls",
+      "label": "constructed by fallback path on SelectorEventLoop",
+      "evidence": "src/mcp/os/win32/utilities.py:183"
+    },
+    {
+      "from": "f:src/mcp/shared/_compat.py#resync_tracer",
+      "to": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.run",
+      "kind": "calls",
+      "label": "called after task-group join for trace resync",
+      "evidence": "src/mcp/shared/jsonrpc_dispatcher.py:541"
+    },
+    {
+      "from": "f:src/mcp/shared/_compat.py#resync_tracer",
+      "to": "f:src/mcp/shared/memory.py#create_client_server_memory_streams",
+      "kind": "calls",
+      "label": "called after stream teardown for trace resync",
+      "evidence": "src/mcp/shared/memory.py:33"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow.shared.inbound-request",
+      "name": "Inbound JSON-RPC request routed to a handler",
+      "summary": "An inbound JSON-RPC message is parsed from the stream, matched to a pending response or dispatched to a handler, and the response is written back.",
+      "steps": [
+        {
+          "node": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher.run",
+          "text": "The receive loop iterates the read stream. For each SessionMessage, _dispatch() is called in receive order."
+        },
+        {
+          "node": "f:src/mcp/shared/message.py#SessionMessage",
+          "text": "Each item is a SessionMessage wrapping a JSONRPCMessage (request, response, notification, or error) and optional MessageMetadata (ServerMessageMetadata for HTTP, None for stdio/memory)."
+        },
+        {
+          "node": "f:src/mcp/shared/transport_context.py#TransportContext",
+          "text": "transport_builder is called on the metadata to produce a TransportContext. For ServerMessageMetadata, can_send_request is read from the metadata's own verdict; for other metadata it defaults to True."
+        },
+        {
+          "node": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+          "text": "For a JSONRPCRequest, _dispatch_request creates a _JSONRPCDispatchContext and an anyio.CancelScope, registers both in _in_flight under coerce_request_id(req.id), then spawns _handle_request in the task group (or awaits it inline for initialize). For notifications/cancelled and notifications/progress, the correlating entry in _in_flight or _pending is updated synchronously before on_notify is offered the message."
+        },
+        {
+          "node": "f:src/mcp/shared/context.py#BaseContext",
+          "text": "The server's runner wraps the DispatchContext in a BaseContext (or its server-side subclass Context) and passes it to the user's handler as the first argument."
+        },
+        {
+          "node": "f:src/mcp/shared/exceptions.py#MCPError",
+          "text": "If the handler raises MCPError, its ErrorData is written back as a JSONRPCError. A pydantic ValidationError maps to INVALID_PARAMS. Any other exception is mapped via handler_exception_to_error_data: currently code=0 for v1 compat. A peer-cancelled request is settled unanswered (no response written, transport notified via on_request_unanswered hook)."
+        }
+      ]
+    },
+    {
+      "id": "flow.shared.memory-transport",
+      "name": "In-memory client/server session for tests",
+      "summary": "create_client_server_memory_streams wires a server and client over in-memory streams, allowing in-process tests without serialization.",
+      "steps": [
+        {
+          "node": "f:src/mcp/shared/memory.py#create_client_server_memory_streams",
+          "text": "create_client_server_memory_streams() creates two pairs of ContextSendStream / ContextReceiveStream (buffer size 1): one for each direction. It yields (client_streams, server_streams) where each is (read_stream, write_stream)."
+        },
+        {
+          "node": "f:src/mcp/shared/_context_streams.py#ContextSendStream",
+          "text": "Every send() on a ContextSendStream snapshots the sender's contextvars via copy_context() and wraps the item in an envelope. This propagates ASGI middleware state (auth tokens, OTel spans) from the HTTP transport task to the handler task."
+        },
+        {
+          "node": "f:src/mcp/shared/_context_streams.py#ContextReceiveStream",
+          "text": "receive() on a ContextReceiveStream unwraps the envelope and stores the sender's context in last_context. JSONRPCDispatcher reads this attribute after each receive and passes the context to _spawn via Context.run, so the handler inherits the sender's contextvars."
+        },
+        {
+          "node": "f:src/mcp/shared/jsonrpc_dispatcher.py#JSONRPCDispatcher",
+          "text": "Both client and server wrap their respective streams in a JSONRPCDispatcher. Each side calls run(on_request, on_notify) in a task group; task_status.started() signals readiness. send_raw_request on one side writes a JSONRPCRequest into the write stream; the other side's receive loop picks it up and dispatches it to the handler."
+        },
+        {
+          "node": "f:src/mcp/shared/direct_dispatcher.py#create_direct_dispatcher_pair",
+          "text": "For tests that need even less overhead, create_direct_dispatcher_pair skips streams entirely: send_raw_request calls peer._dispatch_request directly in-process, sharing the same TransportContext. This eliminates serialization, context-snapshot overhead, and task-group scheduling, making tests faster and more deterministic."
+        }
+      ]
+    }
+  ]
+}

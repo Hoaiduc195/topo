@@ -1,0 +1,1260 @@
+{
+  "area": "internals",
+  "nodes": [
+    {
+      "id": "internals.compat",
+      "parent": "fastapi.internals",
+      "name": "Pydantic compat layer",
+      "kind": "group",
+      "summary": "Isolates the rest of FastAPI from Pydantic internals by exposing one stable interface for building field validators, running validation, and extracting JSON schemas.",
+      "detail": "Three files work together: shared.py defines annotation-inspection predicates (lenient_issubclass, field_annotation_is_scalar, field_annotation_is_sequence, etc.) and version detection used by both v2.py and the rest of the codebase. v2.py provides the ModelField dataclass that wraps a Pydantic TypeAdapter per field, plus get_definitions (which calls GenerateJsonSchema.generate_definitions to build field-to-schema maps), get_schema_from_model_field, create_body_model, and the flat-model traversal helpers. __init__.py re-exports everything so callers import from fastapi._compat without caring about the internal split. The codebase targets Pydantic v2 exclusively; the pydantic.v1 compat helpers (is_pydantic_v1_model_instance, annotation_is_pydantic_v1) exist only to raise a clear error when v1 models are accidentally supplied.",
+      "paths": ["fastapi/_compat/"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "internals.middleware",
+      "parent": "fastapi.internals",
+      "name": "Middleware wrappers",
+      "kind": "group",
+      "summary": "Re-exports Starlette middleware for Cross-Origin Resource Sharing, GZip, trusted-host, HTTPS redirect, and Web Server Gateway Interface, plus AsyncExitStackMiddleware.",
+      "detail": "Six of the seven files in fastapi/middleware/ are single-line re-exports from starlette.middleware: cors.py re-exports CORSMiddleware, gzip.py re-exports GZipMiddleware, httpsredirect.py re-exports HTTPSRedirectMiddleware, trustedhost.py re-exports TrustedHostMiddleware, wsgi.py re-exports WSGIMiddleware, and __init__.py re-exports Starlette's Middleware helper. asyncexitstack.py is the only original middleware: AsyncExitStackMiddleware opens an AsyncExitStack at the top of each request and stores it in the ASGI scope under the key 'fastapi_middleware_astack', ensuring generator-based dependencies that write to that stack are cleaned up when the response finishes.",
+      "paths": ["fastapi/middleware/"],
+      "status": "live",
+      "tech": ["Python", "Starlette", "ASGI"]
+    },
+    {
+      "id": "internals.telemetry",
+      "parent": "fastapi.internals",
+      "name": "OpenTelemetry instrumentation",
+      "kind": "group",
+      "summary": "Auto-configures OpenTelemetry tracing, metrics, and logs exporters from environment variables and instruments every ASGI request and WebSocket connection.",
+      "detail": "_api.py defines TelemetryConfig (a TypedDict), TelemetryData (read-only per-request data for log processors), _RequestTelemetry (mutable per-request state carried in the ASGI scope and OTel context), and the internal helpers _operation/_traced_operation for route-level child spans. _runtime.py reads OTEL_* environment variables at lifespan startup to wire OTLP (OpenTelemetry Protocol) exporters to the global providers; it handles race conditions with other components registering at the same time. _asgi.py provides NativeTelemetry, the callable that wraps each ASGI request, opens a server span, records http.server.request.duration and http.server.active_requests metrics, propagates trace context from request headers, and closes everything after the response. ExceptionTelemetryMiddleware sits outside the route layer to catch exceptions after error handlers have already sent a response. __init__.py re-exports TelemetryConfig, TelemetryData, and get_telemetry_data as the public surface.",
+      "paths": ["fastapi/telemetry/"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry", "ASGI"]
+    },
+
+    {
+      "id": "f:fastapi/_compat/__init__.py",
+      "parent": "internals.compat",
+      "name": "Compat public interface",
+      "kind": "module",
+      "summary": "Re-exports every public symbol from shared.py and v2.py so callers import from fastapi._compat without reaching into sub-modules.",
+      "detail": "Acts as a stable facade. Imports from shared: PYDANTIC_VERSION_MINOR_TUPLE, lenient_issubclass, field_annotation_is_scalar, field_annotation_is_sequence, field_annotation_is_scalar_sequence, is_bytes_or_nonable_bytes_annotation, is_bytes_sequence_annotation, is_uploadfile_or_nonable_uploadfile_annotation, is_uploadfile_sequence_annotation, value_is_sequence, sequence_types, annotation_is_pydantic_v1, is_pydantic_v1_model_instance. Imports from v2: ModelField, PydanticSchemaGenerationError, RequiredParam, Undefined, Url, copy_field_info, create_body_model, evaluate_forwardref, get_cached_model_fields, get_definitions, get_flat_models_from_fields, get_missing_field_error, get_model_name_map, get_schema_from_model_field, is_scalar_field, serialize_sequence_value, with_info_plain_validator_function.",
+      "paths": ["fastapi/_compat/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py",
+      "parent": "internals.compat",
+      "name": "Annotation predicates",
+      "kind": "module",
+      "summary": "Shared annotation-inspection helpers and Pydantic version detection used across the compat layer and by routing and dependency injection.",
+      "detail": "Defines PYDANTIC_VERSION_MINOR_TUPLE (a tuple of integers from pydantic.version.VERSION), sequence_annotation_to_type (mapping Sequence/list/tuple/set/frozenset/deque to their concrete types), and sequence_types. The predicate functions form a hierarchy: lenient_issubclass wraps issubclass with a TypeError guard; _annotation_is_sequence, field_annotation_is_sequence, field_annotation_is_scalar, field_annotation_is_scalar_sequence check annotation shapes including Union and Annotated origins. Upload-file and bytes annotation helpers detect multi-part upload fields. is_pydantic_v1_model_instance and annotation_is_pydantic_v1 guard against accidentally supplying old Pydantic v1 models.",
+      "paths": ["fastapi/_compat/shared.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py",
+      "parent": "internals.compat",
+      "name": "Pydantic v2 implementation",
+      "kind": "module",
+      "summary": "Provides ModelField, schema generation, flat-model traversal, and validation utilities built on Pydantic v2 TypeAdapter and GenerateJsonSchema.",
+      "detail": "ModelField wraps a Pydantic FieldInfo and builds a TypeAdapter on __post_init__, suppressing an UnsupportedFieldAttributeWarning on Pydantic >= 2.12. It exposes validate (calls TypeAdapter.validate_python, re-prefixes error locations), serialize and serialize_json. GenerateJsonSchema extends pydantic.json_schema.GenerateJsonSchema to fix bytes-schema output until an upstream PR is merged. get_definitions builds the field-to-JsonSchemaValue map used by OpenAPI schema generation, handling separate input/output schemas and computed-fields detection. create_body_model dynamically creates a Pydantic BaseModel from a list of ModelFields for multi-field request bodies. evaluate_forwardref wraps pydantic internal forward-reference evaluation with a deprecation fallback for older Pydantic versions.",
+      "paths": ["fastapi/_compat/v2.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "f:fastapi/_compat/v2.py#ModelField",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "ModelField",
+      "kind": "class",
+      "summary": "Wraps a Pydantic FieldInfo and a TypeAdapter to validate and serialize a single field value.",
+      "detail": "A plain dataclass holding field_info, name, mode (validation or serialization), and an optional ConfigDict. __post_init__ constructs a TypeAdapter from Annotated[annotation, *metadata, Field(**attributes)], suppressing UnsupportedFieldAttributeWarning on Pydantic >= 2.12.0. validate() calls TypeAdapter.validate_python(from_attributes=True) and re-prefixes any ValidationError locations via _regenerate_error_with_loc. serialize() calls dump_python; serialize_json() calls dump_json (a single Rust-serialization pass). alias/validation_alias/serialization_alias properties delegate to field_info. __hash__ returns id(self) so instances can be dict keys.",
+      "paths": ["fastapi/_compat/v2.py:113-244"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "@dataclass\nclass ModelField:\n    field_info: FieldInfo\n    name: str\n    mode: Literal['validation', 'serialization'] = 'validation'\n    config: ConfigDict | None = None",
+      "code": "    def validate(self, value, loc=()):\n        try:\n            return (\n                self._type_adapter.validate_python(\n                    value, from_attributes=True),\n                [],\n            )\n        except ValidationError as exc:\n            return None, _regenerate_error_with_loc(\n                errors=exc.errors(include_url=False),\n                loc_prefix=loc\n            )"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#GenerateJsonSchema",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "GenerateJsonSchema",
+      "kind": "class",
+      "summary": "Extends Pydantic's GenerateJsonSchema to correct bytes-field JSON schema output pending an upstream fix.",
+      "detail": "Overrides bytes_schema to return {'type': 'string', 'contentMediaType': 'application/octet-stream'} with an optional 'contentEncoding': 'base64' when the model's ser_json_bytes or val_json_bytes is 'base64'. The class comment references pydantic/pydantic pull request 12841 as the upstream fix that will make this override removable.",
+      "paths": ["fastapi/_compat/v2.py:57-70"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class GenerateJsonSchema(_GenerateJsonSchema):\n    def bytes_schema(self, schema: CoreSchema) -> JsonSchemaValue"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#get_definitions",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "get_definitions()",
+      "kind": "function",
+      "summary": "Builds the field-to-JsonSchemaValue mapping and shared definitions dict for a list of ModelFields, handling separate input/output schemas.",
+      "detail": "Splits fields into validation and serialization lists, calls get_flat_models_from_fields to collect nested BaseModel/Enum types, creates synthetic ModelFields for each, deduplicates to avoid schema collisions with the original fields, then calls GenerateJsonSchema.generate_definitions. Post-processes each definition to strip everything after a form-feed character from description strings (a Pydantic internal convention). Returns (field_mapping, definitions) where field_mapping maps (ModelField, mode) tuples to JsonSchemaValue.",
+      "paths": ["fastapi/_compat/v2.py:309-370"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def get_definitions(\n    *,\n    fields: Sequence[ModelField],\n    model_name_map: ModelNameMap,\n    separate_input_output_schemas: bool = True,\n) -> tuple[dict[tuple[ModelField, Literal['validation', 'serialization']], JsonSchemaValue], dict[str, dict[str, Any]]]",
+      "code": "    schema_generator = GenerateJsonSchema(ref_template=REF_TEMPLATE)\n    validation_fields = [field for field in fields if field.mode == 'validation']\n    serialization_fields = [field for field in fields if field.mode == 'serialization']\n    flat_validation_models = get_flat_models_from_fields(\n        validation_fields, known_models=set()\n    )\n    ...\n    field_mapping, definitions = schema_generator.generate_definitions(inputs=inputs)\n    for item_def in cast(dict[str, dict[str, Any]], definitions).values():\n        if 'description' in item_def:\n            item_description = cast(str, item_def['description']).split('\\f')[0]\n            item_def['description'] = item_description\n    return field_mapping, cast(dict[str, dict[str, Any]], definitions)"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#get_schema_from_model_field",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "get_schema_from_model_field()",
+      "kind": "function",
+      "summary": "Looks up a field's JSON schema from the pre-built field_mapping and injects a title when no $ref is present.",
+      "detail": "Resolves the alias to use (validation_alias or serialization_alias depending on mode), retrieves the JsonSchemaValue from field_mapping for (field, mode), and when the schema has no '$ref' key it adds a 'title' derived from field_info.title or the alias string with underscores replaced by spaces. This is called by OpenAPI schema generation for each route parameter and body field.",
+      "paths": ["fastapi/_compat/v2.py:278-306"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def get_schema_from_model_field(\n    *,\n    field: ModelField,\n    model_name_map: ModelNameMap,\n    field_mapping: dict[...],\n    separate_input_output_schemas: bool = True,\n    field_alias: str | None = None,\n) -> dict[str, Any]"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#create_body_model",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "create_body_model()",
+      "kind": "function",
+      "summary": "Dynamically creates a Pydantic BaseModel class from a list of ModelFields for multi-field request bodies.",
+      "detail": "Calls pydantic.create_model with the field names mapped to (annotation, FieldInfo) pairs, allowing FastAPI to validate a multi-field JSON body as a single Pydantic model and generate the matching OpenAPI schema. Used by dependency injection when multiple body fields are combined into one request body.",
+      "paths": ["fastapi/_compat/v2.py:414-421"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def create_body_model(\n    *, fields: Sequence[ModelField], model_name: str, config: ConfigDict | None = None\n) -> type[BaseModel]"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#evaluate_forwardref",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "evaluate_forwardref()",
+      "kind": "function",
+      "summary": "Resolves a forward reference string using pydantic internals, with a fallback for the deprecated eval_type_lenient API.",
+      "detail": "Tries pydantic._internal._typing_extra.try_eval_type (available since Pydantic v2.10.0b1) first; falls back to eval_type_lenient for older versions. The codebase carries a TODO to remove the fallback once the minimum Pydantic version is advanced.",
+      "paths": ["fastapi/_compat/v2.py:43-54"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def evaluate_forwardref(\n    value: Any,\n    globalns: dict[str, Any] | None = None,\n    localns: dict[str, Any] | None = None,\n) -> Any"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#serialize_sequence_value",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "serialize_sequence_value()",
+      "kind": "function",
+      "summary": "Converts a sequence value to the concrete type (list, tuple, set, etc.) declared in a field's annotation.",
+      "detail": "Resolves the origin type from the field annotation, unwrapping Optional/Union wrappers to find the actual sequence type, then calls sequence_annotation_to_type[origin_type](value) to construct the right concrete sequence. Used by the response serialization path.",
+      "paths": ["fastapi/_compat/v2.py:393-403"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def serialize_sequence_value(*, field: ModelField, value: Any) -> Sequence[Any]"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#get_cached_model_fields",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "get_cached_model_fields()",
+      "kind": "function",
+      "summary": "Returns ModelField list for a BaseModel class, cached with lru_cache to avoid repeated TypeAdapter construction.",
+      "paths": ["fastapi/_compat/v2.py:442-444"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "@lru_cache\ndef get_cached_model_fields(model: type[BaseModel]) -> list[ModelField]"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#lenient_issubclass",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "lenient_issubclass()",
+      "kind": "function",
+      "summary": "issubclass wrapper that returns False for generic aliases instead of raising TypeError.",
+      "detail": "Copies the pattern from pydantic/_internal/_utils.py and adds a TypeGuard return annotation. Checks isinstance(cls, type) first to skip non-class objects, catches TypeError for generic aliases (WithArgsTypes), and re-raises for unexpected errors. Called throughout v2.py and the rest of the codebase wherever a type check is needed on potentially parameterized types.",
+      "paths": ["fastapi/_compat/shared.py:47-55"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def lenient_issubclass(\n    cls: Any, class_or_tuple: type[_T] | tuple[type[_T], ...] | None\n) -> TypeGuard[type[_T]]",
+      "code": "def lenient_issubclass(\n    cls: Any, class_or_tuple: type[_T] | tuple[type[_T], ...] | None\n) -> TypeGuard[type[_T]]:\n    try:\n        return isinstance(cls, type) and issubclass(cls, class_or_tuple)\n    except TypeError:\n        if isinstance(cls, WithArgsTypes):\n            return False\n        raise"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#field_annotation_is_scalar",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "field_annotation_is_scalar()",
+      "kind": "function",
+      "summary": "Returns True when an annotation represents a scalar (non-complex) type including Ellipsis.",
+      "paths": ["fastapi/_compat/shared.py:108-110"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def field_annotation_is_scalar(annotation: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#field_annotation_is_complex",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "field_annotation_is_complex()",
+      "kind": "function",
+      "summary": "Returns True when an annotation is a BaseModel subclass, Mapping, UploadFile, sequence, dataclass, or has a Pydantic core schema hook.",
+      "paths": ["fastapi/_compat/shared.py:92-105"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def field_annotation_is_complex(annotation: object) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#field_annotation_is_sequence",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "field_annotation_is_sequence()",
+      "kind": "function",
+      "summary": "Returns True when an annotation (including Union and Annotated forms) describes a sequence type, excluding str and bytes.",
+      "paths": ["fastapi/_compat/shared.py:64-77"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def field_annotation_is_sequence(annotation: object) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#annotation_is_pydantic_v1",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "annotation_is_pydantic_v1()",
+      "kind": "function",
+      "summary": "Detects whether an annotation contains a pydantic.v1 BaseModel subclass so callers can raise a clear error.",
+      "paths": ["fastapi/_compat/shared.py:210-222"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def annotation_is_pydantic_v1(annotation: Any) -> bool"
+    },
+
+    {
+      "id": "f:fastapi/middleware/asyncexitstack.py",
+      "parent": "internals.middleware",
+      "name": "AsyncExitStack middleware",
+      "kind": "module",
+      "summary": "Opens a per-request AsyncExitStack in the ASGI scope so that generator-based dependencies registered on it are cleaned up when the response finishes.",
+      "detail": "AsyncExitStackMiddleware.__init__ accepts the wrapped app and an optional context_name key (default 'fastapi_middleware_astack'). __call__ uses 'async with AsyncExitStack() as stack' so the stack's cleanup runs after the entire response is sent, then stores the stack in scope[context_name]. FastAPI's dependency injection closes its own generator dependencies in a separate AsyncExitStack; this middleware's stack is used for request-scoped file and resource cleanup declared outside the DI (Dependency Injection) tree.",
+      "paths": ["fastapi/middleware/asyncexitstack.py"],
+      "status": "live",
+      "tech": ["Python", "ASGI", "asyncio"]
+    },
+    {
+      "id": "f:fastapi/middleware/asyncexitstack.py#AsyncExitStackMiddleware",
+      "parent": "f:fastapi/middleware/asyncexitstack.py",
+      "name": "AsyncExitStackMiddleware",
+      "kind": "class",
+      "summary": "ASGI middleware that scopes an AsyncExitStack to the request lifetime via the scope dict.",
+      "paths": ["fastapi/middleware/asyncexitstack.py:8-18"],
+      "status": "live",
+      "tech": ["Python", "ASGI"],
+      "signature": "class AsyncExitStackMiddleware:\n    def __init__(self, app: ASGIApp, context_name: str = 'fastapi_middleware_astack') -> None\n    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None",
+      "code": "class AsyncExitStackMiddleware:\n    def __init__(\n        self, app: ASGIApp, context_name: str = 'fastapi_middleware_astack'\n    ) -> None:\n        self.app = app\n        self.context_name = context_name\n\n    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:\n        async with AsyncExitStack() as stack:\n            scope[self.context_name] = stack\n            await self.app(scope, receive, send)"
+    },
+    {
+      "id": "f:fastapi/middleware/cors.py",
+      "parent": "internals.middleware",
+      "name": "CORS middleware re-export",
+      "kind": "module",
+      "summary": "Re-exports Starlette's CORSMiddleware (Cross-Origin Resource Sharing) so users import from fastapi.middleware.cors.",
+      "detail": "Single-line re-export: `from starlette.middleware.cors import CORSMiddleware as CORSMiddleware`. FastAPI adds no logic; this module exists so the import path fastapi.middleware.cors is stable independently of the Starlette package layout.",
+      "paths": ["fastapi/middleware/cors.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+    {
+      "id": "f:fastapi/middleware/gzip.py",
+      "parent": "internals.middleware",
+      "name": "GZip middleware re-export",
+      "kind": "module",
+      "summary": "Re-exports Starlette's GZipMiddleware for response compression so users import from fastapi.middleware.gzip.",
+      "detail": "Single-line re-export: `from starlette.middleware.gzip import GZipMiddleware as GZipMiddleware`. FastAPI adds no logic; this module provides a stable import path independently of Starlette internals.",
+      "paths": ["fastapi/middleware/gzip.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+    {
+      "id": "f:fastapi/middleware/httpsredirect.py",
+      "parent": "internals.middleware",
+      "name": "HTTPS redirect middleware re-export",
+      "kind": "module",
+      "summary": "Re-exports Starlette's HTTPSRedirectMiddleware so users import from fastapi.middleware.httpsredirect.",
+      "detail": "Single-line re-export from starlette.middleware.httpsredirect. Redirects plain HTTP requests to HTTPS; FastAPI adds no logic and exposes this only to stabilize the import path.",
+      "paths": ["fastapi/middleware/httpsredirect.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+    {
+      "id": "f:fastapi/middleware/trustedhost.py",
+      "parent": "internals.middleware",
+      "name": "Trusted host middleware re-export",
+      "kind": "module",
+      "summary": "Re-exports Starlette's TrustedHostMiddleware so users import from fastapi.middleware.trustedhost.",
+      "detail": "Single-line re-export from starlette.middleware.trustedhost. Rejects requests whose Host header does not match a configured allowed-hosts list; FastAPI adds no logic.",
+      "paths": ["fastapi/middleware/trustedhost.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+    {
+      "id": "f:fastapi/middleware/wsgi.py",
+      "parent": "internals.middleware",
+      "name": "WSGI middleware re-export",
+      "kind": "module",
+      "summary": "Re-exports Starlette's WSGIMiddleware (Web Server Gateway Interface adapter) so users import from fastapi.middleware.wsgi.",
+      "detail": "Single-line re-export from starlette.middleware.wsgi. Adapts a synchronous Web Server Gateway Interface application so it can be mounted inside a FastAPI/ASGI (Asynchronous Server Gateway Interface) app. The file is marked `# pragma: no cover` because WSGI integration requires a WSGI server to test.",
+      "paths": ["fastapi/middleware/wsgi.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette", "WSGI"]
+    },
+
+    {
+      "id": "f:fastapi/telemetry/_api.py",
+      "parent": "internals.telemetry",
+      "name": "Telemetry public API",
+      "kind": "module",
+      "summary": "Defines TelemetryConfig, TelemetryData, and the internal per-request state dataclass plus span helper functions.",
+      "detail": "TelemetryConfig is a TypedDict (total=False) with keys: tracer_provider, meter_provider, logger_provider, tracing, metrics, logs, operation_spans, auto_configure, and exclude. TelemetryData is a public read-only dataclass holding request, websocket, body, values, and errors for log-processor integrations. _RequestTelemetry (private) carries the live span, tracer, logger, route, status code, and mount prefix during a request. _operation/_traced_operation create child spans named 'fastapi.<name>' with 'code.function.name' attribute for endpoint, dependency, serialization, and background-task phases. _route_selected updates the span name and http.route attribute when routing resolves the matched path. _unconfigured detects the OpenTelemetry API's proxy providers so the runtime can skip wiring when no SDK is configured.",
+      "paths": ["fastapi/telemetry/_api.py"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"]
+    },
+    {
+      "id": "f:fastapi/telemetry/_api.py#TelemetryConfig",
+      "parent": "f:fastapi/telemetry/_api.py",
+      "name": "TelemetryConfig",
+      "kind": "class",
+      "summary": "TypedDict of optional settings for FastAPI(telemetry={...}) controlling which signals are emitted and which providers to use.",
+      "detail": "All keys are optional. tracing, metrics, logs, and operation_spans default to True. auto_configure defaults to False unless FASTAPI_OTEL_AUTO_CONFIGURE=true is set. exclude accepts a callable that receives the ASGI scope and returns True to skip telemetry. tracer_provider, meter_provider, logger_provider override the global OpenTelemetry providers when supplied.",
+      "paths": ["fastapi/telemetry/_api.py:35-85"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "class TelemetryConfig(TypedDict, total=False):\n    tracer_provider: TracerProvider | None\n    meter_provider: MeterProvider | None\n    logger_provider: LoggerProvider | None\n    tracing: bool\n    metrics: bool\n    logs: bool\n    operation_spans: bool\n    auto_configure: bool\n    exclude: Callable[[MutableMapping[str, Any]], bool] | None"
+    },
+    {
+      "id": "f:fastapi/telemetry/_api.py#TelemetryData",
+      "parent": "f:fastapi/telemetry/_api.py",
+      "name": "TelemetryData",
+      "kind": "class",
+      "summary": "Public read-only per-request data dataclass that log processors can read from an OpenTelemetry context.",
+      "detail": "Fields: request (Request or None), websocket (WebSocket or None), body (the raw body before parameter validation), values (parsed arguments after dependency resolution), errors (validation errors). Populated by FastAPI as the request progresses; becomes None after the request finishes. Integrations read it synchronously via get_telemetry_data().",
+      "paths": ["fastapi/telemetry/_api.py:88-114"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "@dataclass(kw_only=True)\nclass TelemetryData:\n    request: Request | None = None\n    websocket: WebSocket | None = None\n    body: Any = None\n    values: dict[str, Any] | None = None\n    errors: Sequence[Any] | None = None"
+    },
+    {
+      "id": "f:fastapi/telemetry/_api.py#get_telemetry_data",
+      "parent": "f:fastapi/telemetry/_api.py",
+      "name": "get_telemetry_data()",
+      "kind": "function",
+      "summary": "Public helper that reads the TelemetryData for the current request from the OpenTelemetry context.",
+      "paths": ["fastapi/telemetry/_api.py:139-148"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "def get_telemetry_data(context: Context | None = None) -> TelemetryData | None"
+    },
+    {
+      "id": "f:fastapi/telemetry/_api.py#_operation",
+      "parent": "f:fastapi/telemetry/_api.py",
+      "name": "_operation()",
+      "kind": "function",
+      "summary": "Returns a context manager that opens a child span for a named operation (endpoint, dependency, serialization, background_task) if a tracer is active.",
+      "detail": "Retrieves the current _RequestTelemetry from OTel context; returns a no-op nullcontext if telemetry is off or operation_spans is False. Otherwise delegates to _traced_operation which starts a span named 'fastapi.<name>' with 'code.function.name' set, marks it ERROR only for unhandled exceptions (not for HTTPException or validation errors), and closes the span on exit.",
+      "paths": ["fastapi/telemetry/_api.py:190-198"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "def _operation(\n    *, name: str, function: Callable[..., Any] | None = None\n) -> AbstractContextManager[None]"
+    },
+    {
+      "id": "f:fastapi/telemetry/_api.py#_route_selected",
+      "parent": "f:fastapi/telemetry/_api.py",
+      "name": "_route_selected()",
+      "kind": "function",
+      "summary": "Updates the active span's name and http.route attribute when routing resolves the matched path template.",
+      "detail": "Called from routing.py when a route is matched. Reads _RequestTelemetry from scope['fastapi.telemetry'], builds the full route string accounting for mount prefixes, sets request_telemetry.route, and calls span.set_attribute('http.route', ...) and span.update_name('{method} {route}'). For mount routes it trims the /{path} suffix and accumulates the prefix.",
+      "paths": ["fastapi/telemetry/_api.py:247-264"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "def _route_selected(\n    *, scope: MutableMapping[str, Any], path: str | None, mount: bool = False\n) -> None",
+      "code": "def _route_selected(*, scope, path, mount=False):\n    rt = scope.get('fastapi.telemetry')\n    if not isinstance(rt, _RequestTelemetry):\n        return\n    if mount:\n        path = path.removesuffix('/{path}')\n        rt._mount_prefix += path\n        rt.route = rt._mount_prefix + '/{path}'\n    else:\n        rt.route = rt._mount_prefix + path\n    if rt.span is not None:\n        rt.span.set_attribute('http.route', rt.route)\n        rt.span.update_name(\n            f'{rt.span_method} {rt.route}'\n        )"
+    },
+    {
+      "id": "f:fastapi/telemetry/_api.py#_unconfigured",
+      "parent": "f:fastapi/telemetry/_api.py",
+      "name": "_unconfigured()",
+      "kind": "function",
+      "summary": "Returns True when a provider is one of the OpenTelemetry API's known proxy/deferred providers, meaning no SDK has been registered.",
+      "detail": "Checks (cls.__module__, cls.__name__) against the frozen set _DEFERRED_PROVIDERS containing the proxy classes for trace, metrics, and logs. This avoids using private OpenTelemetry API methods and limits the bridge to known proxy types, never treating vendor providers or SDK implementations as unconfigured.",
+      "paths": ["fastapi/telemetry/_api.py:276-280"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "def _unconfigured(provider: Any) -> bool"
+    },
+
+    {
+      "id": "f:fastapi/telemetry/_asgi.py",
+      "parent": "internals.telemetry",
+      "name": "ASGI instrumentation",
+      "kind": "module",
+      "summary": "Provides NativeTelemetry, the per-request callable that records spans, metrics, and log events for each HTTP and WebSocket connection.",
+      "detail": "NativeTelemetry holds providers and instrument handles lazily (re-creating them when the meter provider changes). Its __call__ method: extracts trace context from request headers via _HeadersGetter, starts a SERVER span with url.scheme, http.request.method, url.path, url.query (redacting sensitive parameters), and server.address/port attributes; records http.server.request.duration (histogram, seconds) and http.server.active_requests (UpDownCounter); wraps send to capture the status code from http.response.start and trigger finish() after the last body chunk or trailer; calls finish() on BaseException too. ExceptionTelemetryMiddleware sits outside the route layer and re-records exceptions that bubble past error handlers. _SENSITIVE_QUERY_PARAMETERS lists five known credential parameter names that are replaced with 'REDACTED' in span attributes.",
+      "paths": ["fastapi/telemetry/_asgi.py"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry", "ASGI"],
+      "facts": [
+        "Duration histogram uses 14 explicit buckets from 0.005s to 10.0s",
+        "Semantic convention schema URL: https://opentelemetry.io/schemas/1.44.0",
+        "Sensitive query params redacted: X-Amz-Signature, X-Amz-Credential, X-Amz-Security-Token, sig, X-Goog-Signature",
+        "OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS env var overrides the default HTTP method set"
+      ]
+    },
+    {
+      "id": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+      "parent": "f:fastapi/telemetry/_asgi.py",
+      "name": "NativeTelemetry",
+      "kind": "class",
+      "summary": "Per-app callable that wraps each ASGI request with OpenTelemetry spans, metrics, and log events.",
+      "detail": "Constructed once per FastAPI app instance with a TelemetryConfig. enabled() checks whether any provider is configured. _instruments() lazily creates or replaces the duration Histogram and active_requests UpDownCounter when the meter provider changes. _get_tracer() similarly caches the Tracer per provider. __call__ is the main path: it evaluates tracing/metering/logging flags, opens parent context, starts span, calls wrapped_send/wrapped_receive to intercept response messages, and cleans up in a finally block that detaches OTel context and clears scope state.",
+      "paths": ["fastapi/telemetry/_asgi.py:157-458"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry", "ASGI"],
+      "signature": "class NativeTelemetry:\n    def __init__(self, config: TelemetryConfig) -> None\n    def enabled(self) -> bool\n    async def __call__(self, *, app, scope, receive, send, legacy_otel=False) -> None",
+      "code": "    async def __call__(self, *, app, scope, receive, send,\n                       legacy_otel=False):\n        config = self.config\n        if config['exclude'] is not None and config['exclude'](scope):\n            scope['fastapi.telemetry'] = None\n            token = otel_context.attach(\n                otel_context.set_value(_REQUEST_TELEMETRY_KEY, None)\n            )\n            try:\n                await app(scope, receive, send)\n            finally:\n                otel_context.detach(token)\n                scope.pop('fastapi.telemetry', None)\n            return"
+    },
+    {
+      "id": "f:fastapi/telemetry/_asgi.py#ExceptionTelemetryMiddleware",
+      "parent": "f:fastapi/telemetry/_asgi.py",
+      "name": "ExceptionTelemetryMiddleware",
+      "kind": "class",
+      "summary": "ASGI middleware that records exceptions that propagate past the route layer before error handlers complete the response.",
+      "detail": "Wraps the inner app in a try/except that calls the internal _exception() helper, which checks whether the exception has already been seen (to avoid double-recording), then emits a log event with the exception details and either 'http.server.request.exception' or 'fastapi.websocket.exception' as the event name. Normal WebSocket disconnects (code 1000 or 1001) are silently skipped.",
+      "paths": ["fastapi/telemetry/_asgi.py:143-154"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry", "ASGI"],
+      "signature": "class ExceptionTelemetryMiddleware:\n    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None"
+    },
+    {
+      "id": "f:fastapi/telemetry/_asgi.py#_HeadersGetter",
+      "parent": "f:fastapi/telemetry/_asgi.py",
+      "name": "_HeadersGetter",
+      "kind": "class",
+      "summary": "OpenTelemetry TextMap propagator Getter implementation for Starlette Headers that handles multi-value and baggage headers.",
+      "detail": "get() calls carrier.getlist(key); for the 'baggage' key it joins multiple values with commas as the baggage propagator reads only the first value. keys() delegates to carrier.keys(). Registered as a module-level singleton _HEADERS_GETTER used in propagate.extract during span creation.",
+      "paths": ["fastapi/telemetry/_asgi.py:55-68"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "class _HeadersGetter(Getter[Headers]):\n    def get(self, carrier: Headers, key: str) -> list[str] | None\n    def keys(self, carrier: Headers) -> list[str]"
+    },
+
+    {
+      "id": "f:fastapi/telemetry/_runtime.py",
+      "parent": "internals.telemetry",
+      "name": "Telemetry auto-configuration",
+      "kind": "module",
+      "summary": "Reads OTEL_* environment variables at ASGI lifespan startup and wires OTLP exporters to the tracing, metrics, and logs providers.",
+      "detail": "_configure_from_environment is the main function: it checks FASTAPI_OTEL_AUTO_CONFIGURE and OTEL_SDK_DISABLED, resolves OTLP endpoints per signal via _export_endpoint (reading OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT or the base OTEL_EXPORTER_OTLP_ENDPOINT with /v1/{signal} appended), then for each enabled signal creates a BatchSpanProcessor/PeriodicExportingMetricReader/BatchLogRecordProcessor backed by the matching OTLP exporter. It handles race conditions: if another component registers the global provider concurrently it closes the unused pipeline and attaches a new component to theirs. _owned tracks providers and components FastAPI created; atexit.register(_shutdown) shuts them down on process exit. lifespan wraps the ASGI lifespan protocol, calling _configure_from_environment on the startup message and _flush on shutdown. _registration_provider contains a known workaround for a Logfire meter wrapper that does not expose add_metric_reader().",
+      "paths": ["fastapi/telemetry/_runtime.py"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "facts": [
+        "Only OTEL_{signal}_EXPORTER=otlp (or none) is supported; other values raise FastAPIError",
+        "Only OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf is supported; grpc raises FastAPIError",
+        "OTEL_SDK_DISABLED=true skips all auto-configuration",
+        "FASTAPI_OTEL_AUTO_CONFIGURE=true enables auto-configuration when not set via TelemetryConfig"
+      ]
+    },
+    {
+      "id": "f:fastapi/telemetry/_runtime.py#_configure_from_environment",
+      "parent": "f:fastapi/telemetry/_runtime.py",
+      "name": "_configure_from_environment()",
+      "kind": "function",
+      "summary": "Adds OTLP exporters from OTEL_* environment variables to the selected OpenTelemetry providers, called at ASGI lifespan startup.",
+      "detail": "Protected by a threading.RLock for concurrent startup safety. For each signal (TRACES, METRICS, LOGS) calls _export_endpoint to resolve the endpoint URL. Imports opentelemetry.sdk and otlp exporter packages on demand (raises FastAPIError with install instructions if missing). For each signal: if the global provider is unconfigured it creates a fresh SDK provider, calls set_tracer_provider/set_meter_provider/set_logger_provider, handles a race condition by shutting down the unused provider and attaching to the winner. If a provider already exists it calls add_span_processor/add_metric_reader/add_log_record_processor. Contains a special case for Logfire's ProxyMeterProvider that exposes add_metric_reader on the wrapped SDK provider.",
+      "paths": ["fastapi/telemetry/_runtime.py:85-207"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "def _configure_from_environment(config: TelemetryConfig) -> None",
+      "code": "    with _lock:\n        signals = [\n            ('TRACES', config['tracing'], config['tracer_provider']),\n            ('METRICS', config['metrics'], config['meter_provider']),\n            ('LOGS', config['logs'], config['logger_provider']),\n        ]\n        requested = [\n            (signal, provider, endpoint)\n            for signal, enabled, provider in signals\n            if enabled and (endpoint := _export_endpoint(signal)) is not None\n        ]"
+    },
+    {
+      "id": "f:fastapi/telemetry/_runtime.py#lifespan",
+      "parent": "f:fastapi/telemetry/_runtime.py",
+      "name": "lifespan()",
+      "kind": "function",
+      "summary": "ASGI lifespan handler that triggers auto-configuration on startup and flushes owned exporters on shutdown.",
+      "detail": "Wraps the receive coroutine to intercept 'lifespan.startup' and call _configure_from_environment (swallowing exceptions so telemetry failures never prevent app startup). Wraps the send coroutine to call run_sync(_flush) before forwarding 'lifespan.shutdown.complete', 'lifespan.shutdown.failed', or 'lifespan.startup.failed' messages. Uses anyio.to_thread.run_sync to flush from async context since SDK flush calls are synchronous.",
+      "paths": ["fastapi/telemetry/_runtime.py:210-238"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry", "ASGI"],
+      "signature": "async def lifespan(\n    *, config: TelemetryConfig, app: ASGIApp, scope: Scope, receive: Receive, send: Send\n) -> None",
+      "code": "    async def wrapped_receive() -> Message:\n        message = await receive()\n        if message['type'] == 'lifespan.startup':\n            try:\n                _configure_from_environment(config)\n            except Exception as exc:\n                logger.warning(\n                    'FastAPI automatic telemetry configuration failed: %s', exc\n                )\n        return message"
+    },
+    {
+      "id": "f:fastapi/telemetry/_runtime.py#_export_endpoint",
+      "parent": "f:fastapi/telemetry/_runtime.py",
+      "name": "_export_endpoint()",
+      "kind": "function",
+      "summary": "Resolves the OTLP endpoint URL for a signal from OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT or the base OTEL_EXPORTER_OTLP_ENDPOINT.",
+      "detail": "Returns None if no endpoint is set or if OTEL_{signal}_EXPORTER=none. Raises FastAPIError if the exporter is set to a value other than 'otlp' or the protocol is not 'http/protobuf'. Validates the parsed URL has an http or https scheme and a non-empty hostname. When using the base endpoint it appends /v1/{signal.lower()} (e.g. /v1/traces).",
+      "paths": ["fastapi/telemetry/_runtime.py:42-70"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "def _export_endpoint(signal: str) -> str | None"
+    },
+
+    {
+      "id": "f:fastapi/utils.py",
+      "parent": "fastapi.internals",
+      "name": "Shared utilities",
+      "kind": "module",
+      "summary": "Miscellaneous helpers used across FastAPI: route ID generation, response field creation, model field construction, and dict merging.",
+      "detail": "create_model_field is the primary entry point for other areas: it validates that an annotation is not a Pydantic v1 model, constructs a FieldInfo if none is supplied, and delegates to v2.ModelField, translating PydanticSchemaGenerationError into a user-readable FastAPIError. generate_unique_id produces a URL-safe operation ID from route name, path, and HTTP method. generate_operation_id_for_path is a deprecated wrapper that emits FastAPIDeprecationWarning. is_body_allowed_for_status_code checks whether a status code permits a response body per the OpenAPI specification. get_path_param_names extracts path parameter names with a simple regex. deep_dict_update recursively merges two dicts, appending lists rather than replacing. get_value_or_default walks a priority list of DefaultPlaceholder / actual values.",
+      "paths": ["fastapi/utils.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/utils.py#create_model_field",
+      "parent": "f:fastapi/utils.py",
+      "name": "create_model_field()",
+      "kind": "function",
+      "summary": "Central factory for ModelField used by routing, OpenAPI generation, and dependency injection to build typed parameter fields.",
+      "detail": "Guards against Pydantic v1 model annotations via annotation_is_pydantic_v1. Accepts an optional FieldInfo or constructs one from type_, default, and alias. Delegates to v2.ModelField(...) and translates PydanticSchemaGenerationError into FastAPIError with the _invalid_args_message hint pointing users to the response_model=None escape hatch.",
+      "paths": ["fastapi/utils.py:58-77"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def create_model_field(\n    name: str,\n    type_: Any,\n    default: Any | None = Undefined,\n    field_info: FieldInfo | None = None,\n    alias: str | None = None,\n    mode: Literal['validation', 'serialization'] = 'validation',\n) -> ModelField",
+      "code": "def create_model_field(name, type_, default=Undefined,\n                       field_info=None, alias=None,\n                       mode='validation'):\n    if annotation_is_pydantic_v1(type_):\n        raise PydanticV1NotSupportedError(f'{type_!r}')\n    field_info = field_info or FieldInfo(\n        annotation=type_, default=default, alias=alias\n    )\n    try:\n        return v2.ModelField(mode=mode, name=name,\n                             field_info=field_info)\n    except PydanticSchemaGenerationError:\n        raise FastAPIError(\n            _invalid_args_message.format(type_=type_)\n        ) from None"
+    },
+    {
+      "id": "f:fastapi/utils.py#generate_unique_id",
+      "parent": "f:fastapi/utils.py",
+      "name": "generate_unique_id()",
+      "kind": "function",
+      "summary": "Generates a URL-safe operation ID string from a route's name, path format, and first HTTP method.",
+      "detail": "Concatenates route.name and route.path_format, replaces all non-alphanumeric characters with underscores via regex, and appends the first method lowercased. This is the default generate_unique_id callback used by APIRouter and can be overridden at the router or app level.",
+      "paths": ["fastapi/utils.py:95-100"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def generate_unique_id(route: 'APIRoute') -> str"
+    },
+    {
+      "id": "f:fastapi/utils.py#deep_dict_update",
+      "parent": "f:fastapi/utils.py",
+      "name": "deep_dict_update()",
+      "kind": "function",
+      "summary": "Recursively merges update_dict into main_dict, appending lists rather than replacing them.",
+      "paths": ["fastapi/utils.py:103-118"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None"
+    },
+    {
+      "id": "f:fastapi/utils.py#get_value_or_default",
+      "parent": "f:fastapi/utils.py",
+      "name": "get_value_or_default()",
+      "kind": "function",
+      "summary": "Returns the first non-DefaultPlaceholder from a priority list, or the first item if all are placeholders.",
+      "paths": ["fastapi/utils.py:121-136"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_value_or_default(\n    first_item: DefaultPlaceholder | DefaultType,\n    *extra_items: DefaultPlaceholder | DefaultType,\n) -> DefaultPlaceholder | DefaultType"
+    },
+    {
+      "id": "f:fastapi/utils.py#is_body_allowed_for_status_code",
+      "parent": "f:fastapi/utils.py",
+      "name": "is_body_allowed_for_status_code()",
+      "kind": "function",
+      "summary": "Returns False for HTTP status codes that must not carry a response body (1xx, 204, 205, 304).",
+      "paths": ["fastapi/utils.py:26-40"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def is_body_allowed_for_status_code(status_code: int | str | None) -> bool"
+    },
+
+    {
+      "id": "f:fastapi/_compat/shared.py#value_is_sequence",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "value_is_sequence()",
+      "kind": "function",
+      "summary": "Returns True when a value is an instance of a sequence type (list, tuple, set, frozenset, deque) but not str or bytes.",
+      "detail": "Uses isinstance(value, sequence_types) and excludes str and bytes explicitly. sequence_types is the tuple of keys from sequence_annotation_to_type, so it covers list, tuple, set, frozenset, deque, and collections.abc.Sequence. Called by dependency injection when deciding whether a resolved parameter value should be passed through the sequence serialization path.",
+      "paths": ["fastapi/_compat/shared.py:80-81"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def value_is_sequence(value: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#field_annotation_is_scalar_sequence",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "field_annotation_is_scalar_sequence()",
+      "kind": "function",
+      "summary": "Returns True when an annotation is a sequence of scalar (non-complex) element types, handling Annotated, Union, and Optional wrappers.",
+      "detail": "Unwraps Annotated by recursing on the first argument. For Union/UnionType it requires at least one scalar-sequence branch and all other branches to be scalar (None is scalar). For plain sequence annotations it verifies every type argument is scalar via field_annotation_is_scalar. Used by routing and DI to identify query-parameter fields that accept multiple values.",
+      "paths": ["fastapi/_compat/shared.py:113-131"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def field_annotation_is_scalar_sequence(annotation: object) -> bool",
+      "code": "def field_annotation_is_scalar_sequence(annotation: object) -> bool:\n    origin = get_origin(annotation)\n    if origin is Annotated:\n        return field_annotation_is_scalar_sequence(get_args(annotation)[0])\n    if origin is Union or origin is UnionType:\n        ok = False\n        for arg in get_args(annotation):\n            if field_annotation_is_scalar_sequence(arg):\n                ok = True\n            elif not field_annotation_is_scalar(arg):\n                return False\n        return ok\n    return field_annotation_is_sequence(annotation) and all(\n        field_annotation_is_scalar(a) for a in get_args(annotation)\n    )"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#is_bytes_or_nonable_bytes_annotation",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "is_bytes_or_nonable_bytes_annotation()",
+      "kind": "function",
+      "summary": "Returns True when an annotation is bytes or Optional[bytes] (a Union containing bytes).",
+      "detail": "Direct lenient_issubclass check first. For Union/UnionType iterates args and returns True if any is a bytes subclass. Used by is_bytes_sequence_annotation and by routing to identify binary upload fields.",
+      "paths": ["fastapi/_compat/shared.py:134-142"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def is_bytes_or_nonable_bytes_annotation(annotation: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#is_uploadfile_or_nonable_uploadfile_annotation",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "is_uploadfile_or_nonable_uploadfile_annotation()",
+      "kind": "function",
+      "summary": "Returns True when an annotation is UploadFile or Optional[UploadFile], used to detect single-file form fields.",
+      "detail": "Same structure as is_bytes_or_nonable_bytes_annotation: direct lenient_issubclass(annotation, UploadFile) first, then Union/UnionType iteration. Used by routing and DI to distinguish single-file upload parameters from plain bytes parameters.",
+      "paths": ["fastapi/_compat/shared.py:145-153"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def is_uploadfile_or_nonable_uploadfile_annotation(annotation: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#is_bytes_sequence_annotation",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "is_bytes_sequence_annotation()",
+      "kind": "function",
+      "summary": "Returns True when an annotation is a sequence of bytes (or Optional[bytes]) elements, for multi-chunk binary upload fields.",
+      "detail": "For Union/UnionType returns True if at least one branch is a bytes sequence. For plain annotations: requires field_annotation_is_sequence to be True and every type argument to satisfy is_bytes_or_nonable_bytes_annotation. Used by routing to route form fields to the bytes-sequence code path.",
+      "paths": ["fastapi/_compat/shared.py:156-168"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def is_bytes_sequence_annotation(annotation: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#is_uploadfile_sequence_annotation",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "is_uploadfile_sequence_annotation()",
+      "kind": "function",
+      "summary": "Returns True when an annotation is a sequence of UploadFile elements, detecting multi-file form upload fields.",
+      "detail": "Mirror of is_bytes_sequence_annotation but checks is_uploadfile_or_nonable_uploadfile_annotation instead of bytes. For Union/UnionType at least one branch must be an UploadFile sequence. Used by routing and dependency injection to handle List[UploadFile] form fields.",
+      "paths": ["fastapi/_compat/shared.py:171-183"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def is_uploadfile_sequence_annotation(annotation: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#is_pydantic_v1_model_instance",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "is_pydantic_v1_model_instance()",
+      "kind": "function",
+      "summary": "Returns True when an object is an instance of pydantic.v1.BaseModel, used to give a clear error for stale v1 models.",
+      "detail": "Attempts to import pydantic.v1 (available inside the pydantic 2.x package as a compatibility shim), suppresses UserWarning during the import, and calls isinstance(obj, v1.BaseModel). Falls back to False when pydantic.v1 is not installed. Marked for removal once pydantic fully removes the pydantic.v1 compat module.",
+      "paths": ["fastapi/_compat/shared.py:186-195"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def is_pydantic_v1_model_instance(obj: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/shared.py#is_pydantic_v1_model_class",
+      "parent": "f:fastapi/_compat/shared.py",
+      "name": "is_pydantic_v1_model_class()",
+      "kind": "function",
+      "summary": "Returns True when a class is a pydantic.v1.BaseModel subclass, used by annotation_is_pydantic_v1 to guard against v1 response models.",
+      "detail": "Same import pattern as is_pydantic_v1_model_instance: imports pydantic.v1 with a UserWarning suppression, then calls lenient_issubclass(cls, v1.BaseModel). Called by annotation_is_pydantic_v1, which in turn is called by create_model_field in utils.py.",
+      "paths": ["fastapi/_compat/shared.py:198-207"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def is_pydantic_v1_model_class(cls: Any) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#is_scalar_field",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "is_scalar_field()",
+      "kind": "function",
+      "summary": "Returns True when a ModelField annotation is scalar and its FieldInfo is not a Body subclass.",
+      "detail": "Imports fastapi.params locally to avoid a circular import. Calls shared.field_annotation_is_scalar on field.field_info.annotation and verifies the FieldInfo is not an instance of params.Body. Used by dependency injection to decide whether a parameter needs JSON body parsing or simple string coercion.",
+      "paths": ["fastapi/_compat/v2.py:373-378"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def is_scalar_field(field: ModelField) -> bool"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#copy_field_info",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "copy_field_info()",
+      "kind": "function",
+      "summary": "Creates a new FieldInfo that merges annotation-derived metadata into a copy of an existing FieldInfo.",
+      "detail": "Instantiates a merged_field_info via cls.from_annotation(annotation) to get Pydantic's default metadata for the type, then copies the original field_info and iterates asdict(merged_field_info)['attributes'] to overwrite attribute values, _attributes_set, metadata, and annotation. This preserves explicit field settings while refreshing type-derived constraints. Called by dependency injection when rebinding a field to a narrower annotation.",
+      "paths": ["fastapi/_compat/v2.py:381-390"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def copy_field_info(*, field_info: FieldInfo, annotation: Any) -> FieldInfo"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#get_missing_field_error",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "get_missing_field_error()",
+      "kind": "function",
+      "summary": "Builds a Pydantic-style error dict for a missing required field at the given location tuple.",
+      "detail": "Creates a ValidationError via ValidationError.from_exception_data with type 'missing', extracts the first error dict (which includes message text, url, type, loc), then sets input to None to avoid leaking the original input value. Returns a dict compatible with the errors list FastAPI collects and later raises as RequestValidationError.",
+      "paths": ["fastapi/_compat/v2.py:406-411"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def get_missing_field_error(loc: tuple[int | str, ...]) -> dict[str, Any]",
+      "code": "def get_missing_field_error(loc: tuple[int | str, ...]) -> dict[str, Any]:\n    error = ValidationError.from_exception_data(\n        'Field required', [{'type': 'missing', 'loc': loc, 'input': {}}]\n    ).errors(include_url=False)[0]\n    error['input'] = None\n    return error"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#get_model_fields",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "get_model_fields()",
+      "kind": "function",
+      "summary": "Returns a list of ModelFields built from a BaseModel's model_fields dict, using the model config for scalar fields.",
+      "detail": "Iterates model.model_fields.items(). For each field, if the type is a BaseModel subclass, dict, or dataclass, model_config is set to None (since those types carry their own config). Otherwise model_config is set to model.model_config so that JSON mode and serialization settings propagate. Builds and returns ModelField instances. Called by get_flat_models_from_model and by get_cached_model_fields (via lru_cache).",
+      "paths": ["fastapi/_compat/v2.py:424-439"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def get_model_fields(model: type[BaseModel]) -> list[ModelField]"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#normalize_name",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "normalize_name()",
+      "kind": "function",
+      "summary": "Replaces any character outside a-z, A-Z, 0-9, dot, hyphen, and underscore with an underscore in a model name.",
+      "detail": "Single re.sub call. Used by get_model_name_map to build stable schema definition keys from model class names, ensuring the resulting OpenAPI component names are URL-safe.",
+      "paths": ["fastapi/_compat/v2.py:454-455"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def normalize_name(name: str) -> str"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#get_model_name_map",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "get_model_name_map()",
+      "kind": "function",
+      "summary": "Returns a dict mapping each BaseModel/Enum type to its normalized name string for use as an OpenAPI component key.",
+      "detail": "Builds a name-to-model map using normalize_name, then inverts it. Duplicate class names from different modules will silently overwrite each other (last writer wins). Called by OpenAPI schema generation to populate the components/schemas dict.",
+      "paths": ["fastapi/_compat/v2.py:458-463"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_model_name_map(unique_models: TypeModelSet) -> dict[TypeModelOrEnum, str]"
+    },
+    {
+      "id": "f:fastapi/_compat/v2.py#get_flat_models_from_model",
+      "parent": "f:fastapi/_compat/v2.py",
+      "name": "get_flat_models_from_model()",
+      "kind": "function",
+      "summary": "Collects the transitive closure of BaseModel and Enum types referenced by a model's fields, recursively.",
+      "detail": "Calls get_model_fields(model) to get the top-level fields, then delegates to get_flat_models_from_fields with the known_models accumulator set. get_flat_models_from_fields recurses into nested BaseModel and Enum field annotations via get_flat_models_from_annotation. Returns the populated known_models set. Used by get_definitions to build the full set of types that need schema entries.",
+      "paths": ["fastapi/_compat/v2.py:466-472"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def get_flat_models_from_model(\n    model: type[BaseModel], known_models: TypeModelSet | None = None\n) -> TypeModelSet"
+    },
+    {
+      "id": "f:fastapi/utils.py#get_path_param_names",
+      "parent": "f:fastapi/utils.py",
+      "name": "get_path_param_names()",
+      "kind": "function",
+      "summary": "Extracts the set of path parameter names from a URL path template string using a simple regex.",
+      "detail": "Uses re.findall('{(.*?)}', path) to collect all brace-delimited names. The regex is non-greedy so nested braces (not used by FastAPI path templates) would yield the innermost content. Called by dependency resolution to identify which parameters come from the path.",
+      "paths": ["fastapi/utils.py:43-44"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_path_param_names(path: str) -> set[str]"
+    },
+    {
+      "id": "f:fastapi/utils.py#generate_operation_id_for_path",
+      "parent": "f:fastapi/utils.py",
+      "name": "generate_operation_id_for_path()",
+      "kind": "function",
+      "summary": "Deprecated helper that builds an operation ID from name, path, and method; replaced by generate_unique_id.",
+      "detail": "Emits FastAPIDeprecationWarning with stacklevel=2 and is marked pragma: nocover because it is no longer called internally. The logic is identical to generate_unique_id: concatenates name and path, replaces non-word characters with underscores, appends the HTTP method lowercased. Kept only for external callers that import it directly.",
+      "paths": ["fastapi/utils.py:80-92"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def generate_operation_id_for_path(*, name: str, path: str, method: str) -> str"
+    },
+    {
+      "id": "f:fastapi/telemetry/_asgi.py#NativeTelemetry.enabled",
+      "parent": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+      "name": "NativeTelemetry.enabled()",
+      "kind": "function",
+      "summary": "Returns True when at least one OpenTelemetry signal (tracing, metrics, or logs) has an SDK provider configured.",
+      "detail": "For each of the three signals (tracing, metrics, logs), checks whether the config has an explicit provider or whether the global provider is not an unconfigured proxy. Calls _unconfigured() from _api.py for the global provider check. Used by the FastAPI app to decide whether to call NativeTelemetry at all, skipping it entirely when no SDK is registered.",
+      "paths": ["fastapi/telemetry/_asgi.py:174-196"],
+      "status": "live",
+      "tech": ["Python", "OpenTelemetry"],
+      "signature": "def enabled(self) -> bool",
+      "code": "    def enabled(self) -> bool:\n        config = self.config\n        return bool(\n            (config['tracing'] and (\n                config['tracer_provider'] is not None\n                or not _unconfigured(trace.get_tracer_provider())))\n            or (config['metrics'] and (\n                config['meter_provider'] is not None\n                or not _unconfigured(metrics.get_meter_provider())))\n            or (config['logs'] and (\n                config['logger_provider'] is not None\n                or not _unconfigured(_logs.get_logger_provider())))\n        )"
+    },
+    {
+      "id": "d:tests/test_telemetry",
+      "parent": "internals.telemetry",
+      "name": "Telemetry test suite",
+      "kind": "test",
+      "summary": "Ten test modules covering HTTP tracing/metrics, WebSocket spans, exception recording, background task spans, operation spans, environment-variable auto-configuration, and third-party integrations.",
+      "paths": [
+        "tests/test_telemetry/test_http.py",
+        "tests/test_telemetry/test_websockets.py",
+        "tests/test_telemetry/test_exceptions.py",
+        "tests/test_telemetry/test_background.py",
+        "tests/test_telemetry/test_operations.py",
+        "tests/test_telemetry/test_runtime.py",
+        "tests/test_telemetry/test_environment_integrations.py",
+        "tests/test_telemetry/test_integrations.py",
+        "tests/test_telemetry/test_native_integrations.py",
+        "tests/test_telemetry/test_semantic_conventions.py",
+        "tests/test_telemetry/test_tracer.py",
+        "tests/test_telemetry/test_data.py"
+      ],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:tests/test_compat.py",
+      "parent": "internals.compat",
+      "name": "Compat test",
+      "kind": "test",
+      "summary": "Tests for the _compat layer including ModelField validation, error location prefixing, and annotation predicate helpers.",
+      "paths": ["tests/test_compat.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:tests/test_schema_compat_pydantic_v2.py",
+      "parent": "internals.compat",
+      "name": "Schema compat test",
+      "kind": "test",
+      "summary": "Tests for get_definitions and get_schema_from_model_field against Pydantic v2 models including computed fields and separate input/output schemas.",
+      "paths": ["tests/test_schema_compat_pydantic_v2.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    }
+  ],
+
+  "edges": [
+    {
+      "from": "f:fastapi/_compat/__init__.py",
+      "to": "f:fastapi/_compat/shared.py",
+      "kind": "reads",
+      "label": "re-exports all annotation predicates",
+      "evidence": "fastapi/_compat/__init__.py:1"
+    },
+    {
+      "from": "f:fastapi/_compat/__init__.py",
+      "to": "f:fastapi/_compat/v2.py",
+      "kind": "reads",
+      "label": "re-exports ModelField and schema helpers",
+      "evidence": "fastapi/_compat/__init__.py:22"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py",
+      "to": "f:fastapi/_compat/shared.py",
+      "kind": "calls",
+      "label": "calls lenient_issubclass and annotation predicates",
+      "evidence": "fastapi/_compat/v2.py:18"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#ModelField",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "builds TypeAdapter per field on __post_init__",
+      "evidence": "fastapi/_compat/v2.py:163"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#GenerateJsonSchema",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "extends GenerateJsonSchema to fix bytes schema",
+      "evidence": "fastapi/_compat/v2.py:57"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#get_definitions",
+      "to": "f:fastapi/_compat/v2.py#GenerateJsonSchema",
+      "kind": "calls",
+      "label": "calls generate_definitions on schema generator",
+      "evidence": "fastapi/_compat/v2.py:318"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#get_definitions",
+      "to": "f:fastapi/_compat/v2.py#ModelField",
+      "kind": "calls",
+      "label": "creates synthetic ModelFields for flat models",
+      "evidence": "fastapi/_compat/v2.py:328"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#get_schema_from_model_field",
+      "to": "f:fastapi/_compat/v2.py#ModelField",
+      "kind": "reads",
+      "label": "reads alias, mode, and field_info from ModelField",
+      "evidence": "fastapi/_compat/v2.py:293"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#create_body_model",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "calls pydantic.create_model to build dynamic BaseModel",
+      "evidence": "fastapi/_compat/v2.py:418"
+    },
+    {
+      "from": "f:fastapi/utils.py#create_model_field",
+      "to": "f:fastapi/_compat/v2.py#ModelField",
+      "kind": "calls",
+      "label": "constructs ModelField, translating schema errors",
+      "evidence": "fastapi/utils.py:73"
+    },
+    {
+      "from": "f:fastapi/utils.py#create_model_field",
+      "to": "f:fastapi/_compat/shared.py#annotation_is_pydantic_v1",
+      "kind": "calls",
+      "label": "guards against Pydantic v1 models before construction",
+      "evidence": "fastapi/utils.py:66"
+    },
+    {
+      "from": "f:fastapi/utils.py",
+      "to": "f:fastapi/_compat/__init__.py",
+      "kind": "reads",
+      "label": "imports ModelField, Undefined, annotation_is_pydantic_v1",
+      "evidence": "fastapi/utils.py:10"
+    },
+    {
+      "from": "f:fastapi/middleware/cors.py",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "re-exports CORSMiddleware from starlette.middleware.cors",
+      "evidence": "fastapi/middleware/cors.py:1"
+    },
+    {
+      "from": "f:fastapi/middleware/gzip.py",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "re-exports GZipMiddleware from starlette.middleware.gzip",
+      "evidence": "fastapi/middleware/gzip.py:1"
+    },
+    {
+      "from": "f:fastapi/middleware/httpsredirect.py",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "re-exports HTTPSRedirectMiddleware",
+      "evidence": "fastapi/middleware/httpsredirect.py:1"
+    },
+    {
+      "from": "f:fastapi/middleware/trustedhost.py",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "re-exports TrustedHostMiddleware",
+      "evidence": "fastapi/middleware/trustedhost.py:1"
+    },
+    {
+      "from": "f:fastapi/middleware/wsgi.py",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "re-exports WSGIMiddleware from starlette.middleware.wsgi",
+      "evidence": "fastapi/middleware/wsgi.py:1"
+    },
+    {
+      "from": "f:fastapi/middleware/asyncexitstack.py#AsyncExitStackMiddleware",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "uses ASGIApp, Receive, Scope, Send from starlette.types",
+      "evidence": "fastapi/middleware/asyncexitstack.py:3"
+    },
+    {
+      "from": "f:fastapi/telemetry/_api.py#TelemetryConfig",
+      "to": "x:opentelemetry",
+      "kind": "reads",
+      "label": "references TracerProvider, MeterProvider, LoggerProvider",
+      "evidence": "fastapi/telemetry/_api.py:43"
+    },
+    {
+      "from": "f:fastapi/telemetry/_api.py#_operation",
+      "to": "f:fastapi/telemetry/_api.py#TelemetryConfig",
+      "kind": "reads",
+      "label": "checks tracer before creating child operation span",
+      "evidence": "fastapi/telemetry/_api.py:193"
+    },
+    {
+      "from": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+      "to": "f:fastapi/telemetry/_api.py#TelemetryConfig",
+      "kind": "reads",
+      "label": "reads all config keys to decide tracing/metering/logging",
+      "evidence": "fastapi/telemetry/_asgi.py:159"
+    },
+    {
+      "from": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+      "to": "x:opentelemetry",
+      "kind": "calls",
+      "label": "creates spans via tracer.start_span and records metrics",
+      "evidence": "fastapi/telemetry/_asgi.py:323"
+    },
+    {
+      "from": "f:fastapi/telemetry/_asgi.py#ExceptionTelemetryMiddleware",
+      "to": "f:fastapi/telemetry/_api.py",
+      "kind": "calls",
+      "label": "calls _exception() to record unhandled exceptions",
+      "evidence": "fastapi/telemetry/_asgi.py:153"
+    },
+    {
+      "from": "f:fastapi/telemetry/_runtime.py#lifespan",
+      "to": "f:fastapi/telemetry/_runtime.py#_configure_from_environment",
+      "kind": "calls",
+      "label": "calls _configure_from_environment on lifespan.startup",
+      "evidence": "fastapi/telemetry/_runtime.py:217"
+    },
+    {
+      "from": "f:fastapi/telemetry/_runtime.py#_configure_from_environment",
+      "to": "f:fastapi/telemetry/_runtime.py#_export_endpoint",
+      "kind": "calls",
+      "label": "resolves OTLP endpoint URL per signal",
+      "evidence": "fastapi/telemetry/_runtime.py:107"
+    },
+    {
+      "from": "f:fastapi/telemetry/_runtime.py#_configure_from_environment",
+      "to": "x:opentelemetry",
+      "kind": "calls",
+      "label": "imports OTLP exporters and SDK providers on demand",
+      "evidence": "fastapi/telemetry/_runtime.py:112"
+    },
+    {
+      "from": "f:fastapi/telemetry/_runtime.py#_configure_from_environment",
+      "to": "x:otlp",
+      "kind": "http",
+      "label": "configures OTLP HTTP/protobuf export to collector endpoint",
+      "evidence": "fastapi/telemetry/_runtime.py:142"
+    },
+    {
+      "from": "f:fastapi/telemetry/_runtime.py#lifespan",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "calls anyio.to_thread.run_sync to flush SDK exporters",
+      "evidence": "fastapi/telemetry/_runtime.py:235"
+    },
+    {
+      "from": "f:fastapi/telemetry/_api.py#_route_selected",
+      "to": "f:fastapi/telemetry/_api.py",
+      "kind": "writes",
+      "label": "writes route and span name when route is matched",
+      "evidence": "fastapi/telemetry/_api.py:258"
+    },
+    {
+      "from": "d:tests/test_telemetry",
+      "to": "f:fastapi/telemetry/_asgi.py",
+      "kind": "tests",
+      "label": "tests NativeTelemetry and span attributes",
+      "evidence": "tests/test_telemetry/test_http.py:1"
+    },
+    {
+      "from": "d:tests/test_telemetry",
+      "to": "f:fastapi/telemetry/_runtime.py",
+      "kind": "tests",
+      "label": "tests _configure_from_environment and lifespan",
+      "evidence": "tests/test_telemetry/test_runtime.py:1"
+    },
+    {
+      "from": "d:tests/test_telemetry",
+      "to": "f:fastapi/telemetry/_api.py",
+      "kind": "tests",
+      "label": "tests _operation spans and TelemetryData",
+      "evidence": "tests/test_telemetry/test_operations.py:1"
+    },
+    {
+      "from": "f:tests/test_compat.py",
+      "to": "f:fastapi/_compat/v2.py",
+      "kind": "tests",
+      "label": "tests ModelField.validate and error loc prefixing",
+      "evidence": "tests/test_compat.py:1"
+    },
+    {
+      "from": "f:tests/test_schema_compat_pydantic_v2.py",
+      "to": "f:fastapi/_compat/v2.py",
+      "kind": "tests",
+      "label": "tests get_definitions and get_schema_from_model_field",
+      "evidence": "tests/test_schema_compat_pydantic_v2.py:1"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#get_cached_model_fields",
+      "to": "f:fastapi/_compat/v2.py#ModelField",
+      "kind": "calls",
+      "label": "calls get_model_fields and caches the result with lru_cache",
+      "evidence": "fastapi/_compat/v2.py:443"
+    },
+    {
+      "from": "f:fastapi/telemetry/_asgi.py#_HeadersGetter",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "operates on starlette.datastructures.Headers as the carrier",
+      "evidence": "fastapi/telemetry/_asgi.py:56"
+    },
+    {
+      "from": "f:fastapi/utils.py#generate_unique_id",
+      "to": "f:fastapi/routing.py",
+      "kind": "reads",
+      "label": "accepts APIRoute as input; default in APIRouter",
+      "evidence": "fastapi/utils.py:95"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#evaluate_forwardref",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "calls",
+      "label": "resolves forward-reference annotations on parameters",
+      "evidence": "fastapi/dependencies/utils.py:267"
+    },
+    {
+      "from": "f:fastapi/_compat/v2.py#serialize_sequence_value",
+      "to": "f:fastapi/_compat/shared.py",
+      "kind": "calls",
+      "label": "reads sequence_annotation_to_type to construct concrete type",
+      "evidence": "fastapi/_compat/v2.py:402"
+    },
+    {
+      "from": "f:fastapi/_compat/shared.py#lenient_issubclass",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "calls",
+      "label": "called for annotation type checks in parameter resolution",
+      "evidence": "fastapi/dependencies/utils.py:179"
+    },
+    {
+      "from": "f:fastapi/_compat/shared.py#field_annotation_is_scalar",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "calls",
+      "label": "called to decide whether a parameter uses scalar coercion",
+      "evidence": "fastapi/dependencies/utils.py:539"
+    },
+    {
+      "from": "f:fastapi/_compat/shared.py#field_annotation_is_complex",
+      "to": "f:fastapi/_compat/shared.py#field_annotation_is_scalar",
+      "kind": "calls",
+      "label": "is_scalar calls is_complex (inverted result)",
+      "evidence": "fastapi/_compat/shared.py:110"
+    },
+    {
+      "from": "f:fastapi/_compat/shared.py#field_annotation_is_sequence",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "calls",
+      "label": "called to detect multi-value query parameters",
+      "evidence": "fastapi/dependencies/utils.py:858"
+    },
+    {
+      "from": "f:fastapi/telemetry/_api.py#TelemetryData",
+      "to": "f:fastapi/routing.py",
+      "kind": "reads",
+      "label": "routing populates TelemetryData per request",
+      "evidence": "fastapi/routing.py:439"
+    },
+    {
+      "from": "f:fastapi/telemetry/_api.py#get_telemetry_data",
+      "to": "f:fastapi/routing.py",
+      "kind": "calls",
+      "label": "routing calls get_telemetry_data() to fill TelemetryData",
+      "evidence": "fastapi/routing.py:439"
+    },
+    {
+      "from": "f:fastapi/telemetry/_api.py#_unconfigured",
+      "to": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+      "kind": "calls",
+      "label": "enabled() calls _unconfigured to test global providers",
+      "evidence": "fastapi/telemetry/_asgi.py:181"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/utils.py#deep_dict_update",
+      "kind": "calls",
+      "label": "merges additional response schemas via deep_dict_update",
+      "evidence": "fastapi/openapi/utils.py:497"
+    },
+    {
+      "from": "f:fastapi/utils.py#get_value_or_default",
+      "to": "f:fastapi/routing.py",
+      "kind": "calls",
+      "label": "routing resolves layered response class defaults",
+      "evidence": "fastapi/routing.py:1432"
+    },
+    {
+      "from": "f:fastapi/utils.py#is_body_allowed_for_status_code",
+      "to": "f:fastapi/routing.py",
+      "kind": "calls",
+      "label": "routing guards body serialization for 1xx/204/205/304",
+      "evidence": "fastapi/routing.py:805"
+    }
+  ],
+
+  "flows": [
+    {
+      "id": "flow.internals.validation-through-compat",
+      "name": "Validation through the compat layer",
+      "summary": "How solve_dependencies in fastapi.di calls the _compat interface to validate a parameter value against a typed field.",
+      "steps": [
+        {
+          "node": "f:fastapi/dependencies/utils.py",
+          "text": "solve_dependencies iterates the Dependant's fields. For each query, path, header, or body parameter it calls ModelField.validate(value, loc=field_name) to check the incoming value."
+        },
+        {
+          "node": "f:fastapi/_compat/v2.py#ModelField",
+          "text": "ModelField.validate calls self._type_adapter.validate_python(value, from_attributes=True). The TypeAdapter was built in __post_init__ from the field's Annotated annotation, metadata, and FieldInfo attributes. If Pydantic raises ValidationError, the errors are passed to _regenerate_error_with_loc to prepend the field's location tuple."
+        },
+        {
+          "node": "f:fastapi/_compat/shared.py#lenient_issubclass",
+          "text": "Throughout annotation inspection (is_scalar_field, field_annotation_is_complex), lenient_issubclass is called to test annotation types without raising TypeError for generic aliases."
+        },
+        {
+          "node": "f:fastapi/_compat/__init__.py",
+          "text": "solve_dependencies imports ModelField, Undefined, and the annotation predicates from fastapi._compat directly, unaware of whether they come from v2.py or shared.py. Any validation errors (non-empty list from validate()) are collected and eventually raised as RequestValidationError."
+        }
+      ]
+    },
+    {
+      "id": "flow.internals.telemetry-autoconfig",
+      "name": "Telemetry auto-configuration at startup",
+      "summary": "How _runtime.configure reads OTEL_* environment variables and wires OTLP exporters at ASGI lifespan startup.",
+      "steps": [
+        {
+          "node": "f:fastapi/telemetry/_runtime.py#lifespan",
+          "text": "The FastAPI application wraps the ASGI lifespan with the telemetry lifespan function. When the ASGI server sends a 'lifespan.startup' message, wrapped_receive intercepts it and calls _configure_from_environment(config)."
+        },
+        {
+          "node": "f:fastapi/telemetry/_runtime.py#_configure_from_environment",
+          "text": "If auto_configure is enabled and OTEL_SDK_DISABLED is not 'true', it iterates over (TRACES, METRICS, LOGS). For each signal it calls _export_endpoint to resolve the OTLP endpoint URL from OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT or the base OTEL_EXPORTER_OTLP_ENDPOINT with /v1/{signal} appended."
+        },
+        {
+          "node": "f:fastapi/telemetry/_runtime.py#_export_endpoint",
+          "text": "_export_endpoint validates the exporter name (must be 'otlp' or 'none'), protocol (must be 'http/protobuf'), and URL scheme (must be http or https). Returns None for 'none', raises FastAPIError for unsupported exporters or protocols."
+        },
+        {
+          "node": "f:fastapi/telemetry/_runtime.py#_configure_from_environment",
+          "text": "For each enabled signal with a valid endpoint, it imports the OTLP exporter and SDK provider from opentelemetry.exporter.otlp.proto.http and opentelemetry.sdk. If _unconfigured(get_tracer_provider()) is True it creates a new TracerProvider/MeterProvider/LoggerProvider with the BatchSpanProcessor or PeriodicExportingMetricReader and registers it globally. Handles a race condition by shutting down the unused provider if another component registered first. Tracks owned providers in _owned for atexit cleanup."
+        },
+        {
+          "node": "x:otlp",
+          "text": "The OTLP HTTP/protobuf exporter begins exporting batched spans/metrics/logs to the collector at the configured endpoint URL."
+        }
+      ]
+    },
+    {
+      "id": "flow.internals.request-span-lifecycle",
+      "name": "HTTP request span lifecycle",
+      "summary": "How NativeTelemetry opens, populates, and closes a SERVER span for each incoming HTTP request.",
+      "steps": [
+        {
+          "node": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+          "text": "The FastAPI ASGI app calls NativeTelemetry.__call__ for each request (scope type 'http' or 'websocket'). It checks enabled() and the exclude callback. It resolves the HTTP method, mapping unknown methods to '_OTHER'. If tracing is on, it calls propagate.extract with _HeadersGetter on the request headers to get the parent context."
+        },
+        {
+          "node": "f:fastapi/telemetry/_asgi.py#_HeadersGetter",
+          "text": "_HeadersGetter.get reads multi-value headers from Starlette Headers, joining baggage values with commas for the baggage propagator. This extracts trace context from traceparent/tracestate/baggage headers sent by upstream callers."
+        },
+        {
+          "node": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+          "text": "NativeTelemetry starts a SERVER span with url.scheme, http.request.method, url.path, url.query (redacting sensitive parameters listed in _SENSITIVE_QUERY_PARAMETERS), and server.address/port. It attaches _RequestTelemetry to scope['fastapi.telemetry'] and to the OTel context. It wraps send to capture the status code from http.response.start."
+        },
+        {
+          "node": "f:fastapi/telemetry/_api.py#_route_selected",
+          "text": "When routing resolves the matched path template, _route_selected is called (by routing.py) and updates the span name to '{METHOD} {route}' and sets http.route on the span."
+        },
+        {
+          "node": "f:fastapi/telemetry/_asgi.py#NativeTelemetry",
+          "text": "After the last response body chunk is sent, finish() sets http.response.status_code and error.type (for 5xx or exceptions), records http.server.request.duration in the histogram, decrements http.server.active_requests, and ends the span. The OTel context is detached in a finally block."
+        }
+      ]
+    }
+  ]
+}

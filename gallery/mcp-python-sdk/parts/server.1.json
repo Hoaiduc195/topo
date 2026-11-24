@@ -1,0 +1,1587 @@
+{
+  "area": "server",
+  "nodes": [
+    {
+      "id": "server.lowlevel",
+      "parent": "server",
+      "name": "Low-level server",
+      "kind": "group",
+      "summary": "The raw MCP server: handler registry, capability negotiation, and protocol dispatch.",
+      "detail": "Contains the Server class (the protocol registry), the ServerRunner kernel (per-connection dispatch), and helper types. Users pass on_* handlers at construction; the runner validates params, runs the middleware chain, and serializes results for the wire.",
+      "paths": ["src/mcp/server/lowlevel/"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "server.transports",
+      "parent": "server",
+      "name": "Transports",
+      "kind": "group",
+      "summary": "The three wire transports: stdio, Server-Sent Events, and Streamable HTTP.",
+      "detail": "stdio_server wraps process stdin/stdout. SseServerTransport provides two ASGI applications (GET for the event stream, POST for messages). StreamableHTTPServerTransport and StreamableHTTPSessionManager together handle session lifecycle, event storage, and GET/POST/DELETE routing for the Streamable HTTP protocol.",
+      "paths": [
+        "src/mcp/server/stdio.py",
+        "src/mcp/server/sse.py",
+        "src/mcp/server/streamable_http.py",
+        "src/mcp/server/streamable_http_manager.py",
+        "src/mcp/server/_streamable_http_modern.py"
+      ],
+      "status": "live",
+      "tech": ["Python", "anyio", "Starlette", "sse-starlette"]
+    },
+    {
+      "id": "server.lifecycle",
+      "parent": "server",
+      "name": "Lifecycle and context",
+      "kind": "group",
+      "summary": "Per-connection state, request context, initialization options, and ASGI app assembly.",
+      "detail": "runner.py bridges the dispatcher layer and the user handler layer. connection.py holds per-client state and the standalone outbound channel. context.py defines ServerRequestContext and the ServerMiddleware protocol. models.py carries InitializationOptions. apps.py and transport_security.py round out ASGI assembly and DNS-rebinding protection.",
+      "paths": [
+        "src/mcp/server/runner.py",
+        "src/mcp/server/connection.py",
+        "src/mcp/server/context.py",
+        "src/mcp/server/models.py",
+        "src/mcp/server/apps.py",
+        "src/mcp/server/transport_security.py",
+        "src/mcp/server/validation.py"
+      ],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "server.features",
+      "parent": "server",
+      "name": "Server features",
+      "kind": "group",
+      "summary": "Elicitation, subscriptions, caching hints, OpenTelemetry, extensions, and skills.",
+      "detail": "elicitation.py provides form and URL-mode elicitation helpers. subscriptions.py defines the SubscriptionBus and ListenHandler for the 2026-07-28 subscriptions/listen stream. caching.py applies per-method TTL hints. _otel.py wraps every inbound message in an OpenTelemetry span. extension.py defines the Extension base class. skills.py serves the io.modelcontextprotocol/skills extension. apps.py implements the io.modelcontextprotocol/ui Apps extension.",
+      "paths": [
+        "src/mcp/server/elicitation.py",
+        "src/mcp/server/subscriptions.py",
+        "src/mcp/server/caching.py",
+        "src/mcp/server/_otel.py",
+        "src/mcp/server/extension.py",
+        "src/mcp/server/skills.py",
+        "src/mcp/server/apps.py"
+      ],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "server.security",
+      "parent": "server",
+      "name": "Security",
+      "kind": "group",
+      "summary": "Request-state sealing, DNS-rebinding protection, and body-size limits.",
+      "detail": "request_state.py provides RequestStateBoundary middleware and AES-256-GCM codec for multi-round-trip requestState tokens. transport_security.py provides Host/Origin header validation and body-size limiting.",
+      "paths": [
+        "src/mcp/server/request_state.py",
+        "src/mcp/server/transport_security.py"
+      ],
+      "status": "live",
+      "tech": ["Python", "cryptography"]
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py",
+      "parent": "server.lowlevel",
+      "name": "Low-level Server",
+      "kind": "module",
+      "summary": "The protocol handler registry: on_* constructor params register handlers; streamable_http_app() assembles the ASGI stack.",
+      "detail": "Server[L] stores two dicts (_request_handlers, _notification_handlers) keyed by method strings. add_request_handler / add_notification_handler insert HandlerEntry(params_type, handler) records. get_capabilities() derives ServerCapabilities from which handlers are registered and the protocol version. run() calls serve_dual_era_loop(). streamable_http_app() builds a StreamableHTTPSessionManager and wraps it in a Starlette app with optional auth middleware. The middleware list defaults to [OpenTelemetryMiddleware()].",
+      "paths": ["src/mcp/server/lowlevel/server.py:129"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py#Server",
+      "parent": "f:src/mcp/server/lowlevel/server.py",
+      "name": "Server",
+      "kind": "class",
+      "summary": "Registry of MCP request and notification handlers; assembles capabilities and starts connections.",
+      "detail": "Generic in LifespanResultT. Constructor accepts on_* keyword arguments that are stored as HandlerEntry records. Deprecated on_set_logging_level, on_roots_list_changed, on_progress issue MCPDeprecationWarning at construction. The _request_handlers dict drives capability negotiation: a handler's presence maps directly to whether the corresponding capability is advertised. Extensions dict is populated by higher layers (MCPServer) and read by get_capabilities.",
+      "paths": ["src/mcp/server/lowlevel/server.py:129-131"],
+      "signature": "class Server(Generic[LifespanResultT])",
+      "status": "live",
+      "code": "class Server(Generic[LifespanResultT]):\n    def __init__(self, name: str, *, version: str = \"\", ...\n        self._request_handlers: dict[str, HandlerEntry[LifespanResultT]] = {}\n        self._notification_handlers: dict[str, HandlerEntry[LifespanResultT]] = {}\n        self._session_manager: StreamableHTTPSessionManager | None = None\n        self.middleware: list[ServerMiddleware[LifespanResultT]] = [OpenTelemetryMiddleware()]\n        self.extensions: dict[str, dict[str, Any]] = {}"
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py#Server.add_request_handler",
+      "parent": "f:src/mcp/server/lowlevel/server.py",
+      "name": "Server.add_request_handler()",
+      "kind": "function",
+      "summary": "Register a typed request handler for a method string; raises if method is 'initialize'.",
+      "paths": ["src/mcp/server/lowlevel/server.py:484-507"],
+      "signature": "def add_request_handler(self, method: str, params_type: type[_ParamsT], handler: RequestHandler[LifespanResultT, _ParamsT]) -> None",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py#Server.get_capabilities",
+      "parent": "f:src/mcp/server/lowlevel/server.py",
+      "name": "Server.get_capabilities()",
+      "kind": "function",
+      "summary": "Derive ServerCapabilities from registered handlers; era-aware: 2026-07-28 uses subscriptions/listen presence for listChanged flags.",
+      "paths": ["src/mcp/server/lowlevel/server.py:567-637"],
+      "signature": "def get_capabilities(self, notification_options, experimental_capabilities, extensions, *, protocol_version) -> types.ServerCapabilities",
+      "status": "live",
+      "code": "if protocol_version in MODERN_PROTOCOL_VERSIONS:\n    listen_served = \"subscriptions/listen\" in self._request_handlers\n    prompts_changed = tools_changed = resources_changed = subscribe = listen_served\nelse:\n    prompts_changed = notification_options.prompts_changed\n    tools_changed = notification_options.tools_changed\n    resources_changed = notification_options.resources_changed\n    subscribe = \"resources/subscribe\" in self._request_handlers"
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py#Server.run",
+      "parent": "f:src/mcp/server/lowlevel/server.py",
+      "name": "Server.run()",
+      "kind": "function",
+      "summary": "Serve one connection over a read/write stream pair; thin wrapper over serve_dual_era_loop.",
+      "paths": ["src/mcp/server/lowlevel/server.py:703-730"],
+      "signature": "async def run(self, read_stream, write_stream, initialization_options, raise_exceptions=False) -> None",
+      "status": "live",
+      "code": "async def run(self, read_stream, write_stream, initialization_options, raise_exceptions=False):\n    async with self.lifespan(self) as lifespan_context:\n        await serve_dual_era_loop(\n            self, read_stream, write_stream,\n            lifespan_state=lifespan_context,\n            init_options=initialization_options,\n            raise_exceptions=raise_exceptions,\n        )"
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py#Server.streamable_http_app",
+      "parent": "f:src/mcp/server/lowlevel/server.py",
+      "name": "Server.streamable_http_app()",
+      "kind": "function",
+      "summary": "Build and return a Starlette ASGI app for Streamable HTTP, with optional auth and DNS-rebinding protection.",
+      "paths": ["src/mcp/server/lowlevel/server.py:732-852"],
+      "signature": "def streamable_http_app(self, *, streamable_http_path='/mcp', json_response=False, stateless_http=False, event_store=None, ...) -> Starlette",
+      "status": "live",
+      "code": "session_manager = StreamableHTTPSessionManager(\n    app=self, event_store=event_store, retry_interval=retry_interval,\n    json_response=json_response, stateless=stateless_http,\n    security_settings=transport_security,\n    max_request_body_size=max_request_body_size,\n    session_idle_timeout=session_idle_timeout,\n    max_sessions=max_sessions,\n)\nreturn Starlette(debug=debug, routes=routes, middleware=middleware,\n    lifespan=lambda app: session_manager.run())"
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py#HandlerEntry",
+      "parent": "f:src/mcp/server/lowlevel/server.py",
+      "name": "HandlerEntry",
+      "kind": "class",
+      "summary": "Frozen dataclass pairing a Pydantic params model with its handler callable; stored in Server._request_handlers.",
+      "paths": ["src/mcp/server/lowlevel/server.py:93-106"],
+      "signature": "@dataclass(frozen=True, slots=True)\nclass HandlerEntry(Generic[LifespanResultT])",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/server.py#NotificationOptions",
+      "parent": "f:src/mcp/server/lowlevel/server.py",
+      "name": "NotificationOptions",
+      "kind": "class",
+      "summary": "Flags controlling listChanged capability bits for the handshake (2025) era.",
+      "paths": ["src/mcp/server/lowlevel/server.py:108-113"],
+      "signature": "class NotificationOptions",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/session.py",
+      "parent": "server.lifecycle",
+      "name": "ServerSession",
+      "kind": "module",
+      "summary": "Per-request proxy for server-to-client requests and notifications; exposes elicit, log, ping, and progress helpers.",
+      "detail": "Built once per inbound request by ServerRunner._make_context. Holds a request-scoped DispatchContext (the POST response stream on Streamable HTTP) and the connection-scoped outbound. send_request dispatches through the channel selected by related_request_id. send_log_message enforces the 2026-era per-request log-level opt-in. elicit_form and elicit_url send the two elicitation/create shapes. report_progress delegates to the DispatchContext's progress method.",
+      "paths": ["src/mcp/server/session.py:35"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/session.py#ServerSession",
+      "parent": "f:src/mcp/server/session.py",
+      "name": "ServerSession",
+      "kind": "class",
+      "summary": "Per-request proxy for server-to-client requests and notifications; channel selection via related_request_id.",
+      "paths": ["src/mcp/server/session.py:35-490"],
+      "signature": "class ServerSession",
+      "status": "live",
+      "code": "class ServerSession:\n    def __init__(self, request_outbound: DispatchContext[Any], connection: Connection, *, request_meta=None):\n        self._request_outbound = request_outbound\n        self._connection = connection\n        self._log_is_request_scoped = connection.protocol_version in MODERN_PROTOCOL_VERSIONS\n        self._allowed_log_levels = allowed_log_levels(connection.protocol_version, request_meta)"
+    },
+    {
+      "id": "f:src/mcp/server/session.py#ServerSession.send_request",
+      "parent": "f:src/mcp/server/session.py",
+      "name": "ServerSession.send_request()",
+      "kind": "function",
+      "summary": "Send a typed server-to-client request and validate the result; channel chosen by related_request_id.",
+      "paths": ["src/mcp/server/session.py:93-122"],
+      "signature": "async def send_request(self, request, result_type, request_read_timeout_seconds=None, metadata=None, progress_callback=None) -> ResultT",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/session.py#ServerSession.elicit_form",
+      "parent": "f:src/mcp/server/session.py",
+      "name": "ServerSession.elicit_form()",
+      "kind": "function",
+      "summary": "Send a form-mode elicitation/create request to collect structured user input.",
+      "paths": ["src/mcp/server/session.py:351-380"],
+      "signature": "async def elicit_form(self, message: str, requested_schema, related_request_id=None) -> types.ElicitResult",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/session.py#ServerSession.elicit_url",
+      "parent": "f:src/mcp/server/session.py",
+      "name": "ServerSession.elicit_url()",
+      "kind": "function",
+      "summary": "Send a URL-mode elicitation/create request for out-of-band interactions (OAuth flows, payment).",
+      "paths": ["src/mcp/server/session.py:382-417"],
+      "signature": "async def elicit_url(self, message: str, url: str, elicitation_id: str, related_request_id=None) -> types.ElicitResult",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/session.py#ServerSession.report_progress",
+      "parent": "f:src/mcp/server/session.py",
+      "name": "ServerSession.report_progress()",
+      "kind": "function",
+      "summary": "Emit a progress notification on the inbound request's stream; no-op when the caller did not request progress.",
+      "paths": ["src/mcp/server/session.py:426-434"],
+      "signature": "async def report_progress(self, progress: float, total: float | None = None, message: str | None = None) -> None",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/stdio.py",
+      "parent": "server.transports",
+      "name": "stdio transport",
+      "kind": "module",
+      "summary": "stdio_server() async context manager: diverts fd 0/1 to null/stderr and yields message streams.",
+      "detail": "Claims stdin (fd 0) and stdout (fd 1) with a process-wide lock (_claims_lock) so two concurrent stdio_server() calls raise RuntimeError. Duplicates the wire onto private file descriptors above fd 2 to protect them from close/recycle. Wraps the wire in UTF-8 text layers (_UnownedTextWrapper) whose close never closes the underlying buffer. Spawns two tasks: stdin_reader parses newline-delimited JSON-RPC and writes SessionMessage/exceptions to read_stream; stdout_writer serializes outbound messages.",
+      "paths": ["src/mcp/server/stdio.py:162"],
+      "status": "live",
+      "tech": ["Python", "anyio"]
+    },
+    {
+      "id": "f:src/mcp/server/stdio.py#stdio_server",
+      "parent": "f:src/mcp/server/stdio.py",
+      "name": "stdio_server()",
+      "kind": "function",
+      "summary": "Async context manager that diverts fd 0/1 and yields (read_stream, write_stream) for one MCP connection.",
+      "paths": ["src/mcp/server/stdio.py:162-217"],
+      "signature": "@asynccontextmanager\nasync def stdio_server(stdin=None, stdout=None)",
+      "status": "live",
+      "code": "@asynccontextmanager\nasync def stdio_server(stdin=None, stdout=None):\n    ...\n    read_stream_writer, read_stream = create_context_streams[SessionMessage | Exception](0)\n    write_stream, write_stream_reader = create_context_streams[SessionMessage](0)\n    async def stdin_reader():\n        async with read_stream_writer:\n            async for line in stdin:\n                message = types.jsonrpc_message_adapter.validate_json(line, by_name=False)\n                await read_stream_writer.send(SessionMessage(message))\n    async with anyio.create_task_group() as tg:\n        tg.start_soon(stdin_reader)\n        tg.start_soon(stdout_writer)\n        yield read_stream, write_stream"
+    },
+    {
+      "id": "f:src/mcp/server/sse.py",
+      "parent": "server.transports",
+      "name": "SSE transport",
+      "kind": "module",
+      "summary": "SseServerTransport: two ASGI applications for the legacy Server-Sent Events transport.",
+      "detail": "connect_sse() (GET handler) assigns a UUID session ID, sends an endpoint event pointing clients at the POST URL, and streams server messages as SSE events. handle_post_message() (POST handler) looks up the session by ID in _read_stream_writers and feeds the parsed message downstream. Credential binding (_session_owners) prevents one authenticated user from posting into another's session. The endpoint field is a relative path to prevent cross-origin requests.",
+      "paths": ["src/mcp/server/sse.py:66"],
+      "status": "live",
+      "tech": ["Python", "sse-starlette", "Starlette"]
+    },
+    {
+      "id": "f:src/mcp/server/sse.py#SseServerTransport",
+      "parent": "f:src/mcp/server/sse.py",
+      "name": "SseServerTransport",
+      "kind": "class",
+      "summary": "Two-part SSE transport: connect_sse() opens a streaming session; handle_post_message() delivers client messages.",
+      "paths": ["src/mcp/server/sse.py:66-287"],
+      "signature": "class SseServerTransport",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/sse.py#SseServerTransport.connect_sse",
+      "parent": "f:src/mcp/server/sse.py",
+      "name": "SseServerTransport.connect_sse()",
+      "kind": "function",
+      "summary": "ASGI context manager that creates a session ID, sends the endpoint event, and yields message streams.",
+      "paths": ["src/mcp/server/sse.py:138-217"],
+      "signature": "@asynccontextmanager\nasync def connect_sse(self, scope: Scope, receive: Receive, send: Send)",
+      "status": "live",
+      "code": "@asynccontextmanager\nasync def connect_sse(self, scope, receive, send):\n    read_stream_writer, read_stream = create_context_streams[SessionMessage | Exception](0)\n    write_stream, write_stream_reader = create_context_streams[SessionMessage](0)\n    session_id = uuid4()\n    self._read_stream_writers[session_id] = read_stream_writer\n    client_post_uri_data = f\"{quote(full_message_path_for_client)}?session_id={session_id.hex}\"\n    await sse_stream_writer.send({\"event\": \"endpoint\", \"data\": client_post_uri_data})\n    yield (read_stream, write_stream)"
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http.py",
+      "parent": "server.transports",
+      "name": "Streamable HTTP transport",
+      "kind": "module",
+      "summary": "StreamableHTTPServerTransport: per-session ASGI handler for GET/POST/DELETE with SSE streaming and event-store resumability.",
+      "detail": "POST requests parse JSON-RPC, create per-request SSE streams keyed by request ID, and mint priming events in the event store for resumability. GET requests open a standalone SSE stream (_GET_stream key) for server-initiated messages. DELETE requests call terminate(). The message_router task (started by connect()) reads the write stream and routes each outbound message to the correct per-request or standalone stream. Idle-timeout fires after no request is in flight for idle_timeout seconds.",
+      "paths": ["src/mcp/server/streamable_http.py:150"],
+      "status": "live",
+      "tech": ["Python", "anyio", "sse-starlette", "Starlette"]
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport",
+      "parent": "f:src/mcp/server/streamable_http.py",
+      "name": "StreamableHTTPServerTransport",
+      "kind": "class",
+      "summary": "Per-session HTTP transport: routes POST/GET/DELETE and distributes outbound messages to per-request SSE streams.",
+      "paths": ["src/mcp/server/streamable_http.py:150-1136"],
+      "signature": "class StreamableHTTPServerTransport",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport.connect",
+      "parent": "f:src/mcp/server/streamable_http.py",
+      "name": "StreamableHTTPServerTransport.connect()",
+      "kind": "function",
+      "summary": "Context manager that creates memory streams, starts the message_router task, and yields (read, write) to the server loop.",
+      "paths": ["src/mcp/server/streamable_http.py:1024-1136"],
+      "signature": "@asynccontextmanager\nasync def connect(self) -> AsyncGenerator[tuple[ReadStream, WriteStream], None]",
+      "status": "live",
+      "code": "@asynccontextmanager\nasync def connect(self):\n    if self._idle_timeout is not None:\n        self.idle_scope = anyio.CancelScope()\n    read_stream_writer, read_stream = create_context_streams[SessionMessage | Exception](0)\n    write_stream, write_stream_reader = create_context_streams[SessionMessage](0)\n    self._read_stream_writer = read_stream_writer\n    self._write_stream = write_stream\n    async with anyio.create_task_group() as tg:\n        async def message_router(): ...\n        tg.start_soon(message_router)\n        yield read_stream, write_stream"
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport._handle_post_request",
+      "parent": "f:src/mcp/server/streamable_http.py",
+      "name": "StreamableHTTPServerTransport._handle_post()",
+      "kind": "function",
+      "summary": "Parse a JSON-RPC POST, mint a priming event, create per-request SSE streams, and feed the message downstream.",
+      "paths": ["src/mcp/server/streamable_http.py:558-726"],
+      "signature": "async def _handle_post_request(self, scope, request, receive, send) -> None",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http.py#EventStore",
+      "parent": "f:src/mcp/server/streamable_http.py",
+      "name": "EventStore",
+      "kind": "class",
+      "summary": "Abstract base for resumable event storage; store_event() saves, replay_events_after() replays from a last-event-id.",
+      "paths": ["src/mcp/server/streamable_http.py:116-147"],
+      "signature": "class EventStore(ABC)",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http_manager.py",
+      "parent": "server.transports",
+      "name": "Streamable HTTP session manager",
+      "kind": "module",
+      "summary": "StreamableHTTPSessionManager: routes requests to per-session transports; manages idle timeout and session cap.",
+      "detail": "run() is the ASGI lifespan; it enters the app lifespan once and spawns per-session tasks in a shared task group. _handle_request() routes by MCP-Protocol-Version header: modern (2026-07-28) requests go to handle_modern_request(); handshake-era requests go to stateful or stateless paths. _admit_session() enforces max_sessions under a lock. _serve_opening_request() starts a per-session serve_loop task. _discard_session() atomically forgets and terminates a session.",
+      "paths": ["src/mcp/server/streamable_http_manager.py:45"],
+      "status": "live",
+      "tech": ["Python", "anyio", "Starlette"]
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager",
+      "parent": "f:src/mcp/server/streamable_http_manager.py",
+      "name": "StreamableHTTPSessionManager",
+      "kind": "class",
+      "summary": "Manages Streamable HTTP sessions: era routing, session creation/reuse, idle timeout, and session cap.",
+      "paths": ["src/mcp/server/streamable_http_manager.py:45-396"],
+      "signature": "class StreamableHTTPSessionManager",
+      "status": "live",
+      "facts": [
+        "DEFAULT_SESSION_IDLE_TIMEOUT = 30 * 60 seconds (30 minutes)",
+        "DEFAULT_MAX_SESSIONS = 10_000",
+        "max_request_body_size defaults to 4 MiB",
+        "run() may only be called once per instance",
+        "Stateless mode creates a fresh transport per request with no session tracking"
+      ]
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager.run",
+      "parent": "f:src/mcp/server/streamable_http_manager.py",
+      "name": "StreamableHTTPSessionManager.run()",
+      "kind": "function",
+      "summary": "Async context manager: enters app lifespan once, creates the task group for all sessions, enforces single-use.",
+      "paths": ["src/mcp/server/streamable_http_manager.py:131-174"],
+      "signature": "@contextlib.asynccontextmanager\nasync def run(self) -> AsyncIterator[None]",
+      "status": "live",
+      "code": "@contextlib.asynccontextmanager\nasync def run(self):\n    async with self._run_lock:\n        if self._has_started:\n            raise RuntimeError('StreamableHTTPSessionManager .run() can only be called once...')\n        self._has_started = True\n    async with self.app.lifespan(self.app) as lifespan_state, anyio.create_task_group() as tg:\n        self._lifespan_state = lifespan_state\n        self._task_group = tg\n        yield"
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager._handle_request",
+      "parent": "f:src/mcp/server/streamable_http_manager.py",
+      "name": "StreamableHTTPSessionManager._handle_request()",
+      "kind": "function",
+      "summary": "Route by MCP-Protocol-Version header: modern era to handle_modern_request; handshake era to stateful or stateless path.",
+      "paths": ["src/mcp/server/streamable_http_manager.py:183-204"],
+      "signature": "async def _handle_request(self, scope, receive, send) -> None",
+      "status": "live",
+      "code": "header = MCP_PROTOCOL_VERSION_HEADER.encode('ascii')\npv = next((v.decode('latin-1') for k, v in scope['headers'] if k == header), None)\nif pv is not None and pv not in HANDSHAKE_PROTOCOL_VERSIONS:\n    await handle_modern_request(\n        self.app, self.security_settings, self.json_response, self._lifespan_state, scope, receive, send\n    )\n    return\nif self.stateless:\n    await self._handle_stateless_request(pv, scope, receive, send)\nelse:\n    await self._handle_stateful_request(scope, receive, send)"
+    },
+    {
+      "id": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPASGIApp",
+      "parent": "f:src/mcp/server/streamable_http_manager.py",
+      "name": "StreamableHTTPASGIApp",
+      "kind": "class",
+      "summary": "Thin ASGI wrapper that delegates all calls to StreamableHTTPSessionManager.asgi_app.",
+      "paths": ["src/mcp/server/streamable_http_manager.py:420-427"],
+      "signature": "class StreamableHTTPASGIApp",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/_streamable_http_modern.py",
+      "parent": "server.transports",
+      "name": "Modern HTTP entry",
+      "kind": "module",
+      "summary": "Single-exchange ASGI handler for 2026-07-28 POSTs: stateless, one request in, one response out.",
+      "detail": "Called from StreamableHTTPSessionManager when MCP-Protocol-Version names a modern revision. No session ID is set. JSON mode calls serve_one directly and writes the JSON-RPC response. SSE mode runs the handler as a sibling task, defers committing to text/event-stream until the handler emits a notification or _SSE_PING_INTERVAL (15 s) elapses, then streams the response with keepalive pings. Mcp-Param-* header validation runs pre-dispatch via _mcp_param_rejection().",
+      "paths": ["src/mcp/server/_streamable_http_modern.py:365"],
+      "status": "live",
+      "tech": ["Python", "anyio"]
+    },
+    {
+      "id": "f:src/mcp/server/_streamable_http_modern.py#handle_modern_request",
+      "parent": "f:src/mcp/server/_streamable_http_modern.py",
+      "name": "handle_modern_request()",
+      "kind": "function",
+      "summary": "ASGI handler for one stateless 2026-07-28 POST: validate, classify, serve_one, respond JSON or SSE.",
+      "paths": ["src/mcp/server/_streamable_http_modern.py:365-528"],
+      "signature": "async def handle_modern_request(app, security_settings, json_response, lifespan_state, scope, receive, send) -> None",
+      "status": "live",
+      "code": "async def handle_modern_request(app, security_settings, json_response, lifespan_state, scope, receive, send):\n    ...\n    verdict = classify_inbound_request(decoded, headers=dict(request.headers))\n    if isinstance(verdict, InboundLadderRejection):\n        await _write_rejection(verdict, req.id, scope, receive, send)\n        return\n    mcp_param_rejection = await _mcp_param_rejection(app, request, req, verdict, lifespan_state)\n    if mcp_param_rejection is not None:\n        await _write_rejection(mcp_param_rejection, req.id, scope, receive, send)\n        return\n    connection = Connection.from_envelope(verdict.protocol_version, verdict.client_info, verdict.client_capabilities)"
+    },
+    {
+      "id": "f:src/mcp/server/runner.py",
+      "parent": "server.lifecycle",
+      "name": "Server runner",
+      "kind": "module",
+      "summary": "ServerRunner kernel and driver functions: bridges the dispatcher layer and typed handler layer.",
+      "detail": "ServerRunner is the per-connection kernel: _on_request runs the middleware chain then validates params and calls the handler; _on_notify does the same for notifications. _serialize shapes the result wire form including cache hints, per-version surface sieve, resultType completion, and serverInfo _meta stamp. Driver functions serve_connection, serve_loop, serve_dual_era_loop, and serve_one manage stream lifecycle. serve_dual_era_loop peeks at the first request to route legacy vs modern connections.",
+      "paths": ["src/mcp/server/runner.py:157"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/runner.py#ServerRunner",
+      "parent": "f:src/mcp/server/runner.py",
+      "name": "ServerRunner",
+      "kind": "class",
+      "summary": "Per-connection handler kernel: runs the middleware chain, validates params, calls handlers, shapes results.",
+      "paths": ["src/mcp/server/runner.py:157-444"],
+      "signature": "@dataclass\nclass ServerRunner(Generic[LifespanT])",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/runner.py#ServerRunner._on_request",
+      "parent": "f:src/mcp/server/runner.py",
+      "name": "ServerRunner._on_request()",
+      "kind": "function",
+      "summary": "Dispatch one request: build context, compose middleware chain, validate params, call handler, serialize result.",
+      "paths": ["src/mcp/server/runner.py:175-240"],
+      "signature": "async def _on_request(self, dctx, method, params) -> dict[str, Any]",
+      "status": "live",
+      "code": "async def _on_request(self, dctx, method, params):\n    meta = _extract_meta(params)\n    ctx = self._make_context(dctx, method, params, meta, version)\n    async def _inner(ctx):\n        if method == 'initialize':\n            return self._serialize(method, version, self._handle_initialize(params))\n        entry = self.server.get_request_handler(method)\n        if entry is None:\n            raise MCPError(code=METHOD_NOT_FOUND, message='Method not found', data=method)\n        typed_params = entry.params_type.model_validate({} if params is None else params, by_name=False)\n        result = await entry.handler(ctx, typed_params)\n        return self._serialize(method, version, result)\n    call = self._compose_server_middleware(_inner)\n    return _dump_result(await call(ctx))"
+    },
+    {
+      "id": "f:src/mcp/server/runner.py#ServerRunner._serialize",
+      "parent": "f:src/mcp/server/runner.py",
+      "name": "ServerRunner._serialize()",
+      "kind": "function",
+      "summary": "Shape a handler result into its wire form: apply cache hints, per-version surface sieve, resultType, and serverInfo stamp.",
+      "paths": ["src/mcp/server/runner.py:341-394"],
+      "signature": "def _serialize(self, method: str, version: str, result: HandlerResult) -> dict[str, Any]",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/runner.py#serve_dual_era_loop",
+      "parent": "f:src/mcp/server/runner.py",
+      "name": "serve_dual_era_loop()",
+      "kind": "function",
+      "summary": "Drive a stream pair in the protocol era the client opens with: peeks at the first request to choose legacy or modern.",
+      "paths": ["src/mcp/server/runner.py:602-646"],
+      "signature": "async def serve_dual_era_loop(server, read_stream, write_stream, *, lifespan_state, session_id=None, init_options=None, raise_exceptions=False) -> None",
+      "status": "live",
+      "code": "async def serve_dual_era_loop(server, read_stream, write_stream, ...):\n    try:\n        async with _replay_from_opening_request(read_stream) as (opening, replayed):\n            opens_modern = (\n                opening is not None\n                and opening.method != 'initialize'\n                and _has_modern_envelope(opening.params)\n            )\n            if opens_modern:\n                await _serve_modern_stream(server, replayed, write_stream, ...)\n            else:\n                await _serve_legacy_stream(server, replayed, write_stream, ...)\n    finally:\n        await write_stream.aclose()"
+    },
+    {
+      "id": "f:src/mcp/server/runner.py#serve_one",
+      "parent": "f:src/mcp/server/runner.py",
+      "name": "serve_one()",
+      "kind": "function",
+      "summary": "Single-exchange driver: build a ServerRunner, call _on_request once, tear down connection.exit_stack.",
+      "paths": ["src/mcp/server/runner.py:815-838"],
+      "signature": "async def serve_one(server, dctx, method, params, *, connection, lifespan_state) -> dict[str, Any]",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/runner.py#modern_on_request",
+      "parent": "f:src/mcp/server/runner.py",
+      "name": "modern_on_request()",
+      "kind": "function",
+      "summary": "Return an OnRequest for modern per-request-envelope dispatch; used by in-process DirectDispatcher peers.",
+      "paths": ["src/mcp/server/runner.py:841-872"],
+      "signature": "def modern_on_request(server, lifespan_state) -> OnRequest",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/connection.py",
+      "parent": "server.lifecycle",
+      "name": "Connection",
+      "kind": "module",
+      "summary": "Per-client connection state: protocol version, peer identity, standalone outbound channel, and exit_stack.",
+      "detail": "Two factories: Connection.from_envelope() builds a born-ready connection from a 2026-era request's _meta (no back-channel by default); Connection.for_loop() builds a handshake-driven connection seeded with LATEST_HANDSHAKE_VERSION. NotifyOnlyOutbound forwards notifications but refuses send_raw_request, used by modern duplex streams. allowed_log_levels() implements the 2026-era per-request log-level opt-in semantics.",
+      "paths": ["src/mcp/server/connection.py:185"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/connection.py#Connection",
+      "parent": "f:src/mcp/server/connection.py",
+      "name": "Connection",
+      "kind": "class",
+      "summary": "Per-client connection state: protocol_version, client_params, outbound channel, state dict, and exit_stack.",
+      "paths": ["src/mcp/server/connection.py:185-493"],
+      "signature": "class Connection",
+      "status": "live",
+      "facts": [
+        "from_envelope() sets initialized.set() immediately (born ready, no handshake)",
+        "for_loop() seeds protocol_version from LATEST_HANDSHAKE_VERSION until handshake overwrites",
+        "has_standalone_channel derived from outbound is not _NO_CHANNEL sentinel",
+        "initialize_accepted: True once client_params is set or initialized.is_set()",
+        "exit_stack unwound (shielded) by aclose_shielded() on connection close"
+      ]
+    },
+    {
+      "id": "f:src/mcp/server/connection.py#Connection.from_envelope",
+      "parent": "f:src/mcp/server/connection.py",
+      "name": "Connection.from_envelope()",
+      "kind": "function",
+      "summary": "Build a born-ready connection from a 2026-era request envelope; mis-shaped values degrade gracefully.",
+      "paths": ["src/mcp/server/connection.py:259-297"],
+      "signature": "@classmethod\ndef from_envelope(cls, protocol_version, client_info, client_capabilities, *, outbound=_NO_CHANNEL) -> Connection",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/connection.py#Connection.for_loop",
+      "parent": "f:src/mcp/server/connection.py",
+      "name": "Connection.for_loop()",
+      "kind": "function",
+      "summary": "Build a handshake-driven connection; initialized is set later when notifications/initialized arrives.",
+      "paths": ["src/mcp/server/connection.py:299-318"],
+      "signature": "@classmethod\ndef for_loop(cls, outbound, *, session_id=None, protocol_version_hint=None) -> Connection",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/connection.py#NotifyOnlyOutbound",
+      "parent": "f:src/mcp/server/connection.py",
+      "name": "NotifyOnlyOutbound",
+      "kind": "class",
+      "summary": "Outbound that forwards notifications but refuses requests; installed for modern duplex stream connections.",
+      "paths": ["src/mcp/server/connection.py:156-183"],
+      "signature": "class NotifyOnlyOutbound(_NoChannelOutbound)",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/connection.py#allowed_log_levels",
+      "parent": "f:src/mcp/server/connection.py",
+      "name": "allowed_log_levels()",
+      "kind": "function",
+      "summary": "Return deliverable log levels for one request; 2026-era is per-request opt-in; handshake era allows all.",
+      "paths": ["src/mcp/server/connection.py:69-89"],
+      "signature": "def allowed_log_levels(protocol_version: str, meta: Mapping[str, Any] | None) -> frozenset[LoggingLevel]",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/context.py",
+      "parent": "server.lifecycle",
+      "name": "Request context",
+      "kind": "module",
+      "summary": "ServerRequestContext dataclass and Context class handed to every handler and middleware.",
+      "detail": "ServerRequestContext[L, R] is the dataclass the runner builds per inbound message: session, lifespan_context, protocol_version, method, params, request_id, meta, and optional SSE close callbacks. Context[L] extends BaseContext with lifespan, connection, and a request-scoped log helper. ServerMiddleware protocol defines the (ctx, call_next) -> result shape.",
+      "paths": ["src/mcp/server/context.py:31"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/context.py#ServerRequestContext",
+      "parent": "f:src/mcp/server/context.py",
+      "name": "ServerRequestContext",
+      "kind": "class",
+      "summary": "Per-request context dataclass: carries session, lifespan_context, protocol_version, method, params, and SSE callbacks.",
+      "paths": ["src/mcp/server/context.py:31-49"],
+      "signature": "@dataclass(kw_only=True)\nclass ServerRequestContext(Generic[LifespanContextT, RequestT])",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/context.py#ServerMiddleware",
+      "parent": "f:src/mcp/server/context.py",
+      "name": "ServerMiddleware",
+      "kind": "class",
+      "summary": "Protocol for context-tier middleware: (ctx, call_next) -> HandlerResult; wraps every inbound message.",
+      "paths": ["src/mcp/server/context.py:146-194"],
+      "signature": "class ServerMiddleware(Protocol[_MwLifespanT])",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/models.py",
+      "parent": "server.lifecycle",
+      "name": "Initialization options",
+      "kind": "module",
+      "summary": "InitializationOptions Pydantic model: carries server name, version, capabilities and optional metadata.",
+      "detail": "Thin model passed to Server.run() and serve_loop(). Fields: server_name, server_version, title, description, capabilities (ServerCapabilities), instructions, website_url, icons. Created by Server.create_initialization_options(); consumed by ServerRunner._handle_initialize() to build the InitializeResult.",
+      "paths": ["src/mcp/server/models.py:9"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:src/mcp/server/models.py#InitializationOptions",
+      "parent": "f:src/mcp/server/models.py",
+      "name": "InitializationOptions",
+      "kind": "class",
+      "summary": "Pydantic model passed to Server.run() / serve_loop; contains server_name, server_version, capabilities.",
+      "paths": ["src/mcp/server/models.py:9-17"],
+      "signature": "class InitializationOptions(BaseModel)",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/transport_security.py",
+      "parent": "server.security",
+      "name": "Transport security",
+      "kind": "module",
+      "summary": "TransportSecurityMiddleware checks Host/Origin headers for DNS-rebinding protection; RequestBodyLimitMiddleware enforces size limit.",
+      "detail": "TransportSecuritySettings carries allowed_hosts and allowed_origins with wildcard port patterns (host:*). The middleware always validates Content-Type on POST; DNS-rebinding checks are opt-in. RequestBodyLimitMiddleware checks Content-Length then streams the body, returning 413 if the limit is exceeded before or during reading. DEFAULT_MAX_REQUEST_BODY_SIZE is 4 MiB.",
+      "paths": ["src/mcp/server/transport_security.py:21"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "facts": ["DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024 (4 MiB)"]
+    },
+    {
+      "id": "f:src/mcp/server/transport_security.py#TransportSecuritySettings",
+      "parent": "f:src/mcp/server/transport_security.py",
+      "name": "TransportSecuritySettings",
+      "kind": "class",
+      "summary": "DNS-rebinding protection settings: allowed_hosts and allowed_origins lists with wildcard port support.",
+      "paths": ["src/mcp/server/transport_security.py:21-39"],
+      "signature": "class TransportSecuritySettings(BaseModel)",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/transport_security.py#TransportSecurityMiddleware",
+      "parent": "f:src/mcp/server/transport_security.py",
+      "name": "TransportSecurityMiddleware",
+      "kind": "class",
+      "summary": "Validates Host and Origin headers for DNS-rebinding protection; always checks Content-Type on POST.",
+      "paths": ["src/mcp/server/transport_security.py:43-123"],
+      "signature": "class TransportSecurityMiddleware",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/elicitation.py",
+      "parent": "server.features",
+      "name": "Elicitation helpers",
+      "kind": "module",
+      "summary": "High-level elicitation helpers: render_elicitation_schema() converts a Pydantic model; elicit_with_validation() wraps the round-trip.",
+      "detail": "render_elicitation_schema() uses _ElicitationJsonSchema (flattens T|None to T, strips None defaults) and validates every property against PrimitiveSchemaDefinition. elicit_with_validation() calls session.elicit_form(), then validates the response content against the schema model. elicit_url() wraps session.elicit_url() and returns a typed UrlElicitationResult.",
+      "paths": ["src/mcp/server/elicitation.py:91"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:src/mcp/server/elicitation.py#elicit_with_validation",
+      "parent": "f:src/mcp/server/elicitation.py",
+      "name": "elicit_with_validation()",
+      "kind": "function",
+      "summary": "Render schema, send form-mode elicitation, validate accepted content; returns AcceptedElicitation[T] or Declined/Cancelled.",
+      "paths": ["src/mcp/server/elicitation.py:103-143"],
+      "signature": "async def elicit_with_validation(session, message, schema: type[ElicitSchemaModelT], related_request_id=None) -> ElicitationResult[ElicitSchemaModelT]",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/subscriptions.py",
+      "parent": "server.features",
+      "name": "Subscriptions",
+      "kind": "module",
+      "summary": "SubscriptionBus protocol and ListenHandler for the 2026-07-28 subscriptions/listen stream.",
+      "detail": "SubscriptionBus is a Protocol: publish() fans an event to synchronous listeners; subscribe() registers one and returns an idempotent unsubscribe. InMemorySubscriptionBus is the default in-process implementation with fan-out isolation (a raising listener is logged and skipped). ListenHandler serves subscriptions/listen: it subscribes, acknowledges the honored filter first, then forwards matching events until the client disconnects or close() is called.",
+      "paths": ["src/mcp/server/subscriptions.py:72"],
+      "status": "live",
+      "tech": ["Python", "anyio"]
+    },
+    {
+      "id": "f:src/mcp/server/subscriptions.py#SubscriptionBus",
+      "parent": "f:src/mcp/server/subscriptions.py",
+      "name": "SubscriptionBus",
+      "kind": "class",
+      "summary": "Protocol for fan-out between event publishers and open listen streams; implement over external pub/sub backends.",
+      "paths": ["src/mcp/server/subscriptions.py:72-93"],
+      "signature": "class SubscriptionBus(Protocol)",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/subscriptions.py#InMemorySubscriptionBus",
+      "parent": "f:src/mcp/server/subscriptions.py",
+      "name": "InMemorySubscriptionBus",
+      "kind": "class",
+      "summary": "In-process SubscriptionBus: synchronous fan-out to listeners in subscription order with error isolation.",
+      "paths": ["src/mcp/server/subscriptions.py:94-125"],
+      "signature": "class InMemorySubscriptionBus",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/subscriptions.py#ListenHandler",
+      "parent": "f:src/mcp/server/subscriptions.py",
+      "name": "ListenHandler",
+      "kind": "class",
+      "summary": "subscriptions/listen handler: acknowledges filter, subscribes to bus, streams matching events until disconnect or close().",
+      "paths": ["src/mcp/server/subscriptions.py:157-254"],
+      "signature": "class ListenHandler",
+      "status": "live",
+      "code": "async def __call__(self, ctx, params):\n    honored = _honored_subset(params.notifications)\n    send, recv = anyio.create_memory_object_stream[ServerEvent](self._max_buffered_events)\n    def deliver(event):\n        if event_matches(honored, honored_uris, event):\n            send.send_nowait(event)\n    unsubscribe = self._bus.subscribe(deliver)\n    await ctx.session.send_notification(SubscriptionsAcknowledgedNotification(...), related_request_id=subscription_id)\n    async for event in recv:\n        await ctx.session.send_notification(event_to_notification(event, meta), related_request_id=subscription_id)\n    return SubscriptionsListenResult(_meta=meta)"
+    },
+    {
+      "id": "f:src/mcp/server/caching.py",
+      "parent": "server.features",
+      "name": "Caching hints",
+      "kind": "module",
+      "summary": "CacheHint dataclass and apply_cache_hint() fill per-method ttlMs/cacheScope on results the handler left unset.",
+      "detail": "CacheHint(ttl_ms, scope) carries TTL in milliseconds and visibility ('public' or 'private'). apply_cache_hint fills only fields not in model_fields_set (handler-set values win). validate_cache_hints validates the constructor-time cache_hints mapping. CACHEABLE_METHODS from mcp_types.methods defines which methods accept hints.",
+      "paths": ["src/mcp/server/caching.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:src/mcp/server/caching.py#CacheHint",
+      "parent": "f:src/mcp/server/caching.py",
+      "name": "CacheHint",
+      "kind": "class",
+      "summary": "Frozen dataclass: ttl_ms (non-negative int milliseconds) and scope ('public' or 'private').",
+      "paths": ["src/mcp/server/caching.py:22-39"],
+      "signature": "@dataclass(frozen=True, slots=True)\nclass CacheHint",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/_otel.py",
+      "parent": "server.features",
+      "name": "OpenTelemetry middleware",
+      "kind": "module",
+      "summary": "OpenTelemetryMiddleware wraps every inbound message in an OpenTelemetry SERVER span with MCP and GenAI attributes.",
+      "detail": "Installed by default on Server.middleware. Extracts trace context from request meta. Sets gen_ai.operation.name='execute_tool' on tools/call, gen_ai.prompt.name on prompts/get. Detects tool errors from CallToolResult(is_error=True) or {'isError': True} and sets span status ERROR. The middleware is a no-op until an OTel exporter is installed.",
+      "paths": ["src/mcp/server/_otel.py"],
+      "status": "live",
+      "tech": ["Python", "opentelemetry"]
+    },
+    {
+      "id": "f:src/mcp/server/_otel.py#OpenTelemetryMiddleware",
+      "parent": "f:src/mcp/server/_otel.py",
+      "name": "OpenTelemetryMiddleware",
+      "kind": "class",
+      "summary": "Default middleware: wraps each inbound message in an OTel SERVER span with mcp.method.name and protocol version attributes.",
+      "paths": ["src/mcp/server/_otel.py:14-72"],
+      "signature": "class OpenTelemetryMiddleware(ServerMiddleware[Any])",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/extension.py",
+      "parent": "server.features",
+      "name": "Extension base class",
+      "kind": "module",
+      "summary": "Extension base class and binding dataclasses for opt-in MCP extensions (SEP-2133).",
+      "detail": "Extension subclasses declare an identifier (reverse-DNS, validated at definition time) and override tools(), resources(), methods(), and intercept_tool_call(). ToolBinding, ResourceBinding, MethodBinding are frozen dataclasses. compose_tool_call_handler() folds interceptors around the tools/call handler. MethodBinding rejects spec-defined methods at construction.",
+      "paths": ["src/mcp/server/extension.py:96"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/extension.py#Extension",
+      "parent": "f:src/mcp/server/extension.py",
+      "name": "Extension",
+      "kind": "class",
+      "summary": "Base class for opt-in MCP extensions; subclasses override tools/resources/methods/intercept_tool_call.",
+      "paths": ["src/mcp/server/extension.py:96-157"],
+      "signature": "class Extension",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/apps.py",
+      "parent": "server.features",
+      "name": "MCP Apps extension",
+      "kind": "module",
+      "summary": "Apps Extension (io.modelcontextprotocol/ui): bind tools to ui:// HTML resources rendered in a sandboxed iframe.",
+      "detail": "Apps is a self-contained Extension. @apps.tool(resource_uri=...) stamps _meta.ui.resourceUri on the tool. add_html_resource() registers the HTML document as a TextResource with MIME type text/html;profile=mcp-app. client_supports_apps() checks the client's extension negotiation. tools() validates that every bound resource_uri has a matching resource registered.",
+      "paths": ["src/mcp/server/apps.py:77"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/skills.py",
+      "parent": "server.features",
+      "name": "Skills extension",
+      "kind": "module",
+      "summary": "Skills Extension (io.modelcontextprotocol/skills, SEP-2640): serve skills/list, skills/get, resources/directory/read.",
+      "detail": "Skills is an Extension that registers method bindings for skills/list, skills/get, and optionally resources/directory/read. Handlers validate results for SEP-2640 conformance (_handle_list, _handle_get). Cache hints are gated to the 2026-07-28 protocol version via _finalize_cacheable().",
+      "paths": ["src/mcp/server/skills.py:65"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/request_state.py",
+      "parent": "server.security",
+      "name": "Request state boundary",
+      "kind": "module",
+      "summary": "RequestStateBoundary middleware and AESGCMRequestStateCodec seal/unseal multi-round-trip requestState tokens.",
+      "detail": "RequestStateBoundary acts only on INPUT_REQUIRED_METHODS (tools/call, prompts/get, resources/read). Inbound: codec unseal, claims check (version, expiry, request binding, audience, principal). Outbound: an input_required result carrying requestState is replaced with a fresh sealed token. AESGCMRequestStateCodec uses AES-256-GCM with HKDF-SHA256 key derivation, a 4-byte key fingerprint for O(1) ring lookup, and a v1. token prefix.",
+      "paths": ["src/mcp/server/request_state.py:327"],
+      "status": "live",
+      "tech": ["Python", "cryptography"]
+    },
+    {
+      "id": "f:src/mcp/server/request_state.py#RequestStateBoundary",
+      "parent": "f:src/mcp/server/request_state.py",
+      "name": "RequestStateBoundary",
+      "kind": "class",
+      "summary": "Middleware: unseals inbound requestState, replaces plaintext, seals outbound input_required requestState.",
+      "paths": ["src/mcp/server/request_state.py:327-454"],
+      "signature": "class RequestStateBoundary",
+      "status": "live"
+    },
+    {
+      "id": "f:src/mcp/server/request_state.py#AESGCMRequestStateCodec",
+      "parent": "f:src/mcp/server/request_state.py",
+      "name": "AESGCMRequestStateCodec",
+      "kind": "class",
+      "summary": "AES-256-GCM codec for requestState tokens: seal() encrypts, unseal() decrypts; supports key rotation via a ring.",
+      "paths": ["src/mcp/server/request_state.py:187-248"],
+      "signature": "class AESGCMRequestStateCodec",
+      "status": "live",
+      "facts": [
+        "Keys must be at least 32 bytes",
+        "Token format: v1.<base64url(kid + nonce + ciphertext)>",
+        "Kid is a 4-byte SHA-256 fingerprint for O(1) ring lookup",
+        "Nonce is 12 random bytes per seal",
+        "Keys[0] seals; all keys unseal (rotation ring)"
+      ]
+    },
+    {
+      "id": "f:src/mcp/server/validation.py",
+      "parent": "server.lifecycle",
+      "name": "Sampling validation",
+      "kind": "module",
+      "summary": "Validation helpers for sampling tools capability and tool_use/tool_result message structure.",
+      "detail": "validate_sampling_tools() raises MCPError INVALID_PARAMS when tools or tool_choice are provided but client lacks the sampling.tools capability. validate_tool_use_result_messages() enforces the SEP-1577 contract: a message with tool_result content must contain only tool_result blocks, must follow a message with matching tool_use, and IDs must match. Called by ServerSession.create_message().",
+      "paths": ["src/mcp/server/validation.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/__init__.py",
+      "parent": "server",
+      "name": "Server package API",
+      "kind": "module",
+      "summary": "Public re-exports: Server, MCPServer, ServerRequestContext, CacheHint, NotificationOptions, InitializationOptions.",
+      "detail": "Thin re-export module forming the public surface of mcp.server. __all__ = ['CacheHint', 'Server', 'ServerRequestContext', 'MCPServer', 'NotificationOptions', 'InitializationOptions']. Consumers import from here rather than from the sub-modules directly.",
+      "paths": ["src/mcp/server/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/__main__.py",
+      "parent": "server",
+      "name": "Server __main__",
+      "kind": "module",
+      "summary": "Minimal demo entry point: runs a bare low-level Server over stdio with anyio trio backend.",
+      "detail": "Creates a nameless bare Server('mcp'), enters stdio_server(), and runs the connection loop via server.run(). Uses anyio.run(..., backend='trio'). Useful for smoke-testing that the package is importable and runnable with no registered handlers.",
+      "paths": ["src/mcp/server/__main__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/__init__.py",
+      "parent": "server.lowlevel",
+      "name": "lowlevel package API",
+      "kind": "module",
+      "summary": "Re-exports Server and NotificationOptions from lowlevel.server.",
+      "detail": "Thin re-export so users can write 'from mcp.server.lowlevel import Server, NotificationOptions' rather than importing from the internal server.py sub-module.",
+      "paths": ["src/mcp/server/lowlevel/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/lowlevel/helper_types.py",
+      "parent": "server.lowlevel",
+      "name": "ReadResourceContents",
+      "kind": "module",
+      "summary": "ReadResourceContents dataclass: content, mime_type, and meta for resource-read results.",
+      "detail": "Single frozen dataclass with three fields: content (str | bytes), mime_type (str | None), meta (dict | None). Used by MCPServer resource handlers as a convenience return type that the high-level server maps to ReadResourceResult.",
+      "paths": ["src/mcp/server/lowlevel/helper_types.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:src/mcp/server/runner.py#serve_loop",
+      "parent": "f:src/mcp/server/runner.py",
+      "name": "serve_loop()",
+      "kind": "function",
+      "summary": "Drive a server in handshake-only loop mode over a stream pair; called by StreamableHTTPSessionManager per session.",
+      "paths": ["src/mcp/server/runner.py:470-500"],
+      "signature": "async def serve_loop(server, read_stream, write_stream, *, lifespan_state, session_id=None, init_options=None, raise_exceptions=False) -> None",
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_runner.py",
+      "parent": "server.lifecycle",
+      "name": "runner tests",
+      "kind": "test",
+      "summary": "Tests for ServerRunner dispatch, middleware chain, era routing, and serve_* drivers.",
+      "paths": ["tests/server/test_runner.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_session.py",
+      "parent": "server.lifecycle",
+      "name": "session tests",
+      "kind": "test",
+      "summary": "Tests for ServerSession elicitation, log routing, progress, and channel selection.",
+      "paths": ["tests/server/test_session.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_connection.py",
+      "parent": "server.lifecycle",
+      "name": "connection tests",
+      "kind": "test",
+      "summary": "Tests for Connection factories, outbound channel behavior, and initialize_accepted gating.",
+      "paths": ["tests/server/test_connection.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_stdio.py",
+      "parent": "server.transports",
+      "name": "stdio tests",
+      "kind": "test",
+      "summary": "Tests for stdio_server: fd claiming, diversion, concurrent-use guard, and message framing.",
+      "paths": ["tests/server/test_stdio.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_streamable_http_manager.py",
+      "parent": "server.transports",
+      "name": "Streamable HTTP manager tests",
+      "kind": "test",
+      "summary": "Tests for session creation, idle timeout, session cap, era routing, and stateless mode.",
+      "paths": ["tests/server/test_streamable_http_manager.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_streamable_http_modern.py",
+      "parent": "server.transports",
+      "name": "modern HTTP handler tests",
+      "kind": "test",
+      "summary": "Tests for handle_modern_request: JSON/SSE mode, Mcp-Param validation, disconnect handling.",
+      "paths": ["tests/server/test_streamable_http_modern.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_subscriptions.py",
+      "parent": "server.features",
+      "name": "subscriptions tests",
+      "kind": "test",
+      "summary": "Tests for InMemorySubscriptionBus, ListenHandler, and filter semantics.",
+      "paths": ["tests/server/test_subscriptions.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_transport_security.py",
+      "parent": "server.security",
+      "name": "transport security tests",
+      "kind": "test",
+      "summary": "Tests for TransportSecurityMiddleware Host/Origin validation and RequestBodyLimitMiddleware size enforcement.",
+      "paths": ["tests/server/test_transport_security.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_request_state_boundary.py",
+      "parent": "server.security",
+      "name": "request state boundary tests",
+      "kind": "test",
+      "summary": "Tests for RequestStateBoundary seal/unseal, expiry, principal binding, and audience enforcement.",
+      "paths": ["tests/server/test_request_state_boundary.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_caching.py",
+      "parent": "server.features",
+      "name": "caching tests",
+      "kind": "test",
+      "summary": "Tests for CacheHint validation and apply_cache_hint field-precedence.",
+      "paths": ["tests/server/test_caching.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_otel.py",
+      "parent": "server.features",
+      "name": "OTel middleware tests",
+      "kind": "test",
+      "summary": "Tests for OpenTelemetryMiddleware span attributes, error status, and tool error detection.",
+      "paths": ["tests/server/test_otel.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_sse_security.py",
+      "parent": "server.transports",
+      "name": "SSE security tests",
+      "kind": "test",
+      "summary": "Tests for SseServerTransport DNS-rebinding validation and credential binding.",
+      "paths": ["tests/server/test_sse_security.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_streamable_http_security.py",
+      "parent": "server.transports",
+      "name": "Streamable HTTP security tests",
+      "kind": "test",
+      "summary": "Tests for StreamableHTTPServerTransport DNS-rebinding and body-size enforcement.",
+      "paths": ["tests/server/test_streamable_http_security.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_skills.py",
+      "parent": "server.features",
+      "name": "skills tests",
+      "kind": "test",
+      "summary": "Tests for Skills extension list/get/directory handlers and SEP-2640 conformance validation.",
+      "paths": ["tests/server/test_skills.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/server/test_apps.py",
+      "parent": "server.features",
+      "name": "MCP Apps tests",
+      "kind": "test",
+      "summary": "Tests for Apps extension tool/resource binding and client_supports_apps capability check.",
+      "paths": ["tests/server/test_apps.py"],
+      "status": "live"
+    }
+  ],
+  "edges": [
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server.run",
+      "to": "f:src/mcp/server/runner.py#serve_dual_era_loop",
+      "kind": "calls",
+      "label": "drives connection over stream pair",
+      "evidence": "src/mcp/server/lowlevel/server.py:722"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server.streamable_http_app",
+      "to": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager",
+      "kind": "calls",
+      "label": "creates session manager and ASGI app",
+      "evidence": "src/mcp/server/lowlevel/server.py:760"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server.get_capabilities",
+      "to": "f:src/mcp/server/lowlevel/server.py#Server",
+      "kind": "reads",
+      "label": "derives capabilities from _request_handlers dict",
+      "evidence": "src/mcp/server/lowlevel/server.py:597"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#ServerRunner._on_request",
+      "to": "f:src/mcp/server/runner.py#ServerRunner._serialize",
+      "kind": "calls",
+      "label": "shape result for the wire",
+      "evidence": "src/mcp/server/runner.py:223"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#ServerRunner._on_request",
+      "to": "f:src/mcp/server/session.py#ServerSession",
+      "kind": "calls",
+      "label": "builds per-request ServerSession via _make_context",
+      "evidence": "src/mcp/server/runner.py:327"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#serve_dual_era_loop",
+      "to": "f:src/mcp/server/runner.py#serve_one",
+      "kind": "calls",
+      "label": "single-exchange dispatch on modern requests",
+      "evidence": "src/mcp/server/runner.py:785"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#ServerRunner",
+      "to": "f:src/mcp/server/connection.py#Connection",
+      "kind": "reads",
+      "label": "reads protocol_version and outbound channel",
+      "evidence": "src/mcp/server/runner.py:179"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager._handle_request",
+      "to": "f:src/mcp/server/_streamable_http_modern.py#handle_modern_request",
+      "kind": "calls",
+      "label": "routes 2026-07-28 requests to single-exchange handler",
+      "evidence": "src/mcp/server/streamable_http_manager.py:195"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager.run",
+      "to": "f:src/mcp/server/lowlevel/server.py#Server",
+      "kind": "calls",
+      "label": "enters app.lifespan and stores lifespan_state",
+      "evidence": "src/mcp/server/streamable_http_manager.py:156"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager",
+      "to": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport",
+      "kind": "calls",
+      "label": "creates one transport per stateful session",
+      "evidence": "src/mcp/server/streamable_http_manager.py:312"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport.connect",
+      "to": "f:src/mcp/server/runner.py#serve_loop",
+      "kind": "calls",
+      "label": "transport streams yielded to serve_loop",
+      "evidence": "src/mcp/server/streamable_http_manager.py:357"
+    },
+    {
+      "from": "f:src/mcp/server/_streamable_http_modern.py#handle_modern_request",
+      "to": "f:src/mcp/server/runner.py#serve_one",
+      "kind": "calls",
+      "label": "single-exchange request dispatch",
+      "evidence": "src/mcp/server/_streamable_http_modern.py:460"
+    },
+    {
+      "from": "f:src/mcp/server/_streamable_http_modern.py#handle_modern_request",
+      "to": "f:src/mcp/server/connection.py#Connection.from_envelope",
+      "kind": "calls",
+      "label": "builds born-ready connection from request _meta",
+      "evidence": "src/mcp/server/_streamable_http_modern.py:443"
+    },
+    {
+      "from": "f:src/mcp/server/session.py#ServerSession.send_request",
+      "to": "f:src/mcp/server/connection.py#Connection",
+      "kind": "calls",
+      "label": "selects standalone vs request-scoped channel",
+      "evidence": "src/mcp/server/session.py:109"
+    },
+    {
+      "from": "f:src/mcp/server/subscriptions.py#ListenHandler",
+      "to": "f:src/mcp/server/session.py#ServerSession.send_request",
+      "kind": "calls",
+      "label": "sends ack notification and stream events on request channel",
+      "evidence": "src/mcp/server/subscriptions.py:227"
+    },
+    {
+      "from": "f:src/mcp/server/elicitation.py#elicit_with_validation",
+      "to": "f:src/mcp/server/session.py#ServerSession.elicit_form",
+      "kind": "calls",
+      "label": "delegates to session elicit_form after rendering schema",
+      "evidence": "src/mcp/server/elicitation.py:125"
+    },
+    {
+      "from": "f:src/mcp/server/_otel.py#OpenTelemetryMiddleware",
+      "to": "f:src/mcp/server/context.py#ServerMiddleware",
+      "kind": "calls",
+      "label": "implements ServerMiddleware protocol",
+      "evidence": "src/mcp/server/_otel.py:14"
+    },
+    {
+      "from": "f:src/mcp/server/request_state.py#RequestStateBoundary",
+      "to": "f:src/mcp/server/context.py#ServerMiddleware",
+      "kind": "calls",
+      "label": "implements ServerMiddleware protocol",
+      "evidence": "src/mcp/server/request_state.py:353"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#ServerRunner",
+      "to": "f:src/mcp/server/caching.py#CacheHint",
+      "kind": "calls",
+      "label": "applies cache hints in _serialize",
+      "evidence": "src/mcp/server/runner.py:357"
+    },
+    {
+      "from": "f:src/mcp/server/transport_security.py#TransportSecurityMiddleware",
+      "to": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport",
+      "kind": "configures",
+      "label": "injected at transport construction via security_settings",
+      "evidence": "src/mcp/server/streamable_http.py:212"
+    },
+    {
+      "from": "f:src/mcp/server/transport_security.py#TransportSecurityMiddleware",
+      "to": "f:src/mcp/server/sse.py#SseServerTransport",
+      "kind": "configures",
+      "label": "injected at transport construction via security_settings",
+      "evidence": "src/mcp/server/sse.py:133"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server.streamable_http_app",
+      "to": "f:src/mcp/server/transport_security.py#TransportSecuritySettings",
+      "kind": "calls",
+      "label": "auto-enables DNS-rebinding protection for localhost",
+      "evidence": "src/mcp/server/lowlevel/server.py:753"
+    },
+    {
+      "from": "f:src/mcp/server/apps.py",
+      "to": "f:src/mcp/server/extension.py#Extension",
+      "kind": "calls",
+      "label": "Apps subclasses Extension",
+      "evidence": "src/mcp/server/apps.py:77"
+    },
+    {
+      "from": "f:src/mcp/server/skills.py",
+      "to": "f:src/mcp/server/extension.py#Extension",
+      "kind": "calls",
+      "label": "Skills subclasses Extension",
+      "evidence": "src/mcp/server/skills.py:65"
+    },
+    {
+      "from": "f:src/mcp/server/stdio.py#stdio_server",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "task group, async file wrapping, and memory streams",
+      "evidence": "src/mcp/server/stdio.py:209"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport",
+      "to": "x:sse-starlette",
+      "kind": "calls",
+      "label": "EventSourceResponse for SSE streams",
+      "evidence": "src/mcp/server/streamable_http.py:694"
+    },
+    {
+      "from": "f:src/mcp/server/sse.py#SseServerTransport",
+      "to": "x:sse-starlette",
+      "kind": "calls",
+      "label": "EventSourceResponse for the SSE event stream",
+      "evidence": "src/mcp/server/sse.py:202"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server.streamable_http_app",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "builds Starlette app with routes and middleware",
+      "evidence": "src/mcp/server/lowlevel/server.py:847"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "task group, CancelScope, and Lock for session lifecycle",
+      "evidence": "src/mcp/server/streamable_http_manager.py:117"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#ServerRunner",
+      "to": "shared",
+      "kind": "calls",
+      "label": "uses JSONRPCDispatcher, Dispatcher, MCPError from shared",
+      "evidence": "src/mcp/server/runner.py:68"
+    },
+    {
+      "from": "f:src/mcp/server/session.py#ServerSession",
+      "to": "shared",
+      "kind": "calls",
+      "label": "uses DispatchContext and Outbound from shared dispatcher",
+      "evidence": "src/mcp/server/session.py:21"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server",
+      "to": "mcpserver",
+      "kind": "calls",
+      "label": "MCPServer (FastMCP) constructs and wraps a lowlevel Server",
+      "evidence": "src/mcp/server/__init__.py:4"
+    },
+    {
+      "from": "f:src/mcp/server/connection.py#Connection",
+      "to": "shared",
+      "kind": "calls",
+      "label": "uses Outbound protocol from shared.dispatcher",
+      "evidence": "src/mcp/server/connection.py:49"
+    },
+    {
+      "from": "f:src/mcp/server/request_state.py#AESGCMRequestStateCodec",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "cryptography package for AES-GCM and HKDF-SHA256",
+      "evidence": "src/mcp/server/request_state.py:24"
+    },
+    {
+      "from": "f:src/mcp/server/_otel.py#OpenTelemetryMiddleware",
+      "to": "shared",
+      "kind": "calls",
+      "label": "uses shared._otel helpers otel_span and trace context",
+      "evidence": "src/mcp/server/_otel.py:11"
+    },
+    {
+      "from": "f:tests/server/test_runner.py",
+      "to": "f:src/mcp/server/runner.py",
+      "kind": "tests",
+      "label": "tests ServerRunner and serve_* drivers",
+      "evidence": "tests/server/test_runner.py:1"
+    },
+    {
+      "from": "f:tests/server/test_session.py",
+      "to": "f:src/mcp/server/session.py",
+      "kind": "tests",
+      "label": "tests ServerSession elicitation and log routing",
+      "evidence": "tests/server/test_session.py:1"
+    },
+    {
+      "from": "f:tests/server/test_connection.py",
+      "to": "f:src/mcp/server/connection.py",
+      "kind": "tests",
+      "label": "tests Connection factories and outbound behavior",
+      "evidence": "tests/server/test_connection.py:1"
+    },
+    {
+      "from": "f:tests/server/test_stdio.py",
+      "to": "f:src/mcp/server/stdio.py",
+      "kind": "tests",
+      "label": "tests stdio_server fd claiming and message framing",
+      "evidence": "tests/server/test_stdio.py:1"
+    },
+    {
+      "from": "f:tests/server/test_streamable_http_manager.py",
+      "to": "f:src/mcp/server/streamable_http_manager.py",
+      "kind": "tests",
+      "label": "tests session manager era routing and lifecycle",
+      "evidence": "tests/server/test_streamable_http_manager.py:1"
+    },
+    {
+      "from": "f:tests/server/test_streamable_http_modern.py",
+      "to": "f:src/mcp/server/_streamable_http_modern.py",
+      "kind": "tests",
+      "label": "tests modern HTTP handler JSON/SSE modes",
+      "evidence": "tests/server/test_streamable_http_modern.py:1"
+    },
+    {
+      "from": "f:tests/server/test_subscriptions.py",
+      "to": "f:src/mcp/server/subscriptions.py",
+      "kind": "tests",
+      "label": "tests SubscriptionBus and ListenHandler",
+      "evidence": "tests/server/test_subscriptions.py:1"
+    },
+    {
+      "from": "f:tests/server/test_transport_security.py",
+      "to": "f:src/mcp/server/transport_security.py",
+      "kind": "tests",
+      "label": "tests Host/Origin validation and body size limits",
+      "evidence": "tests/server/test_transport_security.py:1"
+    },
+    {
+      "from": "f:tests/server/test_request_state_boundary.py",
+      "to": "f:src/mcp/server/request_state.py",
+      "kind": "tests",
+      "label": "tests RequestStateBoundary seal/unseal round-trip",
+      "evidence": "tests/server/test_request_state_boundary.py:1"
+    },
+    {
+      "from": "f:tests/server/test_caching.py",
+      "to": "f:src/mcp/server/caching.py",
+      "kind": "tests",
+      "label": "tests CacheHint and apply_cache_hint",
+      "evidence": "tests/server/test_caching.py:1"
+    },
+    {
+      "from": "f:tests/server/test_otel.py",
+      "to": "f:src/mcp/server/_otel.py",
+      "kind": "tests",
+      "label": "tests OTel middleware span attributes and error detection",
+      "evidence": "tests/server/test_otel.py:1"
+    },
+    {
+      "from": "f:tests/server/test_sse_security.py",
+      "to": "f:src/mcp/server/sse.py",
+      "kind": "tests",
+      "label": "tests SSE transport security and credential binding",
+      "evidence": "tests/server/test_sse_security.py:1"
+    },
+    {
+      "from": "f:tests/server/test_streamable_http_security.py",
+      "to": "f:src/mcp/server/streamable_http.py",
+      "kind": "tests",
+      "label": "tests Streamable HTTP transport DNS-rebinding and body size",
+      "evidence": "tests/server/test_streamable_http_security.py:1"
+    },
+    {
+      "from": "f:tests/server/test_skills.py",
+      "to": "f:src/mcp/server/skills.py",
+      "kind": "tests",
+      "label": "tests Skills extension handlers",
+      "evidence": "tests/server/test_skills.py:1"
+    },
+    {
+      "from": "f:tests/server/test_apps.py",
+      "to": "f:src/mcp/server/apps.py",
+      "kind": "tests",
+      "label": "tests Apps extension tool/resource binding",
+      "evidence": "tests/server/test_apps.py:1"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server",
+      "to": "x:mcp-host",
+      "kind": "http",
+      "label": "serves MCP protocol requests from LLM host clients",
+      "evidence": "src/mcp/server/lowlevel/server.py:703"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server.add_request_handler",
+      "to": "f:src/mcp/server/lowlevel/server.py#HandlerEntry",
+      "kind": "writes",
+      "label": "stores HandlerEntry in _request_handlers dict",
+      "evidence": "src/mcp/server/lowlevel/server.py:507"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#Server.add_request_handler",
+      "to": "f:src/mcp/server/lowlevel/server.py#Server",
+      "kind": "writes",
+      "label": "inserts into Server._request_handlers keyed by method string",
+      "evidence": "src/mcp/server/lowlevel/server.py:507"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#HandlerEntry",
+      "to": "f:src/mcp/server/runner.py#ServerRunner._on_request",
+      "kind": "reads",
+      "label": "runner reads params_type and handler to dispatch",
+      "evidence": "src/mcp/server/runner.py:214"
+    },
+    {
+      "from": "f:src/mcp/server/lowlevel/server.py#NotificationOptions",
+      "to": "f:src/mcp/server/lowlevel/server.py#Server.get_capabilities",
+      "kind": "configures",
+      "label": "listChanged flags read by get_capabilities",
+      "evidence": "src/mcp/server/lowlevel/server.py:598"
+    },
+    {
+      "from": "f:src/mcp/server/session.py#ServerSession.elicit_url",
+      "to": "f:src/mcp/server/session.py#ServerSession.send_request",
+      "kind": "calls",
+      "label": "delegates to send_request with ElicitRequestURLParams",
+      "evidence": "src/mcp/server/session.py:407"
+    },
+    {
+      "from": "f:src/mcp/server/session.py#ServerSession.report_progress",
+      "to": "f:src/mcp/server/session.py#ServerSession",
+      "kind": "calls",
+      "label": "delegates to self._request_outbound.progress()",
+      "evidence": "src/mcp/server/session.py:434"
+    },
+    {
+      "from": "f:src/mcp/server/sse.py#SseServerTransport.connect_sse",
+      "to": "f:src/mcp/server/sse.py#SseServerTransport",
+      "kind": "writes",
+      "label": "registers read_stream_writer keyed by session_id",
+      "evidence": "src/mcp/server/sse.py:159"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport._handle_post_request",
+      "to": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport",
+      "kind": "writes",
+      "label": "feeds message to read_stream; stores SSE streams",
+      "evidence": "src/mcp/server/streamable_http.py:558"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport._handle_post_request",
+      "to": "f:src/mcp/server/streamable_http.py#EventStore",
+      "kind": "calls",
+      "label": "calls store_event() to mint priming event",
+      "evidence": "src/mcp/server/streamable_http.py:650"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http.py#EventStore",
+      "to": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport",
+      "kind": "configures",
+      "label": "injected at construction; transport calls store/replay",
+      "evidence": "src/mcp/server/streamable_http.py:212"
+    },
+    {
+      "from": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPASGIApp",
+      "to": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager",
+      "kind": "calls",
+      "label": "delegates __call__ to session_manager.asgi_app",
+      "evidence": "src/mcp/server/streamable_http_manager.py:427"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#modern_on_request",
+      "to": "f:src/mcp/server/runner.py#serve_one",
+      "kind": "calls",
+      "label": "builds Connection then delegates to serve_one",
+      "evidence": "src/mcp/server/runner.py:863"
+    },
+    {
+      "from": "f:src/mcp/server/runner.py#modern_on_request",
+      "to": "f:src/mcp/server/connection.py#Connection.from_envelope",
+      "kind": "calls",
+      "label": "creates a born-ready connection from request _meta",
+      "evidence": "src/mcp/server/runner.py:858"
+    },
+    {
+      "from": "f:src/mcp/server/connection.py#Connection.for_loop",
+      "to": "f:src/mcp/server/connection.py#Connection",
+      "kind": "calls",
+      "label": "factory for handshake-driven Connection",
+      "evidence": "src/mcp/server/connection.py:314"
+    },
+    {
+      "from": "f:src/mcp/server/connection.py#NotifyOnlyOutbound",
+      "to": "f:src/mcp/server/connection.py#Connection",
+      "kind": "configures",
+      "label": "installed as Connection.outbound on modern streams",
+      "evidence": "src/mcp/server/connection.py:156"
+    },
+    {
+      "from": "f:src/mcp/server/connection.py#allowed_log_levels",
+      "to": "f:src/mcp/server/session.py#ServerSession",
+      "kind": "configures",
+      "label": "result stored as _allowed_log_levels in session",
+      "evidence": "src/mcp/server/session.py:49"
+    },
+    {
+      "from": "f:src/mcp/server/context.py#ServerRequestContext",
+      "to": "f:src/mcp/server/session.py#ServerSession",
+      "kind": "reads",
+      "label": "holds session field: the ServerSession for this request",
+      "evidence": "src/mcp/server/context.py:40"
+    },
+    {
+      "from": "f:src/mcp/server/models.py#InitializationOptions",
+      "to": "f:src/mcp/server/runner.py#ServerRunner",
+      "kind": "configures",
+      "label": "init_options field; runner builds InitializeResult from it",
+      "evidence": "src/mcp/server/runner.py:164"
+    },
+    {
+      "from": "f:src/mcp/server/subscriptions.py#InMemorySubscriptionBus",
+      "to": "f:src/mcp/server/subscriptions.py#SubscriptionBus",
+      "kind": "calls",
+      "label": "in-process implementation of the SubscriptionBus protocol",
+      "evidence": "src/mcp/server/subscriptions.py:94"
+    },
+    {
+      "from": "f:src/mcp/server/subscriptions.py#SubscriptionBus",
+      "to": "f:src/mcp/server/subscriptions.py#ListenHandler",
+      "kind": "configures",
+      "label": "injected; subscribe/publish drive event fan-out",
+      "evidence": "src/mcp/server/subscriptions.py:157"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow.server.streamable-http-request",
+      "name": "Streamable HTTP request end to end",
+      "summary": "A POST arrives at the manager, is routed to a session's transport, runs through the server loop, and streams back as SSE.",
+      "steps": [
+        {
+          "node": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager",
+          "text": "ASGI request arrives at StreamableHTTPASGIApp.__call__, forwarded through RequestBodyLimitMiddleware to StreamableHTTPSessionManager._handle_request. The MCP-Protocol-Version header is checked: a 2026-07-28 value routes to handle_modern_request; a handshake-era value (or absent header) proceeds to _handle_stateful_request."
+        },
+        {
+          "node": "f:src/mcp/server/streamable_http_manager.py#StreamableHTTPSessionManager._handle_request",
+          "text": "In stateful mode, _handle_stateful_request reads Mcp-Session-Id. An existing session ID fetches the already-running StreamableHTTPServerTransport and calls transport.handle_request. A missing session ID calls _admit_session under a lock (enforcing max_sessions), then _serve_opening_request starts a per-session serve_loop task via the shared task group."
+        },
+        {
+          "node": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport._handle_post_request",
+          "text": "transport.handle_request dispatches to _handle_post_request. The request is validated (Accept header, Content-Type, session ID). The JSON-RPC message is parsed. For a request (not notification), _mint_priming_event stores a priming cursor in the event store (if present). An SSE stream pair is created for this request ID and stored in _request_streams and _sse_stream_writers. The session message is sent to the read_stream_writer."
+        },
+        {
+          "node": "f:src/mcp/server/runner.py#ServerRunner._on_request",
+          "text": "The serve_loop's JSONRPCDispatcher reads the message and calls ServerRunner._on_request. The middleware chain (including OpenTelemetryMiddleware) wraps the call. The handler's params are validated, the handler is invoked, and _serialize shapes the result with cache hints, the per-version surface sieve, resultType, and serverInfo _meta stamp."
+        },
+        {
+          "node": "f:src/mcp/server/streamable_http.py#StreamableHTTPServerTransport.connect",
+          "text": "The serve_loop writes the JSON-RPC response to write_stream. The message_router task (started by connect()) reads from write_stream, finds the matching request_id, and deposits the response as an EventMessage into _request_streams[request_id]. The _run_sse_writer task picks it up and sends it as an SSE event to the HTTP response. The SSE stream closes after the response or error frame."
+        }
+      ]
+    },
+    {
+      "id": "flow.server.stdio-wiring",
+      "name": "stdio_server wires stdin/stdout into a ServerSession loop",
+      "summary": "stdio_server() diverts the process file descriptors, creates memory streams, and runs the server loop until stdin closes.",
+      "steps": [
+        {
+          "node": "f:src/mcp/server/stdio.py#stdio_server",
+          "text": "stdio_server() is entered as an async context manager. _claim_fd duplicates fd 0 and fd 1 onto private descriptors above fd 2, then diverts fd 0 to /dev/null and fd 1 to fd 2 (stderr). Two anyio tasks are started: stdin_reader reads newline-delimited JSON and writes SessionMessage objects to read_stream_writer; stdout_writer reads from write_stream_reader and serializes each message as a JSON line followed by a newline."
+        },
+        {
+          "node": "f:src/mcp/server/lowlevel/server.py#Server.run",
+          "text": "The caller (or __main__) enters the context manager, then calls server.run(read_stream, write_stream, init_options). Server.run enters the lifespan context manager, then calls serve_dual_era_loop with both streams."
+        },
+        {
+          "node": "f:src/mcp/server/runner.py#serve_dual_era_loop",
+          "text": "_replay_from_opening_request peeks at the first JSONRPCRequest without consuming it. If the request carries the 2026-07-28 _meta envelope (and is not 'initialize'), the connection is routed to _serve_modern_stream; otherwise to _serve_legacy_stream which uses the standard initialize handshake."
+        },
+        {
+          "node": "f:src/mcp/server/runner.py#ServerRunner._on_request",
+          "text": "The JSONRPCDispatcher drives the message loop. For each inbound request, ServerRunner._on_request builds a ServerRequestContext (including a ServerSession wrapping the DispatchContext), runs the middleware chain, validates params, calls the registered handler, and serializes the result back through the dispatcher onto write_stream, which stdout_writer serializes to stdout."
+        },
+        {
+          "node": "f:src/mcp/server/stdio.py",
+          "text": "When stdin closes (host disconnects), stdin_reader exits and closes read_stream_writer. The dispatcher's read loop receives EOF and returns, ending serve_dual_era_loop. stdio_server()'s finally block calls the restore callbacks to dup2 the private wire descriptors back onto fd 0 and fd 1."
+        }
+      ]
+    }
+  ]
+}

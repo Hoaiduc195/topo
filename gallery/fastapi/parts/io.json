@@ -1,0 +1,1253 @@
+{
+  "area": "io",
+  "nodes": [
+
+    {
+      "id": "io.encoding",
+      "parent": "fastapi.io",
+      "name": "JSON Encoding",
+      "kind": "group",
+      "summary": "Converts arbitrary Python objects into JSON-safe primitives for use in HTTP responses.",
+      "detail": "fastapi/encoders.py provides jsonable_encoder(), the recursive serializer used throughout FastAPI. It handles Pydantic BaseModel, dataclasses, enums, datetimes, Decimal, UUID, IP address types, sets, frozensets, generators, deques, bytes, Path, Pattern, Pydantic secret types, and URL types. The function accepts include/exclude field filters, by_alias, exclude_unset, exclude_defaults, exclude_none, custom_encoder overrides, and a sqlalchemy_safe flag that suppresses attributes starting with _sa. For unrecognised objects it falls back to dict() then vars().",
+      "paths": ["fastapi/encoders.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "io.exceptions",
+      "parent": "fastapi.io",
+      "name": "Exception hierarchy",
+      "kind": "group",
+      "summary": "Defines the exception classes endpoints raise and the handlers that convert them to HTTP responses.",
+      "detail": "fastapi/exceptions.py defines HTTPException (extends Starlette's HTTPException), WebSocketException (extends Starlette's), FastAPIError (RuntimeError base), DependencyScopeError, ValidationException base class, RequestValidationError, WebSocketRequestValidationError, ResponseValidationError, PydanticV1NotSupportedError, and FastAPIDeprecationWarning. fastapi/exception_handlers.py registers three async handlers: http_exception_handler (returns JSONResponse or empty Response depending on status code), request_validation_exception_handler (422 JSON), and websocket_request_validation_exception_handler (closes with WS_1008_POLICY_VIOLATION).",
+      "paths": ["fastapi/exceptions.py", "fastapi/exception_handlers.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "io.responses_requests",
+      "parent": "fastapi.io",
+      "name": "Response & Request types",
+      "kind": "group",
+      "summary": "Re-exports Starlette request and response types and adds deprecated ORJSON/UJSON response wrappers.",
+      "detail": "fastapi/requests.py re-exports starlette.requests.Request and HTTPConnection. fastapi/responses.py re-exports JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse, FileResponse, StreamingResponse, and Response from Starlette, and re-exports EventSourceResponse from fastapi.sse. It also defines deprecated UJSONResponse and ORJSONResponse subclasses of JSONResponse that override render() with ujson/orjson; both emit FastAPIDeprecationWarning on instantiation.",
+      "paths": ["fastapi/responses.py", "fastapi/requests.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "io.datastructures",
+      "parent": "fastapi.io",
+      "name": "Data structures",
+      "kind": "group",
+      "summary": "Provides UploadFile, DefaultPlaceholder, and Starlette datastructure re-exports for FastAPI public API.",
+      "detail": "fastapi/datastructures.py re-exports URL, Address, FormData, Headers, QueryParams, State from starlette.datastructures. It defines UploadFile (extends StarletteUploadFile with Pydantic v2 JSON schema and core schema hooks), DefaultPlaceholder (a wrapper that lets the framework detect overridden defaults even when the value is truthy), Default() (cast helper returning DefaultPlaceholder typed as the wrapped type), and _Unset sentinel.",
+      "paths": ["fastapi/datastructures.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "Starlette"]
+    },
+
+    {
+      "id": "io.sse",
+      "parent": "fastapi.io",
+      "name": "Server-Sent Events",
+      "kind": "group",
+      "summary": "Provides EventSourceResponse, ServerSentEvent model, and wire-format helpers for SSE streaming.",
+      "detail": "fastapi/sse.py defines EventSourceResponse (a StreamingResponse subclass with media_type='text/event-stream'), ServerSentEvent (a Pydantic BaseModel for a single SSE event with data, raw_data, event, id, retry, comment fields), format_sse_event() (builds SSE wire-format bytes from pre-serialized data), and _split_sse_lines(). The module also exposes KEEPALIVE_COMMENT (': ping\\n\\n') and _PING_INTERVAL (15.0 seconds). ServerSentEvent validates that data and raw_data are mutually exclusive and that event/id are single-line.",
+      "paths": ["fastapi/sse.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "io.limits",
+      "parent": "fastapi.io",
+      "name": "Body & form size limits",
+      "kind": "group",
+      "summary": "Middleware and validators that enforce maximum body and form-field sizes on incoming requests.",
+      "detail": "fastapi/_body_limit.py wraps Starlette's RequestBodyLimitMiddleware with AppBodyLimitMiddleware, which skips requests already carrying MAX_BODY_SIZE_SCOPE_KEY (from mounted sub-apps) and handles ExceptionGroup unwrapping for body-too-large signals. validate_max_body_size() checks the value is a non-negative int or None. get_body_size_limit() returns the first non-None limit from a priority list. fastapi/_form_limits.py defines _FormLimits (TypedDict with max_fields, max_files, max_part_size as NonNegativeInt) and _validate_form_limits() using a Pydantic TypeAdapter.",
+      "paths": ["fastapi/_body_limit.py", "fastapi/_form_limits.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette", "Pydantic"]
+    },
+
+    {
+      "id": "io.starlette_reexports",
+      "parent": "fastapi.io",
+      "name": "Starlette thin re-exports",
+      "kind": "group",
+      "summary": "Single-line re-export modules for Starlette's TestClient, Jinja2Templates, and StaticFiles.",
+      "detail": "fastapi/testclient.py re-exports starlette.testclient.TestClient. fastapi/templating.py re-exports starlette.templating.Jinja2Templates. fastapi/staticfiles.py re-exports starlette.staticfiles.StaticFiles. All three are single-statement re-exports with no added logic; they exist to give users a stable fastapi.* import path.",
+      "paths": ["fastapi/testclient.py", "fastapi/templating.py", "fastapi/staticfiles.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "f:fastapi/encoders.py",
+      "parent": "io.encoding",
+      "name": "JSON encoders module",
+      "kind": "module",
+      "summary": "Defines the ENCODERS_BY_TYPE dispatch table and jsonable_encoder() for recursive JSON-safe conversion.",
+      "detail": "Module-level ENCODERS_BY_TYPE maps 25+ Python types to encoder functions. encoders_by_class_tuples groups those by encoder for isinstance batch checks. isoformat() converts date/time/datetime to ISO-8601 strings. decimal_encoder() converts Decimal to int (zero exponent) or float. The main jsonable_encoder() function handles BaseModel, dataclass, Enum, PurePath, primitives, PydanticUndefinedType, dict, list/set/frozenset/generator/deque/tuple, ENCODERS_BY_TYPE lookup, pydantic v1 guard, then dict()/vars() fallback.",
+      "paths": ["fastapi/encoders.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "f:fastapi/encoders.py#jsonable_encoder",
+      "parent": "f:fastapi/encoders.py",
+      "name": "jsonable_encoder()",
+      "kind": "function",
+      "summary": "Recursively converts any Python object into a JSON-serializable dict, list, or primitive.",
+      "detail": "Entry point for FastAPI's response serialization. Accepts include/exclude (IncEx sets or dicts), by_alias (default True), exclude_unset, exclude_defaults, exclude_none, custom_encoder, and sqlalchemy_safe (default True). Processes in order: custom_encoder lookup, BaseModel.model_dump(mode='json'), dataclasses.asdict(), Enum.value, PurePath str(), primitives passthrough, PydanticUndefinedType->None, dict recursion with sqlalchemy_safe _sa key filtering, list/set/frozenset/generator/deque/tuple recursion, ENCODERS_BY_TYPE direct type match, isinstance batch check via encoders_by_class_tuples, pydantic v1 guard, then dict()/vars() fallback.",
+      "paths": ["fastapi/encoders.py:129-366"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def jsonable_encoder(obj, include=None, exclude=None, by_alias=True, exclude_unset=False, exclude_defaults=False, exclude_none=False, custom_encoder=None, sqlalchemy_safe=True) -> Any",
+      "code": "    if isinstance(obj, BaseModel):\n        obj_dict = obj.model_dump(\n            mode=\"json\",\n            include=include,\n            exclude=exclude,\n            by_alias=by_alias,\n            exclude_unset=exclude_unset,\n            exclude_none=exclude_none,\n            exclude_defaults=exclude_defaults,\n        )\n        return jsonable_encoder(\n            obj_dict,\n            exclude_none=exclude_none,\n            sqlalchemy_safe=sqlalchemy_safe,\n        )"
+    },
+
+    {
+      "id": "f:fastapi/encoders.py#ENCODERS_BY_TYPE",
+      "parent": "f:fastapi/encoders.py",
+      "name": "ENCODERS_BY_TYPE",
+      "kind": "data",
+      "summary": "Module-level dispatch table mapping Python types to their JSON-encoding functions.",
+      "detail": "Maps bytes, Color, PyExtraColor, datetime.date/datetime/time/timedelta, Decimal, Enum, frozenset, deque, GeneratorType, IPv4/IPv6 address types, NameEmail, Path, Pattern, SecretBytes, SecretStr, set, UUID, Url, AnyUrl to their respective encoder callables. Pydantic Color is imported with a fallback stub for older versions. PyExtraColor from pydantic_extra_types is imported with a fallback stub.",
+      "paths": ["fastapi/encoders.py:84-112"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "Contains entries for 25+ types including both pydantic.color.Color (deprecated) and pydantic_extra_types.color.Color",
+        "timedelta encodes as total_seconds() float",
+        "Decimal encodes as int when exponent >= 0, else float"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/encoders.py#decimal_encoder",
+      "parent": "f:fastapi/encoders.py",
+      "name": "decimal_encoder()",
+      "kind": "function",
+      "summary": "Encodes a Decimal as int when there is no fractional exponent, otherwise as float.",
+      "detail": "Checks dec_value.as_tuple().exponent: if it is an int >= 0, returns int(dec_value); otherwise returns float(dec_value). Preserves round-trip fidelity for Numeric(x,0) database columns represented as Decimal.",
+      "paths": ["fastapi/encoders.py:59-81"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def decimal_encoder(dec_value: Decimal) -> int | float",
+      "code": "    exponent = dec_value.as_tuple().exponent\n    if isinstance(exponent, int) and exponent >= 0:\n        return int(dec_value)\n    else:\n        return float(dec_value)"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py",
+      "parent": "io.exceptions",
+      "name": "Exception classes",
+      "kind": "module",
+      "summary": "Defines the full FastAPI exception hierarchy from HTTPException to RequestValidationError.",
+      "detail": "HTTPException extends StarletteHTTPException with identical signature but adds FastAPI-specific docs. WebSocketException extends StarletteWebSocketException. FastAPIError extends RuntimeError as the FastAPI-specific base. DependencyScopeError extends FastAPIError for invalid dependency scope declarations. ValidationException base carries errors(), endpoint_ctx (EndpointContext TypedDict), and formats a human-readable string. RequestValidationError and WebSocketRequestValidationError extend ValidationException for incoming request errors; ResponseValidationError extends it for outgoing response errors. PydanticV1NotSupportedError extends FastAPIError. FastAPIDeprecationWarning extends UserWarning (not DeprecationWarning, to avoid Python suppression).",
+      "paths": ["fastapi/exceptions.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "Starlette"]
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#HTTPException",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "HTTPException",
+      "kind": "class",
+      "summary": "FastAPI's HTTP exception class, extending Starlette's with identical fields and FastAPI documentation.",
+      "detail": "Subclasses starlette.exceptions.HTTPException. Constructor takes status_code (int), detail (Any, default None), and headers (Mapping[str, str] | None, default None). Delegates directly to super().__init__. Used by endpoints to signal client errors; caught by http_exception_handler in exception_handlers.py.",
+      "paths": ["fastapi/exceptions.py:17-83"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "class HTTPException(StarletteHTTPException)"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#RequestValidationError",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "RequestValidationError",
+      "kind": "class",
+      "summary": "Raised when request parameter or body validation fails; carries the validation error list and original body.",
+      "detail": "Extends ValidationException. Constructor takes errors (Sequence[Any]) and optional body (Any) and endpoint_ctx (EndpointContext). Stores body on self.body. The errors() method returns the error list. ValidationException.__str__ formats the count and each error entry plus endpoint file/line context if available. Caught by request_validation_exception_handler which returns a 422 JSON response.",
+      "paths": ["fastapi/exceptions.py:212-222"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class RequestValidationError(ValidationException)"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#ValidationException",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "ValidationException",
+      "kind": "class",
+      "summary": "Base class for request and response validation errors; stores errors and optional endpoint context.",
+      "detail": "Stores _errors list and endpoint_ctx EndpointContext TypedDict. Exposes errors() method returning the list. _format_endpoint_context() builds a string with file, line, function, and path from the context. __str__ formats N validation errors with each error and the context. The class is abstract in practice; RequestValidationError, WebSocketRequestValidationError, and ResponseValidationError all extend it.",
+      "paths": ["fastapi/exceptions.py:174-209"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class ValidationException(Exception)",
+      "code": "    def __str__(self) -> str:\n        message = f\"{len(self._errors)} validation error{'s' if len(self._errors) != 1 else ''}:\\n\"\n        for err in self._errors:\n            message += f\"  {err}\\n\"\n        message += self._format_endpoint_context()\n        return message.rstrip()"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#ResponseValidationError",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "ResponseValidationError",
+      "kind": "class",
+      "summary": "Raised when the outgoing response value fails schema validation; carries the invalid body.",
+      "detail": "Extends ValidationException. Accepts errors, optional body (the response value that failed), and optional endpoint_ctx. Stored on self.body. Used by fastapi/routing.py's serialize_response to report when a return value does not conform to the declared response model.",
+      "paths": ["fastapi/exceptions.py:234-243"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class ResponseValidationError(ValidationException)"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#FastAPIError",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "FastAPIError",
+      "kind": "class",
+      "summary": "Base RuntimeError for internal FastAPI programming errors, distinct from HTTP or validation errors.",
+      "detail": "Extends RuntimeError with no added fields. Serves as the base for DependencyScopeError and PydanticV1NotSupportedError. Allows callers to catch all FastAPI-internal errors with a single except clause.",
+      "paths": ["fastapi/exceptions.py:161-164"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class FastAPIError(RuntimeError)"
+    },
+
+    {
+      "id": "f:fastapi/exception_handlers.py",
+      "parent": "io.exceptions",
+      "name": "Exception handlers",
+      "kind": "module",
+      "summary": "Three async handler functions that render HTTPException and validation errors into HTTP or WebSocket responses.",
+      "detail": "http_exception_handler returns an empty Response for status codes that must have no body (checked via is_body_allowed_for_status_code from fastapi.utils), otherwise a JSONResponse with {'detail': exc.detail}. request_validation_exception_handler returns JSONResponse status 422 with {'detail': jsonable_encoder(exc.errors())}. websocket_request_validation_exception_handler closes the WebSocket with code WS_1008_POLICY_VIOLATION and reason set to jsonable_encoder(exc.errors()). All three are registered on the FastAPI app in applications.py.",
+      "paths": ["fastapi/exception_handlers.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "code": "async def http_exception_handler(request: Request, exc: HTTPException) -> Response:\n    headers = getattr(exc, \"headers\", None)\n    if not is_body_allowed_for_status_code(exc.status_code):\n        return Response(status_code=exc.status_code, headers=headers)\n    return JSONResponse(\n        {\"detail\": exc.detail}, status_code=exc.status_code, headers=headers\n    )"
+    },
+
+    {
+      "id": "f:fastapi/exception_handlers.py#http_exception_handler",
+      "parent": "f:fastapi/exception_handlers.py",
+      "name": "http_exception_handler()",
+      "kind": "function",
+      "summary": "Renders an HTTPException into a JSONResponse or empty Response based on the status code.",
+      "detail": "Retrieves optional response headers from the exception. Calls is_body_allowed_for_status_code (from fastapi.utils) to decide whether a body is legal for the status code; returns a bare Response with no body for status codes like 204 and 304. Otherwise wraps exc.detail in {'detail': ...} and returns JSONResponse. Registered as the HTTPException handler in FastAPI application setup.",
+      "paths": ["fastapi/exception_handlers.py:11-17"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "async def http_exception_handler(request: Request, exc: HTTPException) -> Response"
+    },
+
+    {
+      "id": "f:fastapi/exception_handlers.py#request_validation_exception_handler",
+      "parent": "f:fastapi/exception_handlers.py",
+      "name": "request_validation_exception_handler()",
+      "kind": "function",
+      "summary": "Returns a 422 Unprocessable Entity JSON response containing the validation error list.",
+      "detail": "Calls jsonable_encoder(exc.errors()) to convert Pydantic error dicts into JSON-safe form, then wraps them in {'detail': ...} and returns JSONResponse with status 422. Registered as the RequestValidationError handler in FastAPI application setup.",
+      "paths": ["fastapi/exception_handlers.py:20-26"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "async def request_validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse",
+      "code": "async def request_validation_exception_handler(\n    request: Request, exc: RequestValidationError\n) -> JSONResponse:\n    return JSONResponse(\n        status_code=422,\n        content={\"detail\": jsonable_encoder(exc.errors())},\n    )"
+    },
+
+    {
+      "id": "f:fastapi/responses.py",
+      "parent": "io.responses_requests",
+      "name": "Responses module",
+      "kind": "module",
+      "summary": "Re-exports all standard Starlette response classes plus deprecated UJSONResponse and ORJSONResponse.",
+      "detail": "Imports and re-exports JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse, FileResponse, StreamingResponse, Response from starlette.responses, and EventSourceResponse from fastapi.sse. Defines UJSONResponse and ORJSONResponse as deprecated JSONResponse subclasses: UJSONResponse.render() calls ujson.dumps(..., ensure_ascii=False).encode('utf-8'); ORJSONResponse.render() calls orjson.dumps(..., option=OPT_NON_STR_KEYS | OPT_SERIALIZE_NUMPY). Both raise FastAPIDeprecationWarning at class creation time via @deprecated decorator.",
+      "paths": ["fastapi/responses.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "facts": [
+        "UJSONResponse and ORJSONResponse are marked deprecated; Pydantic direct serialization is now preferred",
+        "ujson and orjson are optional imports; assertions guard their use at render time",
+        "ORJSONResponse uses OPT_NON_STR_KEYS | OPT_SERIALIZE_NUMPY options"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/responses.py#UJSONResponse",
+      "parent": "f:fastapi/responses.py",
+      "name": "UJSONResponse",
+      "kind": "class",
+      "summary": "Deprecated JSONResponse subclass that serializes with ujson for non-ASCII passthrough.",
+      "detail": "Marked deprecated via @deprecated from typing_extensions. render() calls ujson.dumps(content, ensure_ascii=False).encode('utf-8'). Requires ujson to be installed separately; asserts its presence at render time. FastAPI now serializes via Pydantic directly, making this class unnecessary.",
+      "paths": ["fastapi/responses.py:48-66"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class UJSONResponse(JSONResponse)"
+    },
+
+    {
+      "id": "f:fastapi/responses.py#ORJSONResponse",
+      "parent": "f:fastapi/responses.py",
+      "name": "ORJSONResponse",
+      "kind": "class",
+      "summary": "Deprecated JSONResponse subclass that serializes with orjson, supporting non-string keys and numpy arrays.",
+      "detail": "Marked deprecated via @deprecated. render() calls orjson.dumps(content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY), returning bytes directly. Requires orjson to be installed separately. FastAPI now serializes via Pydantic directly, making this class unnecessary.",
+      "paths": ["fastapi/responses.py:78-98"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class ORJSONResponse(JSONResponse)",
+      "code": "    def render(self, content: Any) -> bytes:\n        assert orjson is not None, \"orjson must be installed to use ORJSONResponse\"\n        return orjson.dumps(\n            content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY\n        )"
+    },
+
+    {
+      "id": "f:fastapi/requests.py",
+      "parent": "io.responses_requests",
+      "name": "Requests module",
+      "kind": "module",
+      "summary": "Single-line re-export of Starlette's Request and HTTPConnection under the fastapi namespace.",
+      "detail": "Re-exports starlette.requests.Request as Request and starlette.requests.HTTPConnection as HTTPConnection. No added logic; exists so users can write 'from fastapi import Request' without importing directly from Starlette.",
+      "paths": ["fastapi/requests.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py",
+      "parent": "io.datastructures",
+      "name": "Data structures module",
+      "kind": "module",
+      "summary": "Defines UploadFile with Pydantic integration, DefaultPlaceholder sentinel, and Starlette datastructure re-exports.",
+      "detail": "Re-exports URL, Address, FormData, Headers, QueryParams, State from starlette.datastructures. UploadFile extends StarletteUploadFile adding Pydantic v2 JSON schema ('string' + 'application/octet-stream' contentMediaType) and a core schema validator that accepts StarletteUploadFile instances. DefaultPlaceholder wraps any value with bool/eq by value, used by the routing layer to distinguish explicitly overridden defaults. Default() is a typed cast helper. _Unset = Default(None) is the sentinel for un-set Param/FieldInfo values.",
+      "paths": ["fastapi/datastructures.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "Starlette"]
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py#UploadFile",
+      "parent": "f:fastapi/datastructures.py",
+      "name": "UploadFile",
+      "kind": "class",
+      "summary": "File upload container extending Starlette's UploadFile with Pydantic v2 schema and validator hooks.",
+      "detail": "Extends StarletteUploadFile. Adds annotated attributes: file (BinaryIO), filename (str|None), size (int|None), headers (Headers), content_type (str|None). Async methods write(), read(size=-1), seek(offset), close() delegate to super(). _validate() classmethod rejects non-StarletteUploadFile inputs. __get_pydantic_json_schema__ returns {'type': 'string', 'contentMediaType': 'application/octet-stream'}. __get_pydantic_core_schema__ registers with_info_plain_validator_function for Pydantic v2 validation.",
+      "paths": ["fastapi/datastructures.py:21-150"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "Starlette"],
+      "signature": "class UploadFile(StarletteUploadFile)"
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py#DefaultPlaceholder",
+      "parent": "f:fastapi/datastructures.py",
+      "name": "DefaultPlaceholder",
+      "kind": "class",
+      "summary": "Internal sentinel that marks a default value as explicitly set so the routing layer can detect overrides.",
+      "detail": "Wraps any value. __bool__ delegates to bool(self.value). __eq__ is True only when comparing two DefaultPlaceholder instances with equal values. Used by the routing layer (fastapi/routing.py) to know whether response_class, status_code, etc. have been overridden at include_router time, even when the override value is falsy.",
+      "paths": ["fastapi/datastructures.py:153-168"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class DefaultPlaceholder"
+    },
+
+    {
+      "id": "f:fastapi/sse.py",
+      "parent": "io.sse",
+      "name": "SSE module",
+      "kind": "module",
+      "summary": "Provides EventSourceResponse marker class, ServerSentEvent Pydantic model, and format_sse_event() wire encoder.",
+      "detail": "EventSourceResponse is a StreamingResponse subclass setting media_type='text/event-stream'; the actual encoding logic lives in fastapi/routing.py. ServerSentEvent is a Pydantic BaseModel with data (Any, JSON-serialized), raw_data (str, mutually exclusive with data), event (str, single-line), id (str, single-line, no null chars), retry (int >= 0), comment (str). format_sse_event() builds SSE wire bytes from pre-serialized arguments. KEEPALIVE_COMMENT = b': ping\\n\\n'. _PING_INTERVAL = 15.0 seconds.",
+      "paths": ["fastapi/sse.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette", "Pydantic"],
+      "facts": [
+        "EventSourceResponse works with any HTTP method (GET, POST, etc.), compatible with MCP SSE-over-POST",
+        "_PING_INTERVAL is 15.0 seconds and can be monkeypatched by tests",
+        "KEEPALIVE_COMMENT is b': ping\\n\\n'",
+        "data and raw_data are mutually exclusive on ServerSentEvent"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/sse.py#EventSourceResponse",
+      "parent": "f:fastapi/sse.py",
+      "name": "EventSourceResponse",
+      "kind": "class",
+      "summary": "StreamingResponse subclass used as a marker for Server-Sent Events; sets Content-Type to text/event-stream.",
+      "detail": "Subclasses starlette.responses.StreamingResponse. Overrides media_type = 'text/event-stream'. Acts as a marker: the actual SSE encoding and keep-alive ping logic is implemented in fastapi/routing.py's request handler. Compatible with any HTTP method, including POST (for Model Context Protocol SSE streams).",
+      "paths": ["fastapi/sse.py:20-33"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "class EventSourceResponse(StreamingResponse)"
+    },
+
+    {
+      "id": "f:fastapi/sse.py#ServerSentEvent",
+      "parent": "f:fastapi/sse.py",
+      "name": "ServerSentEvent",
+      "kind": "class",
+      "summary": "Pydantic model for a single SSE event with data, event type, id, retry, and comment fields.",
+      "detail": "BaseModel with fields: data (Any, JSON-serialized including plain strings), raw_data (str|None, pre-formatted, mutually exclusive with data), event (str|None, single-line validated), id (str|None, single-line, no null chars), retry (int|None, >= 0), comment (str|None). model_validator _check_data_exclusive enforces data/raw_data exclusivity. Validators _check_event_single_line and _check_id_valid are AfterValidators applied via Annotated.",
+      "paths": ["fastapi/sse.py:52-156"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class ServerSentEvent(BaseModel)"
+    },
+
+    {
+      "id": "f:fastapi/sse.py#format_sse_event",
+      "parent": "f:fastapi/sse.py",
+      "name": "format_sse_event()",
+      "kind": "function",
+      "summary": "Builds SSE wire-format bytes from pre-serialized data, event, id, retry, and comment.",
+      "detail": "Accepts keyword-only: data_str (str|None), event (str|None), id (str|None), retry (int|None), comment (str|None). Builds a lines list in SSE spec order: comment lines (': ...'), event line, data lines (split on \\n, \\r\\n, \\r), id line, retry line. Appends two empty strings to produce the double-newline event terminator. Returns '\\n'.join(lines).encode('utf-8').",
+      "paths": ["fastapi/sse.py:165-233"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def format_sse_event(*, data_str=None, event=None, id=None, retry=None, comment=None) -> bytes",
+      "code": "    lines: list[str] = []\n    if comment is not None:\n        for line in _split_sse_lines(comment):\n            lines.append(f\": {line}\")\n    if event is not None:\n        lines.append(f\"event: {event}\")\n    if data_str is not None:\n        for line in _split_sse_lines(data_str):\n            lines.append(f\"data: {line}\")\n    if id is not None:\n        lines.append(f\"id: {id}\")\n    if retry is not None:\n        lines.append(f\"retry: {retry}\")\n    lines.append(\"\")\n    return \"\\n\".join(lines).encode(\"utf-8\")"
+    },
+
+    {
+      "id": "f:fastapi/_body_limit.py",
+      "parent": "io.limits",
+      "name": "Body limit middleware",
+      "kind": "module",
+      "summary": "Wraps Starlette's RequestBodyLimitMiddleware with FastAPI-specific error handling and sub-app scope logic.",
+      "detail": "validate_max_body_size() rejects boolean or negative int values. get_body_size_limit() returns the first non-None from a priority list. get_body_limit_error() unwraps ExceptionGroup to find body-limiter errors; if the group contains non-body-limit errors it returns None. wrap_app_with_body_limit() applies RequestBodyLimitMiddleware over a _BodyLimitExceptionMiddleware inner wrapper. AppBodyLimitMiddleware passes straight through when MAX_BODY_SIZE_SCOPE_KEY is not in scope; when it is in scope (mounted sub-app) it tracks the response-started state and delegates HTTP error responses to http_exception_handler.",
+      "paths": ["fastapi/_body_limit.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "facts": [
+        "max_body_size must be a non-negative int or None; booleans are rejected",
+        "Uses ExceptionGroup split/subgroup to isolate body-limit errors from concurrent task errors",
+        "Delegates 413 response rendering to http_exception_handler"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/_body_limit.py#AppBodyLimitMiddleware",
+      "parent": "f:fastapi/_body_limit.py",
+      "name": "AppBodyLimitMiddleware",
+      "kind": "class",
+      "summary": "ASGI middleware that enforces a per-app max body size, skipping mounted sub-apps that handle their own limit.",
+      "detail": "Constructor calls wrap_app_with_body_limit(app, max_body_size). __call__ passes straight through when MAX_BODY_SIZE_SCOPE_KEY is absent from the ASGI scope (no body-limit context active). When the key is present (a mounted sub-app shares the parent's byte counter), it wraps the send callable to track whether the response has started, then catches body-limit ExceptionGroup errors; if the response has not started and the error is an HTTPException it calls http_exception_handler directly rather than re-raising to prevent a 500 from ServerErrorMiddleware.",
+      "paths": ["fastapi/_body_limit.py:74-101"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "class AppBodyLimitMiddleware",
+      "code": "    async def __call__(self, scope, receive, send):\n        if MAX_BODY_SIZE_SCOPE_KEY not in scope:\n            await self.app(scope, receive, send)\n            return\n        started = False\n        async def send_response(message):\n            nonlocal started\n            if message[\"type\"] == \"http.response.start\":\n                started = True\n            await send(message)\n        try:\n            await self.app(scope, receive, send_response)\n        except Exception as exc:\n            error = get_body_limit_error(exc)\n            if error and not started: raise error from exc"
+    },
+
+    {
+      "id": "f:fastapi/_form_limits.py",
+      "parent": "io.limits",
+      "name": "Form limits module",
+      "kind": "module",
+      "summary": "Pydantic-validated TypedDict for multipart form size limits used when parsing Form, File, and UploadFile parameters.",
+      "detail": "Defines _FormLimits as a TypedDict with optional fields max_fields (NonNegativeInt), max_files (NonNegativeInt), and max_part_size (NonNegativeInt). @with_config applies strict=True, extra='forbid'. _form_limits_adapter is a TypeAdapter[_FormLimits]. _validate_form_limits() returns an empty dict for None input or validates via the adapter. Called by the dependency injection layer when route parameters include Form or File annotations.",
+      "paths": ["fastapi/_form_limits.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class _FormLimits(TypedDict, total=False)",
+      "code": "@with_config(ConfigDict(strict=True, extra=\"forbid\"))\nclass _FormLimits(TypedDict, total=False):\n    max_fields: Annotated[NonNegativeInt, Doc(\"Maximum number of non-file form fields.\")]\n    max_files: Annotated[NonNegativeInt, Doc(\"Maximum number of files in a multipart form.\")]\n    max_part_size: Annotated[NonNegativeInt, Doc(\"Maximum size of a non-file field in bytes.\")]"
+    },
+
+    {
+      "id": "f:fastapi/testclient.py",
+      "parent": "io.starlette_reexports",
+      "name": "Test client module",
+      "kind": "module",
+      "summary": "Single-line re-export of Starlette's TestClient under the fastapi namespace.",
+      "detail": "Re-exports starlette.testclient.TestClient. No logic added. Exists so users can write 'from fastapi.testclient import TestClient' without importing directly from Starlette. The actual implementation in Starlette uses HTTPX as the HTTP client driver.",
+      "paths": ["fastapi/testclient.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette", "HTTPX"]
+    },
+
+    {
+      "id": "f:fastapi/templating.py",
+      "parent": "io.starlette_reexports",
+      "name": "Templating module",
+      "kind": "module",
+      "summary": "Single-line re-export of Starlette's Jinja2Templates under the fastapi namespace.",
+      "detail": "Re-exports starlette.templating.Jinja2Templates. No logic added. The class accepts a 'directory' argument and renders templates with Jinja2. Requires the jinja2 Python package.",
+      "paths": ["fastapi/templating.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette", "Jinja2"]
+    },
+
+    {
+      "id": "f:fastapi/staticfiles.py",
+      "parent": "io.starlette_reexports",
+      "name": "Static files module",
+      "kind": "module",
+      "summary": "Single-line re-export of Starlette's StaticFiles under the fastapi namespace.",
+      "detail": "Re-exports starlette.staticfiles.StaticFiles. No logic added. Mounted via app.mount('/static', StaticFiles(directory='static')). No runtime dependency on extra packages beyond Starlette.",
+      "paths": ["fastapi/staticfiles.py"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "f:tests/test_jsonable_encoder.py",
+      "parent": "io.encoding",
+      "name": "jsonable_encoder tests",
+      "kind": "test",
+      "summary": "Unit and integration tests for jsonable_encoder with Pydantic models, enums, datetimes, and custom encoders.",
+      "paths": ["tests/test_jsonable_encoder.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:tests/test_exception_handlers.py",
+      "parent": "io.exceptions",
+      "name": "Exception handler tests",
+      "kind": "test",
+      "summary": "Integration tests verifying that HTTPException and RequestValidationError produce correct HTTP responses.",
+      "paths": ["tests/test_exception_handlers.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:tests/test_datastructures.py",
+      "parent": "io.datastructures",
+      "name": "Data structure tests",
+      "kind": "test",
+      "summary": "Tests for UploadFile, DefaultPlaceholder, and other datastructure classes.",
+      "paths": ["tests/test_datastructures.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:tests/test_sse.py",
+      "parent": "io.sse",
+      "name": "SSE tests",
+      "kind": "test",
+      "summary": "Tests for EventSourceResponse, ServerSentEvent, format_sse_event, and SSE wire format correctness.",
+      "paths": ["tests/test_sse.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:tests/test_request_body_limits.py",
+      "parent": "io.limits",
+      "name": "Body limit tests",
+      "kind": "test",
+      "summary": "Tests for AppBodyLimitMiddleware, validate_max_body_size, and get_body_limit_error error handling.",
+      "paths": ["tests/test_request_body_limits.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:tests/test_form_limits.py",
+      "parent": "io.limits",
+      "name": "Form limit tests",
+      "kind": "test",
+      "summary": "Tests for _validate_form_limits and _FormLimits with strict Pydantic validation.",
+      "paths": ["tests/test_form_limits.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:tests/test_deprecated_responses.py",
+      "parent": "io.responses_requests",
+      "name": "Deprecated responses tests",
+      "kind": "test",
+      "summary": "Tests that UJSONResponse and ORJSONResponse emit deprecation warnings and render correctly.",
+      "paths": ["tests/test_deprecated_responses.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py#UploadFile.write",
+      "parent": "f:fastapi/datastructures.py#UploadFile",
+      "name": "UploadFile.write()",
+      "kind": "function",
+      "summary": "Writes bytes to the upload file by delegating to the Starlette async super().write().",
+      "detail": "Accepts bytes as the data argument. Delegates entirely to StarletteUploadFile.write() with await, running in a threadpool to be awaitable. Not normally called on a request file; intended for test helpers that pre-populate an UploadFile before passing it to an endpoint.",
+      "paths": ["fastapi/datastructures.py:66-84"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "async def write(self, data: bytes) -> None",
+      "code": "    async def write(\n        self,\n        data: Annotated[\n            bytes,\n            Doc(\"\"\"\n                The bytes to write to the file.\n                \"\"\"),\n        ],\n    ) -> None:\n        return await super().write(data)"
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py#UploadFile.read",
+      "parent": "f:fastapi/datastructures.py#UploadFile",
+      "name": "UploadFile.read()",
+      "kind": "function",
+      "summary": "Reads up to size bytes from the upload file, delegating to the Starlette async super().read().",
+      "detail": "Accepts an optional size int (default -1 reads all). Delegates to StarletteUploadFile.read() with await; the underlying Starlette implementation runs the blocking file.read() call in a threadpool via run_in_threadpool. Returns the bytes read.",
+      "paths": ["fastapi/datastructures.py:86-102"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "async def read(self, size: int = -1) -> bytes"
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py#UploadFile.seek",
+      "parent": "f:fastapi/datastructures.py#UploadFile",
+      "name": "UploadFile.seek()",
+      "kind": "function",
+      "summary": "Moves the file cursor to the given byte offset, delegating to Starlette's async super().seek().",
+      "detail": "Accepts an offset int. Delegates to StarletteUploadFile.seek(offset) with await, which runs the blocking file.seek() in a threadpool. Useful when an endpoint needs to re-read a file after a first pass.",
+      "paths": ["fastapi/datastructures.py:104-122"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "async def seek(self, offset: int) -> None"
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py#UploadFile.close",
+      "parent": "f:fastapi/datastructures.py#UploadFile",
+      "name": "UploadFile.close()",
+      "kind": "function",
+      "summary": "Closes the upload file by delegating to the Starlette async super().close().",
+      "detail": "No arguments. Delegates to StarletteUploadFile.close() with await, which runs file.close() in a threadpool. The dependency injection layer calls close() automatically after the endpoint returns when UploadFile is used as a parameter.",
+      "paths": ["fastapi/datastructures.py:124-130"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "async def close(self) -> None",
+      "code": "    async def close(self) -> None:\n        return await super().close()"
+    },
+
+    {
+      "id": "f:fastapi/datastructures.py#Default",
+      "parent": "f:fastapi/datastructures.py",
+      "name": "Default()",
+      "kind": "function",
+      "summary": "Cast helper that wraps any value in DefaultPlaceholder typed as the original type.",
+      "detail": "Takes a value of DefaultType and returns DefaultPlaceholder(value) typed as DefaultType via a type: ignore cast. This lets callers write Default(JSONResponse) with a type checker understanding the return type as type[JSONResponse], while the runtime value is a DefaultPlaceholder that the routing layer can detect and unwrap.",
+      "paths": ["fastapi/datastructures.py:174-181"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def Default(value: DefaultType) -> DefaultType"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#WebSocketException",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "WebSocketException",
+      "kind": "class",
+      "summary": "FastAPI's WebSocket exception class, extending Starlette's with a close code and optional reason.",
+      "detail": "Subclasses starlette.exceptions.WebSocketException. Constructor takes code (int, a valid WebSocket close code per RFC 6455 section 7.4.1) and optional reason (str|None). Delegates directly to super().__init__. Used by WebSocket endpoints to signal client errors; caught by websocket_request_validation_exception_handler.",
+      "paths": ["fastapi/exceptions.py:86-154"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "class WebSocketException(StarletteWebSocketException)"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#WebSocketRequestValidationError",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "WebSocketRequestValidationError",
+      "kind": "class",
+      "summary": "Raised when WebSocket request parameter validation fails; carries the error list.",
+      "detail": "Extends ValidationException. Constructor takes errors (Sequence[Any]) and optional endpoint_ctx (EndpointContext). Stores errors via the base class. Caught by websocket_request_validation_exception_handler which closes the WebSocket with WS_1008_POLICY_VIOLATION.",
+      "paths": ["fastapi/exceptions.py:224-231"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class WebSocketRequestValidationError(ValidationException)"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#ValidationException.errors",
+      "parent": "f:fastapi/exceptions.py#ValidationException",
+      "name": "ValidationException.errors()",
+      "kind": "function",
+      "summary": "Returns the stored sequence of validation error dicts.",
+      "detail": "Simple accessor returning self._errors, the sequence passed to __init__. The errors are Pydantic error dicts with loc, msg, type, and optional input fields. Called by exception handlers when building the response body.",
+      "paths": ["fastapi/exceptions.py:190-191"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def errors(self) -> Sequence[Any]"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#DependencyScopeError",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "DependencyScopeError",
+      "kind": "class",
+      "summary": "Raised when a dependency declares a dependency on a narrower-scope dependency.",
+      "detail": "Extends FastAPIError (RuntimeError). No added constructor arguments. Raised by the dependency injection layer in fastapi/dependencies/utils.py when a dependency with a broader scope (e.g., request-scoped) depends on one with a narrower scope (e.g., yield-scoped). Caught during app startup or first request.",
+      "paths": ["fastapi/exceptions.py:167-172"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class DependencyScopeError(FastAPIError)"
+    },
+
+    {
+      "id": "f:fastapi/exceptions.py#EndpointContext",
+      "parent": "f:fastapi/exceptions.py",
+      "name": "EndpointContext",
+      "kind": "data",
+      "summary": "TypedDict carrying optional function, path, file, and line fields for locating the failing endpoint.",
+      "detail": "TypedDict with total=False (all fields optional): function (str), path (str), file (str), line (int). Passed into ValidationException constructors by the routing layer so that error messages include the Python source location of the endpoint. Rendered by ValidationException._format_endpoint_context().",
+      "paths": ["fastapi/exceptions.py:10-14"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class EndpointContext(TypedDict, total=False)"
+    },
+
+    {
+      "id": "f:fastapi/encoders.py#isoformat",
+      "parent": "f:fastapi/encoders.py",
+      "name": "isoformat()",
+      "kind": "function",
+      "summary": "Converts a date, time, or datetime object to its ISO-8601 string representation.",
+      "detail": "Single-line wrapper around o.isoformat(). Referenced directly in ENCODERS_BY_TYPE for datetime.date, datetime.datetime, and datetime.time keys. Taken from Pydantic v1 source for backward compatibility. Returns e.g. '2024-01-15T12:30:00' or '2024-01-15'.",
+      "paths": ["fastapi/encoders.py:53-54"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def isoformat(o: datetime.date | datetime.time) -> str"
+    },
+
+    {
+      "id": "f:fastapi/encoders.py#generate_encoders_by_class_tuples",
+      "parent": "f:fastapi/encoders.py",
+      "name": "generate_encoders_by_class_tuples()",
+      "kind": "function",
+      "summary": "Inverts the type-to-encoder map into an encoder-to-class-tuple map for isinstance batch checks.",
+      "detail": "Takes the type_encoder_map (e.g. ENCODERS_BY_TYPE) and builds a defaultdict mapping each encoder callable to a tuple of all types that share that encoder. jsonable_encoder uses the resulting encoders_by_class_tuples dict to call isinstance(obj, classes_tuple) once per encoder rather than once per type, reducing the number of isinstance calls for objects with shared encoders (e.g. frozenset, deque, GeneratorType all map to list).",
+      "paths": ["fastapi/encoders.py:115-126"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def generate_encoders_by_class_tuples(type_encoder_map) -> dict[Callable, tuple[Any, ...]]",
+      "code": "def generate_encoders_by_class_tuples(\n    type_encoder_map: dict[Any, Callable[[Any], Any]],\n) -> dict[Callable[[Any], Any], tuple[Any, ...]]:\n    encoders_by_class_tuples: dict[Callable[[Any], Any], tuple[Any, ...]] = defaultdict(\n        tuple\n    )\n    for type_, encoder in type_encoder_map.items():\n        encoders_by_class_tuples[encoder] += (type_,)\n    return encoders_by_class_tuples"
+    },
+
+    {
+      "id": "f:fastapi/_body_limit.py#validate_max_body_size",
+      "parent": "f:fastapi/_body_limit.py",
+      "name": "validate_max_body_size()",
+      "kind": "function",
+      "summary": "Validates that max_body_size is a non-negative integer or None, raising ValueError otherwise.",
+      "detail": "Called at app construction time when max_body_size is provided. Rejects None (passes through), booleans (isinstance bool check before int), non-int values, and negative integers. Raises ValueError with a plain message. Prevents silent misconfiguration from accepting True/False as 1/0.",
+      "paths": ["fastapi/_body_limit.py:21-29"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def validate_max_body_size(max_body_size: int | None) -> None",
+      "code": "def validate_max_body_size(max_body_size: int | None) -> None:\n    if max_body_size is None:\n        return\n    if (\n        isinstance(max_body_size, bool)\n        or not isinstance(max_body_size, int)\n        or max_body_size < 0\n    ):\n        raise ValueError(\"max_body_size must be a non-negative integer or None\")"
+    },
+
+    {
+      "id": "f:fastapi/_body_limit.py#get_body_size_limit",
+      "parent": "f:fastapi/_body_limit.py",
+      "name": "get_body_size_limit()",
+      "kind": "function",
+      "summary": "Returns the first non-None limit from a priority list of int|None values.",
+      "detail": "Takes *limits (int|None). Iterates the arguments in order and returns the first value that is not None. Returns None if all are None. Used by the routing layer to resolve the effective body size limit from route-level, router-level, and app-level settings in descending priority.",
+      "paths": ["fastapi/_body_limit.py:32-36"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_body_size_limit(*limits: int | None) -> int | None"
+    },
+
+    {
+      "id": "f:fastapi/_body_limit.py#get_body_limit_error",
+      "parent": "f:fastapi/_body_limit.py",
+      "name": "get_body_limit_error()",
+      "kind": "function",
+      "summary": "Unwraps an ExceptionGroup to find a body-limit error, or returns None for unrelated exceptions.",
+      "detail": "If exc is an ExceptionGroup, splits it on _body_limit_errors (the internal Starlette body-limit exception types). Returns None if any non-body-limit errors are present in the group. If the group contains a _response_sent error (Starlette already sent the 413 response), prefers that subgroup. Unwraps nested ExceptionGroups until a leaf exception is reached, then returns it only if it is a body-limit type.",
+      "paths": ["fastapi/_body_limit.py:39-50"],
+      "status": "live",
+      "tech": ["Python", "Starlette"]
+    },
+
+    {
+      "id": "f:fastapi/_body_limit.py#wrap_app_with_body_limit",
+      "parent": "f:fastapi/_body_limit.py",
+      "name": "wrap_app_with_body_limit()",
+      "kind": "function",
+      "summary": "Wraps an ASGI app with Starlette's RequestBodyLimitMiddleware when a limit is provided.",
+      "detail": "Returns the app unchanged when max_body_size is None. Otherwise wraps the app first in _BodyLimitExceptionMiddleware (which unwraps ExceptionGroups from concurrent tasks), then in RequestBodyLimitMiddleware with the given limit. The inner middleware ensures that body-limit ExceptionGroups raised by concurrent task groups are re-raised as plain exceptions that Starlette's middleware can catch.",
+      "paths": ["fastapi/_body_limit.py:53-58"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "def wrap_app_with_body_limit(app: ASGIApp, max_body_size: int | None) -> ASGIApp"
+    },
+
+    {
+      "id": "f:fastapi/exception_handlers.py#websocket_request_validation_exception_handler",
+      "parent": "f:fastapi/exception_handlers.py",
+      "name": "websocket_request_validation_exception_handler()",
+      "kind": "function",
+      "summary": "Closes the WebSocket with policy-violation code 1008 when WebSocket parameter validation fails.",
+      "detail": "Accepts a WebSocket and a WebSocketRequestValidationError. Calls jsonable_encoder(exc.errors()) to convert the Pydantic error list into a JSON-safe value used as the close reason string. Calls await websocket.close(code=WS_1008_POLICY_VIOLATION, reason=...). Returns None; no HTTP response is generated. Registered as the WebSocketRequestValidationError handler in FastAPI application setup.",
+      "paths": ["fastapi/exception_handlers.py:29-34"],
+      "status": "live",
+      "tech": ["Python", "Starlette"],
+      "signature": "async def websocket_request_validation_exception_handler(websocket: WebSocket, exc: WebSocketRequestValidationError) -> None",
+      "code": "async def websocket_request_validation_exception_handler(\n    websocket: WebSocket, exc: WebSocketRequestValidationError\n) -> None:\n    await websocket.close(\n        code=WS_1008_POLICY_VIOLATION, reason=jsonable_encoder(exc.errors())\n    )"
+    },
+
+    {
+      "id": "f:fastapi/responses.py#UJSONResponse.render",
+      "parent": "f:fastapi/responses.py#UJSONResponse",
+      "name": "UJSONResponse.render()",
+      "kind": "function",
+      "summary": "Serializes content to UTF-8 bytes using ujson with ensure_ascii=False.",
+      "detail": "Asserts that ujson was successfully imported (lazy import at module level). Calls ujson.dumps(content, ensure_ascii=False) to produce a JSON string with non-ASCII characters preserved, then encodes to UTF-8 bytes. The ensure_ascii=False is ujson's flag; ujson does not use a named keyword here, it is a positional parameter in some versions.",
+      "paths": ["fastapi/responses.py:64-66"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def render(self, content: Any) -> bytes"
+    },
+
+    {
+      "id": "f:fastapi/responses.py#ORJSONResponse.render",
+      "parent": "f:fastapi/responses.py#ORJSONResponse",
+      "name": "ORJSONResponse.render()",
+      "kind": "function",
+      "summary": "Serializes content to bytes using orjson with non-string key and numpy array support options.",
+      "detail": "Asserts that orjson was successfully imported. Calls orjson.dumps(content, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY) and returns the resulting bytes directly. orjson.dumps already returns bytes; no extra encode() call is needed. The combined option flag enables integer/UUID/enum dict keys and numpy ndarray serialization.",
+      "paths": ["fastapi/responses.py:94-98"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def render(self, content: Any) -> bytes"
+    }
+
+  ],
+  "edges": [
+
+    {
+      "from": "f:fastapi/exception_handlers.py#request_validation_exception_handler",
+      "to": "f:fastapi/encoders.py#jsonable_encoder",
+      "kind": "calls",
+      "label": "encodes validation errors to JSON-safe form",
+      "evidence": "fastapi/exception_handlers.py:25"
+    },
+    {
+      "from": "f:fastapi/exception_handlers.py#http_exception_handler",
+      "to": "f:fastapi/exceptions.py#HTTPException",
+      "kind": "reads",
+      "label": "reads status_code, detail, headers from exception",
+      "evidence": "fastapi/exception_handlers.py:11-16"
+    },
+    {
+      "from": "f:fastapi/_body_limit.py#AppBodyLimitMiddleware",
+      "to": "f:fastapi/exception_handlers.py#http_exception_handler",
+      "kind": "calls",
+      "label": "delegates 413 response rendering to HTTP handler",
+      "evidence": "fastapi/_body_limit.py:100-101"
+    },
+    {
+      "from": "f:fastapi/responses.py",
+      "to": "f:fastapi/sse.py#EventSourceResponse",
+      "kind": "reads",
+      "label": "re-exports EventSourceResponse in the responses namespace",
+      "evidence": "fastapi/responses.py:5"
+    },
+    {
+      "from": "f:fastapi/datastructures.py#UploadFile",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends StarletteUploadFile for async file I/O",
+      "evidence": "fastapi/datastructures.py:21"
+    },
+    {
+      "from": "f:fastapi/datastructures.py#UploadFile",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "registers Pydantic v2 core schema and JSON schema hooks",
+      "evidence": "fastapi/datastructures.py:139-150"
+    },
+    {
+      "from": "f:fastapi/encoders.py#jsonable_encoder",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "calls BaseModel.model_dump(mode='json') for Pydantic models",
+      "evidence": "fastapi/encoders.py:243-258"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#HTTPException",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.exceptions.HTTPException",
+      "evidence": "fastapi/exceptions.py:17"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#RequestValidationError",
+      "to": "f:fastapi/exceptions.py#ValidationException",
+      "kind": "calls",
+      "label": "extends ValidationException base class",
+      "evidence": "fastapi/exceptions.py:212"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#ResponseValidationError",
+      "to": "f:fastapi/exceptions.py#ValidationException",
+      "kind": "calls",
+      "label": "extends ValidationException base class",
+      "evidence": "fastapi/exceptions.py:234"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#FastAPIError",
+      "to": "f:fastapi/exceptions.py#ValidationException",
+      "kind": "reads",
+      "label": "PydanticV1NotSupportedError extends FastAPIError",
+      "evidence": "fastapi/exceptions.py:246"
+    },
+    {
+      "from": "f:fastapi/sse.py#EventSourceResponse",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.responses.StreamingResponse",
+      "evidence": "fastapi/sse.py:20"
+    },
+    {
+      "from": "f:fastapi/sse.py#ServerSentEvent",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "BaseModel with AfterValidator and model_validator",
+      "evidence": "fastapi/sse.py:52"
+    },
+    {
+      "from": "f:fastapi/responses.py#UJSONResponse",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.responses.JSONResponse",
+      "evidence": "fastapi/responses.py:48"
+    },
+    {
+      "from": "f:fastapi/responses.py#ORJSONResponse",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "extends starlette.responses.JSONResponse",
+      "evidence": "fastapi/responses.py:78"
+    },
+    {
+      "from": "f:fastapi/_body_limit.py",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "wraps Starlette RequestBodyLimitMiddleware",
+      "evidence": "fastapi/_body_limit.py:4-6"
+    },
+    {
+      "from": "f:fastapi/testclient.py",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "re-exports starlette.testclient.TestClient",
+      "evidence": "fastapi/testclient.py:1"
+    },
+    {
+      "from": "f:fastapi/testclient.py",
+      "to": "x:httpx",
+      "kind": "calls",
+      "label": "TestClient uses HTTPX as its HTTP driver",
+      "evidence": "fastapi/testclient.py:1"
+    },
+    {
+      "from": "f:fastapi/templating.py",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "re-exports starlette.templating.Jinja2Templates",
+      "evidence": "fastapi/templating.py:1"
+    },
+    {
+      "from": "f:fastapi/templating.py",
+      "to": "x:jinja2",
+      "kind": "calls",
+      "label": "Jinja2Templates uses Jinja2 for template rendering",
+      "evidence": "fastapi/templating.py:1"
+    },
+    {
+      "from": "f:fastapi/staticfiles.py",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "re-exports starlette.staticfiles.StaticFiles",
+      "evidence": "fastapi/staticfiles.py:1"
+    },
+    {
+      "from": "f:fastapi/requests.py",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "re-exports starlette.requests.Request and HTTPConnection",
+      "evidence": "fastapi/requests.py:1-2"
+    },
+    {
+      "from": "f:fastapi/encoders.py#jsonable_encoder",
+      "to": "f:fastapi/exceptions.py#FastAPIError",
+      "kind": "calls",
+      "label": "raises PydanticV1NotSupportedError for pydantic v1 models",
+      "evidence": "fastapi/encoders.py:341-345"
+    },
+    {
+      "from": "f:tests/test_jsonable_encoder.py",
+      "to": "f:fastapi/encoders.py",
+      "kind": "tests",
+      "label": "tests jsonable_encoder with all supported types",
+      "evidence": "tests/test_jsonable_encoder.py:1"
+    },
+    {
+      "from": "f:tests/test_exception_handlers.py",
+      "to": "f:fastapi/exception_handlers.py",
+      "kind": "tests",
+      "label": "tests HTTP and validation exception handler responses",
+      "evidence": "tests/test_exception_handlers.py:1"
+    },
+    {
+      "from": "f:tests/test_datastructures.py",
+      "to": "f:fastapi/datastructures.py",
+      "kind": "tests",
+      "label": "tests UploadFile and DefaultPlaceholder",
+      "evidence": "tests/test_datastructures.py:1"
+    },
+    {
+      "from": "f:tests/test_sse.py",
+      "to": "f:fastapi/sse.py",
+      "kind": "tests",
+      "label": "tests EventSourceResponse, ServerSentEvent, format_sse_event",
+      "evidence": "tests/test_sse.py:1"
+    },
+    {
+      "from": "f:tests/test_request_body_limits.py",
+      "to": "f:fastapi/_body_limit.py",
+      "kind": "tests",
+      "label": "tests AppBodyLimitMiddleware and body limit helpers",
+      "evidence": "tests/test_request_body_limits.py:1"
+    },
+    {
+      "from": "f:tests/test_form_limits.py",
+      "to": "f:fastapi/_form_limits.py",
+      "kind": "tests",
+      "label": "tests _validate_form_limits and _FormLimits validation",
+      "evidence": "tests/test_form_limits.py:1"
+    },
+    {
+      "from": "f:tests/test_deprecated_responses.py",
+      "to": "f:fastapi/responses.py",
+      "kind": "tests",
+      "label": "tests UJSONResponse and ORJSONResponse deprecation",
+      "evidence": "tests/test_deprecated_responses.py:1"
+    },
+    {
+      "from": "f:fastapi/exception_handlers.py",
+      "to": "f:fastapi/exceptions.py#RequestValidationError",
+      "kind": "reads",
+      "label": "handles RequestValidationError in validation handler",
+      "evidence": "fastapi/exception_handlers.py:20-26"
+    },
+
+    {
+      "from": "f:fastapi/encoders.py#jsonable_encoder",
+      "to": "f:fastapi/encoders.py#ENCODERS_BY_TYPE",
+      "kind": "reads",
+      "label": "looks up type in dispatch table for scalar types",
+      "evidence": "fastapi/encoders.py:336-337"
+    },
+    {
+      "from": "f:fastapi/encoders.py#ENCODERS_BY_TYPE",
+      "to": "f:fastapi/encoders.py#decimal_encoder",
+      "kind": "calls",
+      "label": "maps Decimal type to decimal_encoder function",
+      "evidence": "fastapi/encoders.py:92"
+    },
+    {
+      "from": "f:fastapi/encoders.py#ENCODERS_BY_TYPE",
+      "to": "f:fastapi/encoders.py#isoformat",
+      "kind": "calls",
+      "label": "maps date/datetime/time types to isoformat function",
+      "evidence": "fastapi/encoders.py:88-90"
+    },
+    {
+      "from": "f:fastapi/encoders.py#generate_encoders_by_class_tuples",
+      "to": "f:fastapi/encoders.py#ENCODERS_BY_TYPE",
+      "kind": "reads",
+      "label": "inverts the type map into encoder-to-class-tuples dict",
+      "evidence": "fastapi/encoders.py:126"
+    },
+    {
+      "from": "f:fastapi/datastructures.py#DefaultPlaceholder",
+      "to": "f:fastapi/datastructures.py#Default",
+      "kind": "reads",
+      "label": "Default() wraps a value in DefaultPlaceholder at runtime",
+      "evidence": "fastapi/datastructures.py:181"
+    },
+    {
+      "from": "f:fastapi/sse.py#format_sse_event",
+      "to": "f:fastapi/sse.py#EventSourceResponse",
+      "kind": "reads",
+      "label": "called by routing layer for SSE endpoints",
+      "evidence": "fastapi/routing.py:595"
+    },
+    {
+      "from": "f:fastapi/exception_handlers.py#websocket_request_validation_exception_handler",
+      "to": "f:fastapi/exceptions.py#WebSocketRequestValidationError",
+      "kind": "reads",
+      "label": "closes WebSocket on validation error",
+      "evidence": "fastapi/exception_handlers.py:29-34"
+    },
+    {
+      "from": "f:fastapi/exception_handlers.py#websocket_request_validation_exception_handler",
+      "to": "f:fastapi/encoders.py#jsonable_encoder",
+      "kind": "calls",
+      "label": "encodes WebSocket validation errors to JSON-safe form",
+      "evidence": "fastapi/exception_handlers.py:33"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#ValidationException.errors",
+      "to": "f:fastapi/exceptions.py#ValidationException",
+      "kind": "reads",
+      "label": "accessor returning the stored error list",
+      "evidence": "fastapi/exceptions.py:190-191"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#WebSocketRequestValidationError",
+      "to": "f:fastapi/exceptions.py#ValidationException",
+      "kind": "calls",
+      "label": "extends ValidationException base class",
+      "evidence": "fastapi/exceptions.py:224"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#DependencyScopeError",
+      "to": "f:fastapi/exceptions.py#FastAPIError",
+      "kind": "calls",
+      "label": "extends FastAPIError as specific scope-mismatch error",
+      "evidence": "fastapi/exceptions.py:167"
+    },
+    {
+      "from": "f:fastapi/exceptions.py#EndpointContext",
+      "to": "f:fastapi/exceptions.py#ValidationException",
+      "kind": "reads",
+      "label": "supplies endpoint file and line to ValidationException",
+      "evidence": "fastapi/exceptions.py:179"
+    },
+    {
+      "from": "f:fastapi/_body_limit.py#validate_max_body_size",
+      "to": "f:fastapi/_body_limit.py",
+      "kind": "reads",
+      "label": "validates max_body_size at construction time",
+      "evidence": "fastapi/_body_limit.py:21-29"
+    },
+    {
+      "from": "f:fastapi/_body_limit.py#wrap_app_with_body_limit",
+      "to": "f:fastapi/_body_limit.py#AppBodyLimitMiddleware",
+      "kind": "reads",
+      "label": "called by AppBodyLimitMiddleware constructor to wrap the app",
+      "evidence": "fastapi/_body_limit.py:76"
+    },
+    {
+      "from": "f:fastapi/_body_limit.py#get_body_limit_error",
+      "to": "f:fastapi/_body_limit.py#AppBodyLimitMiddleware",
+      "kind": "reads",
+      "label": "identifies body-limit exceptions in AppBodyLimitMiddleware",
+      "evidence": "fastapi/_body_limit.py:97"
+    },
+    {
+      "from": "f:fastapi/responses.py#UJSONResponse.render",
+      "to": "f:fastapi/responses.py#UJSONResponse",
+      "kind": "reads",
+      "label": "render() is the override method on UJSONResponse",
+      "evidence": "fastapi/responses.py:64"
+    },
+    {
+      "from": "f:fastapi/responses.py#ORJSONResponse.render",
+      "to": "f:fastapi/responses.py#ORJSONResponse",
+      "kind": "reads",
+      "label": "render() is the override method on ORJSONResponse",
+      "evidence": "fastapi/responses.py:94"
+    },
+    {
+      "from": "f:fastapi/datastructures.py#UploadFile.write",
+      "to": "f:fastapi/datastructures.py#UploadFile",
+      "kind": "reads",
+      "label": "async method on UploadFile delegating to Starlette super",
+      "evidence": "fastapi/datastructures.py:84"
+    },
+    {
+      "from": "f:fastapi/datastructures.py#UploadFile.read",
+      "to": "f:fastapi/datastructures.py#UploadFile",
+      "kind": "reads",
+      "label": "async method on UploadFile delegating to Starlette super",
+      "evidence": "fastapi/datastructures.py:102"
+    },
+    {
+      "from": "f:fastapi/datastructures.py#UploadFile.seek",
+      "to": "f:fastapi/datastructures.py#UploadFile",
+      "kind": "reads",
+      "label": "async method on UploadFile delegating to Starlette super",
+      "evidence": "fastapi/datastructures.py:122"
+    },
+    {
+      "from": "f:fastapi/datastructures.py#UploadFile.close",
+      "to": "f:fastapi/datastructures.py#UploadFile",
+      "kind": "reads",
+      "label": "async method on UploadFile delegating to Starlette super",
+      "evidence": "fastapi/datastructures.py:130"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow.io.encode-return-value",
+      "name": "Encoding a return value into a JSON response",
+      "summary": "serialize_response in fastapi/routing.py calls jsonable_encoder to convert any Python object returned by an endpoint into JSON-safe primitives before wrapping it in a JSONResponse.",
+      "steps": [
+        {
+          "node": "f:fastapi/encoders.py#jsonable_encoder",
+          "text": "serialize_response (in fastapi/routing.py, owned by the routing area) calls jsonable_encoder(response_content, ...) with the endpoint return value and the response model's include/exclude settings. jsonable_encoder dispatches on type: for a Pydantic BaseModel it calls model_dump(mode='json', by_alias=True, ...) and recurses on the resulting dict; for a dataclass it calls dataclasses.asdict() and recurses; for enums it returns .value; for collections it recurses on each element; for scalar types it returns the value directly."
+        },
+        {
+          "node": "f:fastapi/encoders.py#ENCODERS_BY_TYPE",
+          "text": "For types not handled by earlier branches (bytes, Decimal, UUID, datetimes, IP addresses, SecretStr, etc.), jsonable_encoder looks up the type in ENCODERS_BY_TYPE and applies the mapped encoder function. Unknown objects fall back to dict() then vars()."
+        },
+        {
+          "node": "f:fastapi/responses.py",
+          "text": "The JSON-safe dict or list produced by jsonable_encoder is passed to JSONResponse (re-exported from Starlette), which serializes it to bytes and sets the Content-Type header to application/json. The response is then sent back to the client by the ASGI layer."
+        }
+      ]
+    },
+    {
+      "id": "flow.io.error-to-response",
+      "name": "An error raised by an endpoint becoming an HTTP response",
+      "summary": "An HTTPException or RequestValidationError raised during request handling is caught by the registered exception handler in exception_handlers.py and rendered into a JSON HTTP response.",
+      "steps": [
+        {
+          "node": "f:fastapi/exceptions.py#HTTPException",
+          "text": "An endpoint raises HTTPException(status_code=404, detail='Item not found'). The exception propagates up through the ASGI middleware stack. Starlette's exception-handling middleware catches it and dispatches to the registered handler."
+        },
+        {
+          "node": "f:fastapi/exception_handlers.py#http_exception_handler",
+          "text": "http_exception_handler receives the Request and HTTPException. It calls is_body_allowed_for_status_code to check whether the status code permits a response body. For 404 it does, so the handler returns JSONResponse({'detail': exc.detail}, status_code=404, headers=exc.headers or None)."
+        },
+        {
+          "node": "f:fastapi/exception_handlers.py#request_validation_exception_handler",
+          "text": "If a RequestValidationError was raised instead (e.g., a path parameter failed Pydantic validation), request_validation_exception_handler calls jsonable_encoder(exc.errors()) to convert the Pydantic error list into a JSON-safe list of dicts, then returns JSONResponse({'detail': ...}, status_code=422). The 422 response body lists each validation failure with its location, message, and type."
+        }
+      ]
+    },
+    {
+      "id": "flow.io.sse-streaming",
+      "name": "Streaming Server-Sent Events from a path operation",
+      "summary": "An endpoint annotated with response_class=EventSourceResponse yields ServerSentEvent objects; the routing layer encodes each one to SSE wire format and streams it to the client.",
+      "steps": [
+        {
+          "node": "f:fastapi/sse.py#EventSourceResponse",
+          "text": "The route is declared with response_class=EventSourceResponse. The routing layer detects this marker class and wraps the generator in SSE-encoding logic. EventSourceResponse sets Content-Type: text/event-stream so the client opens an EventSource connection."
+        },
+        {
+          "node": "f:fastapi/sse.py#ServerSentEvent",
+          "text": "The endpoint yields ServerSentEvent(data=some_object, event='update', id='42') objects. The routing layer serializes data with jsonable_encoder and passes the result to format_sse_event as data_str."
+        },
+        {
+          "node": "f:fastapi/sse.py#format_sse_event",
+          "text": "format_sse_event builds the wire-format bytes: 'event: update\\ndata: {\\\"key\\\": \\\"value\\\"}\\nid: 42\\n\\n'. KEEPALIVE_COMMENT (': ping\\n\\n') is sent every _PING_INTERVAL seconds when the generator is idle to keep the connection alive through proxies and load balancers."
+        }
+      ]
+    }
+  ]
+}

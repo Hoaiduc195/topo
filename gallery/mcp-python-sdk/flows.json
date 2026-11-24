@@ -1,0 +1,10 @@
+{
+  "flows": [],
+  "feature": [
+    ["flow.client.http-open-call-close", "Call a tool over HTTP"],
+    ["flow.mcpserver.tool-registration", "Register a tool with @mcp.tool()"],
+    ["flow.server.streamable-http-request", "Serve a Streamable HTTP request"],
+    ["flow.auth.code-flow", "OAuth authorization-code flow"],
+    ["flow.shared.inbound-request", "Route an inbound JSON-RPC request"]
+  ]
+}

@@ -1,0 +1,1339 @@
+{
+  "area": "jsx",
+  "nodes": [
+
+    {
+      "id": "jsx.node-model",
+      "parent": "hono.jsx",
+      "name": "JSX node model",
+      "kind": "group",
+      "summary": "JSXNode class hierarchy, jsx() factory and the Fragment/cloneElement/memo helpers that form the virtual-node tree.",
+      "detail": "The node model lives in base.ts. JSXNode is the base class: it holds tag, props, children and an isEscaped flag that lets the HTML utility treat it as a safe string. JSXFunctionNode extends it for function components; JSXFragmentNode extends it for Fragments. jsx() is the public factory: it strips the key, calls jsxFn(), which delegates to JSXFunctionNode for functions, to a custom intrinsic-element component for recognised HTML tags, or to a plain JSXNode for raw elements. memo() wraps a component and attaches DOM_MEMO so the DOM renderer can skip reconciliation when props are shallowly equal. Fragment renders by directly serialising its children without a wrapper tag. The DOM_RENDERER symbol on each wrapper holds the DOM-side counterpart of a server-only tag.",
+      "paths": ["src/jsx/base.ts"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "jsx.runtime",
+      "parent": "hono.jsx",
+      "name": "JSX runtimes",
+      "kind": "group",
+      "summary": "The two runtime entry points consumed by the TypeScript compiler: jsx-runtime.ts (production) and jsx-dev-runtime.ts (development).",
+      "detail": "jsx-runtime.ts re-exports jsxDEV as jsx/jsxs, and adds three template-compilation helpers: jsxTemplate (wraps the html tagged-template literal and marks output as rendered JSX), jsxAttr (escapes a single attribute key=value pair), and jsxEscape (a no-op identity function used by the compiler for literal string values). jsx-dev-runtime.ts exports jsxDEV, which calls jsxFn from base.ts and attaches the optional key. Fragment is re-exported from base.ts. The dom/ subfolder has parallel dom/jsx-runtime.ts and dom/jsx-dev-runtime.ts that call the DOM-specific jsxDEV defined in dom/jsx-dev-runtime.ts, which routes string tags directly to intrinsic-element components.",
+      "paths": ["src/jsx/jsx-runtime.ts", "src/jsx/jsx-dev-runtime.ts", "src/jsx/dom/jsx-runtime.ts", "src/jsx/dom/jsx-dev-runtime.ts"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "jsx.server-render",
+      "parent": "hono.jsx",
+      "name": "Server string renderer",
+      "kind": "group",
+      "summary": "Synchronous and async rendering of a JSXNode tree to an escaped HTML string, driven by StringBuffer callbacks.",
+      "detail": "Rendering is initiated by JSXNode.toString() or renderChildren(). Both create a StringBufferWithCallbacks (an array where index 0 is the growing string and later elements are pending promises), then call toStringToBuffer() recursively. For function components JSXFunctionNode.toStringToBuffer() invokes the tag function; async results are deferred by pushing a Promise to the front of the buffer. When the buffer is of length 1 the string is returned directly; otherwise stringBufferToString() resolves promises and concatenates. attributeToBuffer() escapes each attribute value: booleans produce `attr=\"\"`, style objects are serialised via styleObjectForEach, raw strings call escapeToBuffer. childrenToStringToBuffer() iterates child types and handles strings (escapeToBuffer), numbers (direct append), HtmlEscapedStrings (direct append with callback propagation), Promises (buffer.unshift), and arrays (recursive).",
+      "paths": ["src/jsx/base.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.context",
+      "parent": "hono.jsx",
+      "name": "Server render context",
+      "kind": "group",
+      "summary": "Per-request context isolation using AsyncLocalStorage (Node.js, Deno, Bun, Cloudflare Workers) with a synchronous fallback store.",
+      "detail": "context.ts creates and reads JSX contexts on the server. createContext() registers a context in globalContexts[] and returns it as a function-component (the Provider). useContext() reads the current value from the per-request RenderStore (a WeakMap keyed by context object). runWithRenderContext() establishes the store: on runtimes with AsyncLocalStorage it calls storage.run(), ensuring context values propagate across await boundaries; on runtimes without it, it uses a module-level fallbackStore and warns once per process when async components access context post-await. captureRenderContext() snapshots all active values so a suspended subtree can resume them after a promise resolves. createContextProviderFunction() (dom/context.ts) is the DOM counterpart: it returns a function that pushes/pops the value on the shared values[] array in the right order using internal sentinel tag nodes.",
+      "paths": ["src/jsx/context.ts", "src/jsx/dom/context.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.hooks",
+      "parent": "hono.jsx",
+      "name": "Hooks API",
+      "kind": "group",
+      "summary": "React-compatible hooks (useState, useEffect, useContext, useRef, useMemo and friends) stored in the NodeObject stash.",
+      "detail": "All hooks in hooks/index.ts resolve the current NodeObject by reading the top of buildDataStack (pushed by invokeTag() in render.ts). Each NodeObject carries a DOM_STASH tuple: slot 0 is the current hook index (reset to 0 on every render call), slot 1 is an array-of-arrays keyed by STASH_STATE/STASH_EFFECT/STASH_CALLBACK/STASH_MEMO/STASH_REF. useState() reads or initialises stateArray[hookIndex] and returns the state plus an updater that calls update() (triggering a reconciliation). useEffect/useLayoutEffect/useInsertionEffect share useEffectCommon and store an EffectData tuple [deps, layoutCb, cleanup, effectCb, insertionCb]. useCallback and useMemo both check isDepsChanged. useRef stores the ref object directly. use() implements the promise-suspension protocol by caching resolutions in a WeakMap and throwing the promise if unsettled. useSyncExternalStore has a path for server-side rendering that calls getServerSnapshot.",
+      "paths": ["src/jsx/hooks/index.ts", "src/jsx/dom/hooks/index.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.dom-renderer",
+      "parent": "hono.jsx",
+      "name": "DOM renderer",
+      "kind": "group",
+      "summary": "Client-side virtual-DOM reconciler: build() diffs the node tree, apply()/applyNodeObject() mutate real DOM, and update() schedules async re-renders.",
+      "detail": "dom/render.ts is the core of the DOM renderer. build() recursively builds a virtual-DOM tree in NodeObject.vC, reconciling against the previous children (node.pC or node.vC). It matches children by tag and key, using a scan budget before switching to key indexing for large lists. For function components it calls invokeTag(), which pushes the node onto buildDataStack before calling the component, making hooks work. After build(), apply()/applyNodeObject() walk the resulting vC array and insert, move or update real DOM nodes; applyProps() diffs old and new props, handling events (addEventListener/removeEventListener), refs, style (cssText or style.setProperty), dangerouslySetInnerHTML, and all other attributes. update() is an async function: it deduplates rapid state changes via updateMap and coalesces updates with Promise.resolve(). renderNode() is the synchronous entry used internally; render() is the public API.",
+      "paths": ["src/jsx/dom/render.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.dom-entry",
+      "parent": "hono.jsx",
+      "name": "DOM public entry",
+      "kind": "group",
+      "summary": "hono/jsx/dom: re-exports hooks, context, components and render for the client-side bundle.",
+      "detail": "dom/index.ts collects and re-exports all public DOM symbols: render, jsx/createElement, useState through useSyncExternalStore, Suspense, ErrorBoundary, createContext, createPortal, flushSync, memo, Fragment. dom/client.ts exports createRoot and hydrateRoot to match the react-dom/client API. hydrateRoot delegates to createRoot.render(); createRoot wraps the component in a useState-based shell node so re-renders via root.render() trigger a state update. dom/server.ts exports renderToString (synchronous, throws on async components) and renderToReadableStream (delegates to streaming.ts).",
+      "paths": ["src/jsx/dom/index.ts", "src/jsx/dom/client.ts", "src/jsx/dom/server.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.streaming",
+      "parent": "hono.jsx",
+      "name": "Streaming & Suspense",
+      "kind": "group",
+      "summary": "Suspense-style streaming: Suspense wraps async children in a placeholder template and injects content via inline scripts as promises resolve.",
+      "detail": "streaming.ts has two exports. Suspense is an async component: it renders children synchronously; if any child throws a Promise (the use() protocol) it catches it, captures the render context, and queues the deferred resolution. When resArray contains promises the component emits `<template id=\"H:N\"></template>{fallback}<!--/$-->` with an HtmlEscapedCallback. During streaming that callback awaits the promises, then either patches the buffer in-place (non-streaming path) or emits a `<template data-hono-target=\"H:N\">` and an inline script that calls replaceWith(). StreamingContext lets the caller inject a nonce onto those scripts. renderToReadableStream drives the response: it calls resolveCallback() in the BeforeStream phase to collect synchronous output, enqueues it, then awaits each Stream-phase callback in a loop, enqueuing each resolved chunk separately.",
+      "paths": ["src/jsx/streaming.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.components",
+      "parent": "hono.jsx",
+      "name": "ErrorBoundary component",
+      "kind": "group",
+      "summary": "ErrorBoundary for server and DOM: catches sync and async errors during render and renders fallback or fallbackRender instead.",
+      "detail": "components.ts implements the server-side ErrorBoundary. It resolves each child with resolveChildEarly(); if a child throws a Promise (use() suspension) it re-renders after the promise resolves. If a child throws an Error it calls onError, then produces the fallback string using renderFallback(). When children contain pending Promises the component emits a template/comment fence and an HtmlEscapedCallback that patches or streams the final content, with an inline script to remove the fence. dom/components.ts implements the DOM counterpart using the DOM_ERROR_HANDLER symbol: the ErrorBoundary function attaches a handler to the Fragment that returns fallback on error; Suspense's handler expects a Promise, calls err.finally(retry) to schedule a re-render, and returns the fallback.",
+      "paths": ["src/jsx/components.ts", "src/jsx/dom/components.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.intrinsic",
+      "parent": "hono.jsx",
+      "name": "Intrinsic element hoisting",
+      "kind": "group",
+      "summary": "Special handling for title, script, style, link, meta, form, input and button: de-duplication, precedence sorting and head-hoisting.",
+      "detail": "intrinsic-element/components.ts (server) wraps each tag in documentMetadataTag, which serialises the tag to a string and attaches an insertIntoHead callback. That callback runs during HTML buffering: it tracks rendered tags in a WeakMap keyed by the render context object, deduplicates by configurable keys (src for script, href for link/style, name for meta), and when it finds </head> in the buffer it re-orders tags by precedence and inserts them. dom/intrinsic-element/components.ts (DOM) uses createPortal to place each tag into document.head, deduplicates against existing elements in the head via querySelectorAll, respects the same precedence ordering for stylesheets, and handles blocking=\"render\" by calling use() on the resource-load promise. intrinsic-element/common.ts holds the shared deDupeKeyMap and domRenderers registry.",
+      "paths": ["src/jsx/intrinsic-element/components.ts", "src/jsx/intrinsic-element/common.ts", "src/jsx/dom/intrinsic-element/components.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.css",
+      "parent": "hono.jsx",
+      "name": "CSS-in-JSX helper",
+      "kind": "group",
+      "summary": "DOM-side CSS-in-JS layer: css/cx/keyframes/viewTransition tagged-template helpers that inject rules into a CSSStyleSheet at runtime.",
+      "detail": "dom/css.ts builds on the shared cssCommon/cxCommon/keyframesCommon utilities in helper/css/common (owned by helpers area). createCssContext({ id }) returns a context object with css, cx, keyframes, viewTransition and Style. css() calls cssCommon to produce a CssClassName object whose toString() calls insertRule(): insertRule() locates or creates the <style id=\"${id}\"> element, grabs its CSSStyleSheet, and calls sheet.insertRule() once per new class name. viewTransition wraps viewTransitionCommon for CSS View Transitions. The Style component is a plain JSX <style> tag that accepts CssClassName children and serialises their STYLE_STRING. The module exports a default context with id DEFAULT_STYLE_ID.",
+      "paths": ["src/jsx/dom/css.ts"],
+      "status": "live",
+      "tech": ["TypeScript", "CSS"]
+    },
+
+    {
+      "id": "jsx.children",
+      "parent": "hono.jsx",
+      "name": "Children utilities",
+      "kind": "group",
+      "summary": "React-compatible Children API: map, forEach, count, only and toArray.",
+      "detail": "children.ts exports the Children object with five methods that mirror React.Children. toArray normalises a Child (which may be a scalar or array) into Child[]. map, forEach, count, only and toArray all delegate to toArray first. The only() method throws if the flattened list is not exactly one element. This module is re-exported from both src/jsx/index.ts and src/jsx/dom/index.ts.",
+      "paths": ["src/jsx/children.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.utils-module",
+      "parent": "hono.jsx",
+      "name": "JSX utilities",
+      "kind": "group",
+      "summary": "Attribute and tag validation, key normalisation and style object serialisation shared by the server and DOM renderers.",
+      "detail": "utils.ts exports isValidTagName, isValidAttributeName (each backed by a bounded LRU cache Set), normalizeIntrinsicElementKey (camelCase to HTML attribute name map for className->class, htmlFor->for etc.), and styleObjectForEach which converts a React-style style object to CSS property/value pairs, converting camelCase to kebab-case and appending px to unitless numeric values for length/size properties. hasUnsafeStyleValue prevents CSS injection by validating style value strings for unbalanced brackets, semicolons and other injection markers.",
+      "paths": ["src/jsx/utils.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.index-entry",
+      "parent": "hono.jsx",
+      "name": "Public entry point",
+      "kind": "group",
+      "summary": "hono/jsx main entry: re-exports all public symbols from base, context, hooks, streaming and components.",
+      "detail": "index.ts is the public API surface for hono/jsx. It imports and re-exports jsx, Fragment, memo, isValidElement, cloneElement, ErrorBoundary, createContext, useContext, the full hooks set, Suspense, Children, and type exports from types.ts and intrinsic-elements.ts. It also re-exports useActionState and useOptimistic from dom/hooks. The reactAPICompatVersion constant '19.0.0-hono-jsx' is exposed as the version symbol for compatibility.",
+      "paths": ["src/jsx/index.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.constants-module",
+      "parent": "hono.jsx",
+      "name": "Symbol constants",
+      "kind": "group",
+      "summary": "Module-scoped Symbol constants used to tag nodes with renderer, error handler, stash, memo and permalink metadata.",
+      "detail": "constants.ts defines seven Symbols: DOM_RENDERER (points to the DOM-side render function on a server component), DOM_ERROR_HANDLER (error/suspension handler on a Fragment for DOM ErrorBoundary/Suspense), DOM_STASH (hook stash on NodeObject), DOM_INTERNAL_TAG (marks sentinel tag functions created by context providers), DOM_MEMO (propsAreEqual function on memo-wrapped components), PERMALINK (server action URL on an action function), and RENDERED_JSX (marks an HtmlEscapedString as already-rendered JSX to skip double-escaping).",
+      "paths": ["src/jsx/constants.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.types-module",
+      "parent": "hono.jsx",
+      "name": "Type exports",
+      "kind": "group",
+      "summary": "Central re-export of all public TypeScript types for hono/jsx consumers.",
+      "detail": "types.ts re-exports Child, JSXNode, FC from base.ts; RefObject from hooks/index.ts; Context from context.ts; and declares PropsWithChildren, CSSProperties, ReactElement, ReactNode, ComponentClass, and global event aliases (MouseEvent, KeyboardEvent, etc.) that map to browser globals.",
+      "paths": ["src/jsx/types.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "jsx.intrinsic-elements",
+      "parent": "hono.jsx",
+      "name": "HTML element type definitions",
+      "kind": "group",
+      "summary": "TypeScript JSX.IntrinsicElements namespace with per-tag prop types modelled after the React type definitions.",
+      "detail": "intrinsic-elements.ts is a large type-only file that declares the JSX namespace used by the TypeScript compiler for tag checking. It references src/utils/mime (BaseMime) for type/accept fields and src/utils/types (StringLiteralUnion) for enum-like string fields. The comment credits the React repository (Meta Platforms) for the original definitions.",
+      "paths": ["src/jsx/intrinsic-elements.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#JSXNode",
+      "parent": "jsx.node-model",
+      "name": "JSXNode",
+      "kind": "class",
+      "summary": "Base virtual-DOM node: holds tag, props, children and serialises itself to an HTML string via toStringToBuffer.",
+      "detail": "JSXNode.toStringToBuffer opens the tag, iterates props via attributeToBuffer, handles dangerouslySetInnerHTML, calls childrenToStringToBuffer, then closes the tag. The class implements HtmlEscaped (isEscaped:true) so it is safe to embed in template literals without double-escaping. toString() wraps toStringToBuffer in runWithRenderContext to establish the per-request store.",
+      "paths": ["src/jsx/base.ts:279"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class JSXNode implements HtmlEscaped",
+      "code": "export class JSXNode implements HtmlEscaped {\n  tag: string | Function\n  props: Props\n  key?: string\n  children: Child[]\n  isEscaped: true = true as const\n  constructor(tag: string | Function, props: Props, children: Child[]) {\n    if (typeof tag !== 'function' && !isValidTagName(tag)) {\n      throw new Error(`Invalid JSX tag name: ${tag}`)\n    }\n    this.tag = tag; this.props = props; this.children = children\n  }"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#JSXFunctionNode",
+      "parent": "jsx.node-model",
+      "name": "JSXFunctionNode",
+      "kind": "class",
+      "summary": "Extends JSXNode for function components; toStringToBuffer calls the tag function and handles sync, async and array results.",
+      "detail": "JSXFunctionNode.toStringToBuffer merges children into props.children, then calls this.tag(props). Sync JSXNode results recurse into toStringToBuffer; Promise results are deferred via buffer.unshift('', resolveFunctionComponentResult(res, captureRenderContext())); array results iterate via childrenToStringToBuffer; numbers and HtmlEscapedStrings append directly; plain strings are escaped.",
+      "paths": ["src/jsx/base.ts:364"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class JSXFunctionNode extends JSXNode",
+      "code": "class JSXFunctionNode extends JSXNode {\n  override toStringToBuffer(buffer): void {\n    const props = { ...this.props }\n    if (this.children.length) {\n      props.children = this.children.length === 1 ? this.children[0] : this.children\n    }\n    const res = (this.tag as Function).call(null, props)\n    if (typeof res === 'boolean' || res == null) { return }\n    else if (res instanceof Promise) {\n      const ctx = globalContexts.length ? captureRenderContext() : undefined\n      buffer.unshift('', resolveFunctionComponentResult(res, ctx))\n    } else if (res instanceof JSXNode) { res.toStringToBuffer(buffer) }\n    else if (Array.isArray(res)) { childrenToStringToBuffer(res, buffer) }\n  }\n}"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#jsx",
+      "parent": "jsx.node-model",
+      "name": "jsx()",
+      "kind": "function",
+      "summary": "Public JSX factory: strips key from props, normalises children, delegates to jsxFn() and attaches key to the returned node.",
+      "detail": "jsx() is called by transpiled JSX and by createElement. It null-coalesces props, packs children into props.children, extracts and deletes the key, calls jsxFn, and re-attaches key. jsxFn() one-time-initialises domRenderers on JSX intrinsic-element tags, then dispatches to JSXFunctionNode (functions), JSXFunctionNode(intrinsic tag component) for known HTML tags, nameSpaceContext wrapping for svg/head, or plain JSXNode.",
+      "paths": ["src/jsx/base.ts:407"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const jsx = (tag: string | Function, props: Props | null, ...children: Child[]): JSXNode",
+      "code": "export const jsx = (tag: string | Function, props: Props | null, ...children: Child[]): JSXNode => {\n  props ??= {}\n  if (children.length) {\n    props.children = children.length === 1 ? children[0] : children\n  }\n  const key = props.key\n  delete props['key']\n  const node = jsxFn(tag, props, children)\n  node.key = key\n  return node\n}"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#jsxFn",
+      "parent": "jsx.node-model",
+      "name": "jsxFn()",
+      "kind": "function",
+      "summary": "Internal dispatcher: routes tag to JSXFunctionNode, an intrinsic-element wrapper, a namespace context wrapper, or a plain JSXNode.",
+      "detail": "jsxFn() is called by jsx() and by jsxDEV (via jsx-dev-runtime). On its first call it installs DOM_RENDERER symbols from domRenderers onto the intrinsicElementTags object. It then checks: (1) function tags -> JSXFunctionNode; (2) recognised HTML tag keys in intrinsicElementTags -> JSXFunctionNode wrapping the intrinsic component; (3) 'svg' or 'head' tags -> JSXNode wrapping a nameSpaceContext.Provider JSXFunctionNode; (4) everything else -> plain JSXNode.",
+      "paths": ["src/jsx/base.ts:422"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const jsxFn = (tag: string | Function, props: Props, children: Child[]): JSXNode"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#Fragment",
+      "parent": "jsx.node-model",
+      "name": "Fragment",
+      "kind": "function",
+      "summary": "Returns a JSXFragmentNode that serialises its children without a wrapper element.",
+      "detail": "Fragment is a named export and also the StrictMode alias. It wraps children (normalised to an array) in a JSXFragmentNode whose toStringToBuffer calls childrenToStringToBuffer directly. Used both on the server and in the DOM renderer where dom/jsx-dev-runtime.ts exports its own Fragment that calls jsxDEV('').",
+      "paths": ["src/jsx/base.ts:501"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const Fragment = ({ children }: { key?: string; children?: Child | HtmlEscapedString }): HtmlEscapedString"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#memo",
+      "parent": "jsx.node-model",
+      "name": "memo()",
+      "kind": "function",
+      "summary": "Wraps a component function so the DOM renderer can skip re-renders when props are shallowly equal.",
+      "detail": "memo(component, propsAreEqual) creates a wrapper function that delegates to component() (for the server toString path) and attaches DOM_MEMO = propsAreEqual and DOM_RENDERER = component. The DOM renderer's build() checks (oldChild.tag as MemorableFC)[DOM_MEMO]?.(pP, oldChild.props) to decide whether to set oldChild.s = true (skip build). shallowEqual is the default comparator.",
+      "paths": ["src/jsx/base.ts:486"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const memo = <T>(component: FC<T>, propsAreEqual?: (prevProps: Readonly<T>, nextProps: Readonly<T>) => boolean): FC<T>"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#attributeToBuffer",
+      "parent": "jsx.server-render",
+      "name": "attributeToBuffer()",
+      "kind": "function",
+      "summary": "Serialises one prop key-value pair into the StringBuffer, escaping values and skipping refs and event handlers.",
+      "detail": "attributeToBuffer skips ref and null/undefined values. Boolean attributes that are true emit `attr=\"\"`. Function values on non-on* props throw; on* functions are silently skipped (server ignores event handlers). style objects are serialised via styleObjectForEach then escapeToBuffer. String values call escapeToBuffer. Numbers and HtmlEscapedAttributes (not marked RENDERED_JSX) are appended directly. Promise values push to the buffer front. Object values call toString().",
+      "paths": ["src/jsx/base.ts:158"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const attributeToBuffer = (buffer: StringBuffer, prefix: string, key: string, v: unknown, tag?: string): void"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#childrenToStringToBuffer",
+      "parent": "jsx.server-render",
+      "name": "childrenToStringToBuffer()",
+      "kind": "function",
+      "summary": "Iterates children and appends each to the StringBuffer, handling all Child union members.",
+      "detail": "For string children it calls escapeToBuffer. Boolean/null/undefined children are skipped. JSXNode children call toStringToBuffer. Number children are directly appended. HtmlEscapedString children append directly and propagate callbacks. Promise children push to buffer.unshift. Array children recurse.",
+      "paths": ["src/jsx/base.ts:217"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "const childrenToStringToBuffer = (children: Child[], buffer: StringBufferWithCallbacks): void",
+      "code": "const childrenToStringToBuffer = (children: Child[], buffer): void => {\n  for (let i = 0, len = children.length; i < len; i++) {\n    const child = children[i]\n    if (typeof child === 'string') { escapeToBuffer(child, buffer) }\n    else if (typeof child === 'boolean' || child === null || child === undefined) { continue }\n    else if (child instanceof JSXNode) { child.toStringToBuffer(buffer) }\n    else if (typeof child === 'number') { (buffer[0] as string) += child }\n    else if ((child as unknown as HtmlEscaped).isEscaped) { (buffer[0] as string) += child }\n    else if (child instanceof Promise) { buffer.unshift('', child) }\n    else if (Array.isArray(child)) { childrenToStringToBuffer(child, buffer) }\n  }\n}"
+    },
+
+    {
+      "id": "f:src/jsx/context.ts#createContext",
+      "parent": "jsx.context",
+      "name": "createContext()",
+      "kind": "function",
+      "summary": "Creates a server-side JSX context with request-scoped isolation via AsyncLocalStorage.",
+      "detail": "createContext<T>(defaultValue) builds a Context<T> which is itself a function component (the Provider). The Provider, when rendered, pushes the value into a per-request store derived via getContextValuesIn and pops it in a .finally(). With AsyncLocalStorage available each Provider clones the current store to give async children their own private copy so concurrent requests cannot read each other's values. globalContexts[] tracks all created contexts for captureRenderContext. The DOM counterpart (dom/context.ts) uses sentinel internal-tag nodes to push/pop into values[] without AsyncLocalStorage.",
+      "paths": ["src/jsx/context.ts:213"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const createContext = <T>(defaultValue: T): Context<T>",
+      "code": "export const createContext = <T>(defaultValue: T): Context<T> => {\n  const values = [defaultValue]\n  const context: Context<T> = ((props) => {\n    const store = getCurrentStore()\n    const storage = store && loadAsyncLocalStorage()\n    if (store && storage) {\n      // own WeakMap so async children read this Provider's value\n      const ownStore: RenderStore = new WeakMap()\n      getContextValuesIn(ownStore, context).push(props.value)\n      return storage.run(ownStore, renderChildrenOf)\n    }\n    // fallback: push/pop on shared array\n    getContextValuesIn(store, context).push(props.value)\n    // ... pop in finally\n  }) as Context<T>"
+    },
+
+    {
+      "id": "f:src/jsx/context.ts#runWithRenderContext",
+      "parent": "jsx.context",
+      "name": "runWithRenderContext()",
+      "kind": "function",
+      "summary": "Establishes the per-request RenderStore for a render, using AsyncLocalStorage when available or a synchronous fallback store.",
+      "detail": "runWithRenderContext is called by JSXNode.toString() and renderChildren(). If a store is already active it short-circuits. Otherwise it creates a new WeakMap store, then either calls storage.run(store, callback) (AsyncLocalStorage path, propagates across await) or sets fallbackStore temporarily and executes callback synchronously (fallback path, context is lost after the first await, with a one-time warning).",
+      "paths": ["src/jsx/context.ts:161"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const runWithRenderContext = <T>(callback: () => T, resumeStore?: RenderStore): T"
+    },
+
+    {
+      "id": "f:src/jsx/context.ts#captureRenderContext",
+      "parent": "jsx.context",
+      "name": "captureRenderContext()",
+      "kind": "function",
+      "summary": "Snapshots the current render store and returns a resumer closure for deferred continuations.",
+      "detail": "captureRenderContext() reads getCurrentStore() and all active context values via captureContextValues(). It returns a closure that calls resumeWithContextValues() to push those values into a fresh store before invoking the continuation. Used by JSXFunctionNode (async components), Suspense, and ErrorBoundary to restore context after a promise resolves.",
+      "paths": ["src/jsx/context.ts:196"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const captureRenderContext = (): (<T>(callback: () => T) => T)"
+    },
+
+    {
+      "id": "f:src/jsx/context.ts#useContext",
+      "parent": "jsx.context",
+      "name": "useContext()",
+      "kind": "function",
+      "summary": "Reads the nearest provided value of a context from the current per-request RenderStore.",
+      "detail": "useContext<T>(context) calls readContextValueIn(getCurrentStore(), context). readContextValueIn never materialises a store entry; if the store is undefined (no render context) it warns once and returns context.values.at(-1). The DOM counterpart in context.ts (re-exported from hooks/index.ts via context.ts useContext) reads the same globalContexts values[] stack directly.",
+      "paths": ["src/jsx/context.ts:285"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useContext = <T>(context: Context<T>): T"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useState",
+      "parent": "jsx.hooks",
+      "name": "useState()",
+      "kind": "function",
+      "summary": "Returns current state and an updater that calls update() to schedule a DOM reconciliation.",
+      "detail": "useState reads buildDataStack.at(-1) to find the current NodeObject. It initialises stateArray[hookIndex] on first render. The returned updater: runs the functional-update form if passed a function, skips if Object.is(newState, currentState), otherwise pushes the new value and calls update([pendingType, false, updateHook], node). When inside a transition or deferred-value pending stack it defers the commit to after the pending promise settles.",
+      "paths": ["src/jsx/hooks/index.ts:182"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useState: UseStateType",
+      "code": "export const useState: UseStateType = <T>(initialState?: T | (() => T)) => {\n  const resolveInitialState = () =>\n    typeof initialState === 'function' ? (initialState as () => T)() : (initialState as T)\n  const buildData = buildDataStack.at(-1) as [unknown, NodeObject]\n  if (!buildData) return [resolveInitialState(), () => {}]\n  const [, node] = buildData\n  const stateArray = (node[DOM_STASH][1][STASH_SATE] ||= [])\n  const hookIndex = node[DOM_STASH][0]++\n  return (stateArray[hookIndex] ||= [\n    resolveInitialState(),\n    (newState: T | ((s: T) => T)) => {\n      // compute new value, compare with Object.is, call update()\n    }\n  ])\n}"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useEffect",
+      "parent": "jsx.hooks",
+      "name": "useEffect()",
+      "kind": "function",
+      "summary": "Schedules an effect callback after DOM paint, with optional dependency array for skip-on-equal.",
+      "detail": "useEffect delegates to useEffectCommon(3, effect, deps) which stores an EffectData tuple at STASH_EFFECT[hookIndex]. The tuple index 3 is the effect runner; index 2 is the cleanup; index 1 is the layoutEffect slot (unused here). apply() collects all EffectData callbacks via getNextChildren and invokes the useEffect runner via requestAnimationFrame. useLayoutEffect uses index 1 and runs synchronously after DOM mutation. useInsertionEffect uses index 4 and runs synchronously before DOM mutation.",
+      "paths": ["src/jsx/hooks/index.ts:288"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useEffect = (effect: () => void | (() => void), deps?: readonly unknown[]): void"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#use",
+      "parent": "jsx.hooks",
+      "name": "use()",
+      "kind": "function",
+      "summary": "Suspends the component by throwing a Promise; returns the resolved value on subsequent renders.",
+      "detail": "use(promise) checks resolvedPromiseValueMap for a cached result. If found with length 1 it returns the value; with length 2 it re-throws the error. If not found it registers .then/.catch handlers to populate the cache and throws the promise. The Suspense component (both server and DOM) catches this throw and handles resumption.",
+      "paths": ["src/jsx/hooks/index.ts:336"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const use = <T>(promise: Promise<T>): T",
+      "code": "export const use = <T>(promise: Promise<T>): T => {\n  const cachedRes = resolvedPromiseValueMap.get(promise) as [T] | [undefined, unknown] | undefined\n  if (cachedRes) {\n    if (cachedRes.length === 2) {\n      throw cachedRes[1]\n    }\n    return cachedRes[0] as T\n  }\n  promise.then(\n    (res) => resolvedPromiseValueMap.set(promise, [res]),\n    (e) => resolvedPromiseValueMap.set(promise, [undefined, e])\n  )\n  throw promise\n}"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useMemo",
+      "parent": "jsx.hooks",
+      "name": "useMemo()",
+      "kind": "function",
+      "summary": "Memoises the result of factory() until one of the deps changes.",
+      "detail": "useMemo reads memoArray[hookIndex] from the stash and calls isDepsChanged on the previous deps. If changed it calls factory() and stores [result, deps]; otherwise it returns the cached result. useCallback is implemented identically but stores [callback, deps] without calling the factory.",
+      "paths": ["src/jsx/hooks/index.ts:352"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useMemo = <T>(factory: () => T, deps: readonly unknown[]): T"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useRef",
+      "parent": "jsx.hooks",
+      "name": "useRef()",
+      "kind": "function",
+      "summary": "Returns a stable RefObject whose current property persists across renders.",
+      "detail": "useRef reads refArray[hookIndex] from STASH_REF. On first render it creates { current: initialValue }. The same object is returned on every subsequent render. forwardRef creates a wrapper that extracts ref from props and passes it as the second argument. useImperativeHandle assigns ref.current = createHandle() inside a useEffect with the given deps.",
+      "paths": ["src/jsx/hooks/index.ts:320"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export function useRef<T>(initialValue?: T | null): RefObject<T | null | undefined>"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useReducer",
+      "parent": "jsx.hooks",
+      "name": "useReducer()",
+      "kind": "function",
+      "summary": "React-compatible reducer hook; dispatches actions through reducer(state, action) using useState under the hood.",
+      "detail": "useReducer(reducer, initialArg, init) creates a stable dispatch via useCallback, then calls useState initialised to init?(initialArg) : initialArg. The dispatch calls setState(state => reducer(state, action)). The reducer reference is captured in useCallback's deps so it stays stable across renders.",
+      "paths": ["src/jsx/hooks/index.ts:245"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useReducer = <T, A>(reducer: (state: T, action: A) => T, initialArg: T, init?: (initialState: T) => T): [T, (action: A) => void]"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useSyncExternalStore",
+      "parent": "jsx.hooks",
+      "name": "useSyncExternalStore()",
+      "kind": "function",
+      "summary": "Subscribes to an external store; uses getServerSnapshot on the server-side rendering path.",
+      "detail": "useSyncExternalStore checks buildDataStack: if empty it assumes server-side rendering and calls getServerSnapshot() (throws if absent). Otherwise it reads the snapshot, keeps a latestSnapshot ref, and swaps subscription inside a useEffect when subscribe changes. A second useEffect unsubscribes on unmount. Stale snapshot detection compares snapshot at subscription time against getSnapshot().",
+      "paths": ["src/jsx/hooks/index.ts:401"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useSyncExternalStore = <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T, getServerSnapshot?: () => T): T"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#startTransition",
+      "parent": "jsx.hooks",
+      "name": "startTransition()",
+      "kind": "function",
+      "summary": "Marks state updates inside the callback as low-priority (PendingType 1) so they can be interrupted.",
+      "detail": "startTransition calls runCallback(1, callback) which pushes [1, promise] onto pendingStack before running callback. useState's updater reads pendingStack.at(-1) and uses the PendingType for the update() call. useTransition exposes the isPending flag by checking context[0] === 2 and returns startTransitionHook (PendingType 2) which awaits the transition.",
+      "paths": ["src/jsx/hooks/index.ts:119"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const startTransition = (callback: () => void): void"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#build",
+      "parent": "jsx.dom-renderer",
+      "name": "build()",
+      "kind": "function",
+      "summary": "Reconciles children: matches old and new by tag/key, skips memo'd subtrees, invokes function tags and propogates error handlers.",
+      "detail": "build(context, node, children?) either calls invokeTag() for function components or converts props.children via toArray for elements. It then matches new children against oldVChildren by tag and key, using a scan budget before switching to a Map for O(1) lookup on large keyed lists. For matched pairs it copies the old NodeObject's element reference and sets s=true if props are shallowEqual or the DOM_MEMO comparator says skip. Unmatched old children go to node.vR for removal. Error handler bookkeeping uses context[5] (a stack of [context, handler, node]) so the nearest ErrorBoundary absorbs thrown errors.",
+      "paths": ["src/jsx/dom/render.ts:517"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const build = (context: Context, node: NodeObject, children?: Child[]): void",
+      "code": "export const build = (context: Context, node: NodeObject, children?: Child[]): void => {\n  children ||=\n    typeof node.tag == 'function' ? invokeTag(context, node) : toArray(node.props.children)\n  for (let i = 0; i < children.length; i++) {\n    let child = buildNode(children[i])\n    if (child) {\n      // match against oldVChildren by tag+key\n      // oldChild.s=true when memo propsAreEqual passes\n      if (!isNodeString(child) && !child.s) build(context, child)\n      vChildren.push(child)\n    }\n  }\n  node.vR = oldVChildren || []\n  node.vC = vChildren\n}"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#applyNodeObject",
+      "parent": "jsx.dom-renderer",
+      "name": "applyNodeObject()",
+      "kind": "function",
+      "summary": "Walks vC and mutates real DOM: creates elements, inserts/reorders nodes, runs effect callbacks.",
+      "detail": "applyNodeObject calls getNextChildren to flatten the vC tree into next[] and collect remove[] and effect callbacks[]. It then calculates the insertion offset by finding the next sibling from findInsertBefore. For each next[] child: NodeStrings update textContent; NodeObjects create the DOM element via document.createElement/createElementNS, call applyProps and recurse. After all children are placed the offset logic handles insertBefore vs appendChild. Finally useInsertionEffect callbacks run synchronously, useLayoutEffect callbacks run synchronously, useEffect callbacks run inside requestAnimationFrame.",
+      "paths": ["src/jsx/dom/render.ts:393"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "const applyNodeObject = (node: NodeObject, container: Container, isNew: boolean): void"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#update",
+      "parent": "jsx.dom-renderer",
+      "name": "update()",
+      "kind": "function",
+      "summary": "Async reconciliation entry: deduplicates rapid updates via updateMap and coalesces with Promise.resolve().",
+      "detail": "update(context, node) stores a resolve function in updateMap[node]. If a previous pending update exists it cancels it. It awaits Promise.resolve() to let the current microtask queue drain, then checks if the node is still the latest update before calling updateSync(). updateSync() calls build() then apply(). When inside a currentUpdateSets batch (from flushSync) the node is added to the set and all pending nodes are flushed synchronously before the batch exits.",
+      "paths": ["src/jsx/dom/render.ts:805"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const update = async (context: Context, node: NodeObject): Promise<NodeObject | undefined>"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#render",
+      "parent": "jsx.dom-renderer",
+      "name": "render()",
+      "kind": "function",
+      "summary": "Mounts a JSX child tree into a DOM container, synchronously performing the initial build and apply.",
+      "detail": "render(jsxNode, container) wraps the child in a synthetic root NodeObject (tag:'', props:{children:jsxNode}), builds it inside renderNode(), applies it to a DocumentFragment, replaces all container containers in the vC tree to point to the real container, then calls container.replaceChildren(fragment).",
+      "paths": ["src/jsx/dom/render.ts:861"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const render = (jsxNode: Child, container: Container): void",
+      "code": "export const render = (jsxNode: Child, container: Container): void => {\n  renderNode(buildNode({ tag: '', props: { children: jsxNode } } as any) as NodeObject, container)\n}\nexport const renderNode = (node: NodeObject, container: Container): void => {\n  const context: Context = []\n  ;(context as Context)[5] = []\n  ;(context as Context)[4] = true\n  build(context, node, undefined)\n  ;(context as Context)[4] = false\n  const fragment = document.createDocumentFragment()\n  apply(node, fragment, true)\n  replaceContainer(node, fragment, container)\n  container.replaceChildren(fragment)\n}"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#applyProps",
+      "parent": "jsx.dom-renderer",
+      "name": "applyProps()",
+      "kind": "function",
+      "summary": "Diffs old and new props and applies changes to a DOM element: events, refs, style, dangerouslySetInnerHTML and attributes.",
+      "detail": "applyProps iterates new attributes and skips unchanged ones (by reference equality against oldAttributes). Event props (matching getEventSpec) call removeEventListener/addEventListener. dangerouslySetInnerHTML sets innerHTML. ref props call the ref function or assign ref.current; cleanup is tracked in refCleanupMap. style props set cssText or use style.setProperty. value on INPUT/TEXTAREA assigns the .value property directly; SELECT value is deferred to applySelectValue after children. Invalid attribute errors (DOMException InvalidCharacterError) are silently swallowed. Removed old props call removeAttribute or removeEventListener.",
+      "paths": ["src/jsx/dom/render.ts:164"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "const applyProps = (container: SupportedElement, attributes: Props, oldAttributes?: Props): void"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#createPortal",
+      "parent": "jsx.dom-renderer",
+      "name": "createPortal()",
+      "kind": "function",
+      "summary": "Returns a synthetic node that renders its children into an arbitrary DOM container outside the component tree.",
+      "detail": "createPortal(children, container, key) returns a plain object with tag HONO_PORTAL_ELEMENT ('_hp'), props.children, and e = container. applyNodeObject recognises HONO_PORTAL_ELEMENT and skips the offset increment for it; findInsertBefore skips portal nodes when searching for insertion positions. Used internally by intrinsic-element DOM components to hoist head tags.",
+      "paths": ["src/jsx/dom/render.ts:880"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const createPortal = (children: Child, container: HTMLElement, key?: string): Child"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#flushSync",
+      "parent": "jsx.dom-renderer",
+      "name": "flushSync()",
+      "kind": "function",
+      "summary": "Synchronously flushes all state updates triggered inside callback, bypassing the async update queue.",
+      "detail": "flushSync pushes a new Set onto currentUpdateSets. Any update() calls during callback add their node to the set instead of awaiting Promise.resolve(). After callback returns, flushSync iterates the set and calls the update function synchronously via latest[1](). This matches React's flushSync behaviour for test environments.",
+      "paths": ["src/jsx/dom/render.ts:866"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const flushSync = (callback: () => void): void"
+    },
+
+    {
+      "id": "f:src/jsx/streaming.ts#Suspense",
+      "parent": "jsx.streaming",
+      "name": "Suspense",
+      "kind": "function",
+      "summary": "Async component that emits a template placeholder and streams resolved content via inline scripts.",
+      "detail": "Suspense renders children synchronously; if any throw a Promise it defers via captureRenderContext(). It awaits the fallback string and emits `<template id=\"H:N\"></template>{fallback}<!--/$-->` with an HtmlEscapedCallback. The callback: on the buffer path replaces the template range with the resolved content in-place; on the stream path emits a data-hono-target template and an inline replace script. scriptNonce from StreamingContext is used on the script tag. The DOM counterpart in dom/components.ts attaches a DOM_ERROR_HANDLER that returns fallback when a promise is thrown and calls err.finally(retry).",
+      "paths": ["src/jsx/streaming.ts:51"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const Suspense: FC<PropsWithChildren<{ fallback: any }>>",
+      "code": "export const Suspense = async ({ children, fallback }) => {\n  try {\n    buildDataStack.push([[], stackNode])\n    resArray = children.map(serializeBoundaryChild)\n  } catch (e) {\n    if (e instanceof Promise) {\n      const resume = captureRenderContext()\n      resArray = [e.then(() => resume(() => childrenToString(children)))]\n    } else { throw e }\n  } finally { popNodeStack() }\n  if (resArray.some((r) => r instanceof Promise)) {\n    return raw(`<template id=\"H:N\"></template>${fallbackStr}<!--/$-->`, [streamCb])\n  }\n  return raw(resArray.join(''))\n}"
+    },
+
+    {
+      "id": "f:src/jsx/streaming.ts#renderToReadableStream",
+      "parent": "jsx.streaming",
+      "name": "renderToReadableStream()",
+      "kind": "function",
+      "summary": "Wraps a rendered JSXNode in a ReadableStream, flushing the initial HTML then streaming Suspense chunks.",
+      "detail": "renderToReadableStream resolves the content through HtmlEscapedCallbackPhase.BeforeStream (collecting all synchronous output including Suspense fallbacks) and enqueues the encoded result. It then iterates Stream-phase callbacks, enqueuing each resolved chunk. Errors from individual chunks are passed to onError (default: console.trace) and replaced with an empty string. The stream is cancelled cleanly via the cancelled flag.",
+      "paths": ["src/jsx/streaming.ts:157"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const renderToReadableStream = (content: HtmlEscapedString | JSXNode | Promise<HtmlEscapedString>, onError?: (e: unknown) => string | void): ReadableStream<Uint8Array>"
+    },
+
+    {
+      "id": "f:src/jsx/components.ts#ErrorBoundary",
+      "parent": "jsx.components",
+      "name": "ErrorBoundary (server)",
+      "kind": "function",
+      "summary": "Async server component that catches child render errors and streams a fallback instead.",
+      "detail": "ErrorBoundary resolves each child with resolveChildEarly. Synchronous errors call renderFallback immediately. Suspension (thrown Promise) is caught, the render context is captured, and the continuation is queued. When promises are present it emits a template/comment fence and an HtmlEscapedCallback that patches the buffer (non-streaming) or emits a replace script (streaming). The same inline-script pattern as Suspense is used, but with 'E:N' ids. DOM counterpart in dom/components.ts uses DOM_ERROR_HANDLER: errors that are not Promises invoke the fallback; Promises re-throw to Suspense's handler.",
+      "paths": ["src/jsx/components.ts:51"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const ErrorBoundary: FC<PropsWithChildren<{ fallback?: Child; fallbackRender?: FallbackRender; onError?: ErrorHandler }>>"
+    },
+
+    {
+      "id": "f:src/jsx/dom/client.ts#createRoot",
+      "parent": "jsx.dom-entry",
+      "name": "createRoot()",
+      "kind": "function",
+      "summary": "Creates a React-dom-compatible root object whose render() method mounts or updates the app.",
+      "detail": "createRoot wraps the initial render in a useState shell: on the first render() call it calls renderNode with a component that holds the app node in state; subsequent render() calls call setJsxNode(newNode) triggering an update. unmount() calls setJsxNode(null) to clear the tree and sets the internal reference to null, causing future render() calls to throw.",
+      "paths": ["src/jsx/dom/client.ts:23"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const createRoot = (element: HTMLElement | DocumentFragment, options?: RootOptions): Root"
+    },
+
+    {
+      "id": "f:src/jsx/dom/server.ts#renderToString",
+      "parent": "jsx.dom-entry",
+      "name": "renderToString()",
+      "kind": "function",
+      "summary": "Synchronously renders a JSX element to a string; throws if the tree contains async components.",
+      "detail": "renderToString calls prepareRoot (renderChildren for string/array inputs), then calls element.toString(). If the result is a Promise it throws, because async components require renderToReadableStream. The function accepts an identifierPrefix option but warns that it is not supported yet.",
+      "paths": ["src/jsx/dom/server.ts:25"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "const renderToString = (element: Child, options?: RenderToStringOptions): string"
+    },
+
+    {
+      "id": "f:src/jsx/jsx-runtime.ts#jsxTemplate",
+      "parent": "jsx.runtime",
+      "name": "jsxTemplate()",
+      "kind": "function",
+      "summary": "Tagged-template helper used by the TypeScript JSX transform for pre-compiled JSX templates.",
+      "detail": "jsxTemplate wraps the html helper from helper/html and marks the result with RENDERED_JSX so attributeToBuffer does not double-escape it. It is listed in jsx-runtime.ts alongside jsxAttr and jsxEscape to satisfy the TypeScript automatic runtime import contract.",
+      "paths": ["src/jsx/jsx-runtime.ts:16"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const jsxTemplate: typeof html"
+    },
+
+    {
+      "id": "f:src/jsx/jsx-dev-runtime.ts#jsxDEV",
+      "parent": "jsx.runtime",
+      "name": "jsxDEV()",
+      "kind": "function",
+      "summary": "Development JSX factory: calls jsxFn with normalised children and attaches the optional key.",
+      "detail": "jsxDEV(tag, props, key) calls jsxFn from base.ts. It normalises the children field: if props.children is an array it passes it directly; otherwise it wraps it in a single-element array. The key is attached to the returned node. This function is re-exported as jsx and jsxs from jsx-runtime.ts.",
+      "paths": ["src/jsx/jsx-dev-runtime.ts:12"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export function jsxDEV(tag: string | Function, props: Record<string, unknown>, key?: string): JSXNode"
+    },
+
+    {
+      "id": "f:src/jsx/dom/css.ts#createCssContext",
+      "parent": "jsx.css",
+      "name": "createCssContext()",
+      "kind": "function",
+      "summary": "Creates an isolated CSS-in-JS context with css, cx, keyframes, viewTransition and Style helpers bound to a named style element.",
+      "detail": "createCssContext({ id, classNameSlug?, onInvalidSlug? }) calls createCssJsxDomObjects({ id }) to get a cssObject whose toString() inserts rules into the CSSStyleSheet, and a Style component. It then wraps cssCommon/cxCommon/keyframesCommon/viewTransitionCommon from helper/css/common (helpers area) with newCssClassNameObject to override toString. The module exports a default context with id DEFAULT_STYLE_ID and exports css, cx, keyframes, viewTransition, Style as named exports from that context.",
+      "paths": ["src/jsx/dom/css.ts:180"],
+      "status": "live",
+      "tech": ["TypeScript", "CSS"],
+      "signature": "export const createCssContext = ({ id, classNameSlug, onInvalidSlug }: { id: Readonly<string>; classNameSlug?: ClassNameSlug; onInvalidSlug?: OnInvalidSlug }): DefaultContextType"
+    },
+
+    {
+      "id": "f:src/jsx/dom/hooks/index.ts#useActionState",
+      "parent": "jsx.hooks",
+      "name": "useActionState()",
+      "kind": "function",
+      "summary": "Wraps a form action function; tracks pending state and serialises concurrent action calls.",
+      "detail": "useActionState(fn, initialState, permalink) maintains state via useState and a pending counter. The returned actionState function: increments pending, appends a run task to ref.current.queue so actions serialise, calls fn(state, formData) and updates state on resolution. The PERMALINK symbol is attached to actionState so form/button/input intrinsic elements can read it for server action routing. useOptimistic maintains a speculative state that updates immediately and reverts once all registered Promise actions settle.",
+      "paths": ["src/jsx/dom/hooks/index.ts:86"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useActionState = <T>(fn: Function, initialState: T, permalink?: string): [T, Function, boolean]"
+    },
+
+    {
+      "id": "f:src/jsx/intrinsic-element/components.ts#title",
+      "parent": "jsx.intrinsic",
+      "name": "title (server)",
+      "kind": "function",
+      "summary": "Server intrinsic for <title>: hoists to <head> unless inside an SVG or head namespace context.",
+      "detail": "title checks getNameSpaceContext(); if the current namespace is 'svg' or 'head' it returns a plain JSXNode. Otherwise it calls documentMetadataTag('title', children, props, false) which serialises the tag and attaches insertIntoHead. insertIntoHead accumulates rendered title tags and, when the buffer contains </head>, inserts them before it.",
+      "paths": ["src/jsx/intrinsic-element/components.ts:121"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const title: FC<PropsWithChildren>"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#invokeTag",
+      "parent": "jsx.dom-renderer",
+      "name": "invokeTag()",
+      "kind": "function",
+      "summary": "Calls a function component with its resolved props while holding it on the buildDataStack for hooks.",
+      "detail": "invokeTag resets node[DOM_STASH][0] to 0, pushes [context, node] onto buildDataStack, calls the component function (using DOM_RENDERER if present), and pops in a finally block. This ensures every hook call inside the component reads the correct NodeObject via buildDataStack.at(-1).",
+      "paths": ["src/jsx/dom/render.ts:276"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "const invokeTag = (context: Context, node: NodeObject): Child[]"
+    },
+
+    {
+      "id": "f:src/jsx/dom/context.ts#createContextProviderFunction",
+      "parent": "jsx.context",
+      "name": "createContextProviderFunction()",
+      "kind": "function",
+      "summary": "Returns a DOM context Provider function that uses sentinel internal-tag nodes to push/pop values into the shared values array.",
+      "detail": "createContextProviderFunction(values) returns a function that wraps children between two setInternalTagFlag nodes: a push node that calls values.push(value) and a pop node that calls values.pop(). An DOM_ERROR_HANDLER pops on error. This avoids the need for AsyncLocalStorage in the DOM renderer because the DOM build() process is fully synchronous.",
+      "paths": ["src/jsx/dom/context.ts:7"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const createContextProviderFunction = <T>(values: T[]): Function",
+      "code": "export const createContextProviderFunction =\n  <T>(values: T[]): Function =>\n  ({ value, children }) => {\n    const props = { children: [\n      { tag: setInternalTagFlag(() => values.push(value)), props: {} },\n    ] }\n    if (Array.isArray(children)) props.children.push(...children.flat())\n    else props.children.push(children)\n    props.children.push({ tag: setInternalTagFlag(() => values.pop()), props: {} })\n    const res = { tag: '', props }\n    res[DOM_ERROR_HANDLER] = (err) => { values.pop(); throw err }\n    return res\n  }"
+    },
+
+    {
+      "id": "f:src/jsx/utils.ts#isValidAttributeName",
+      "parent": "jsx.utils-module",
+      "name": "isValidAttributeName()",
+      "kind": "function",
+      "summary": "Validates an attribute name against HTML rules, using an LRU cache for performance.",
+      "detail": "Fast path: checks each character is a-z, A-Z, 0-9, hyphen, underscore, dot or colon. If all pass the name is cached and returned true. If a non-fast-path character is found it falls back to invalidAttributeNameCharRe test. The cache (Set, max 1024 entries) is cleared entirely on overflow.",
+      "paths": ["src/jsx/utils.ts:49"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const isValidAttributeName = (name: string): boolean"
+    },
+
+    {
+      "id": "f:src/jsx/utils.ts#styleObjectForEach",
+      "parent": "jsx.utils-module",
+      "name": "styleObjectForEach()",
+      "kind": "function",
+      "summary": "Iterates a React-style style object, converting keys to kebab-case and values to CSS strings, skipping unsafe values.",
+      "detail": "styleObjectForEach iterates Object.entries(style). For each key: CSS variables and already-lowercase keys pass through; camelCase keys are converted to kebab-case. Invalid property names are skipped. null values emit fn(key, null) to remove the property. Numbers get 'px' appended unless the property is unitless (z-index, opacity, flex, etc. matched by regex). String values are validated by hasUnsafeStyleValue (checks for unbalanced brackets, semicolons, braces) to prevent CSS injection.",
+      "paths": ["src/jsx/utils.ts:169"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const styleObjectForEach = (style: Record<string, unknown>, fn: (key: string, value: string | null) => void): void"
+    },
+
+    {
+      "id": "f:src/jsx/children.ts#Children",
+      "parent": "jsx.children",
+      "name": "Children",
+      "kind": "function",
+      "summary": "React-compatible Children object with map, forEach, count, only and toArray.",
+      "detail": "Children.map/forEach/count/only all normalise via toArray first. Children.only throws if the flattened list length is not exactly 1. toArray wraps a scalar child in [child]. The object is re-exported from both jsx/index.ts and jsx/dom/index.ts.",
+      "paths": ["src/jsx/children.ts:5"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const Children: { map, forEach, count, only, toArray }"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#renderChildren",
+      "parent": "jsx.server-render",
+      "name": "renderChildren()",
+      "kind": "function",
+      "summary": "Establishes a render context and serialises a Child[] to an HtmlEscapedString.",
+      "detail": "renderChildren(children) wraps childrenToStringToBuffer inside runWithRenderContext so a fresh per-request store is established. Used by string/array children in Suspense, ErrorBoundary and the context Provider, all of which need to render nested content in a known context.",
+      "paths": ["src/jsx/base.ts:253"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const renderChildren = (children: Child[]): HtmlEscapedString | Promise<HtmlEscapedString>"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#buildNode",
+      "parent": "jsx.dom-renderer",
+      "name": "buildNode()",
+      "kind": "function",
+      "summary": "Converts a Child value into a Node: scalars become NodeString, JSXNodes get a DOM_STASH attached.",
+      "detail": "buildNode(child) returns undefined for null/undefined/boolean. Strings and numbers become NodeString {t, d:true}. JSXNode objects: if already visited (vR in node) they are cloned as a fresh descriptor preserving tag/props/key; function-tag nodes get DOM_STASH=[0,[]]; element nodes get a namespace looked up in nameSpaceMap and a nameSpaceContext injected into props.children.",
+      "paths": ["src/jsx/dom/render.ts:732"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const buildNode = (node: Child): Node | undefined"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#shallowEqual",
+      "parent": "jsx.node-model",
+      "name": "shallowEqual()",
+      "kind": "function",
+      "summary": "Default props comparator for memo(): returns true when all keys are reference-equal.",
+      "detail": "shallowEqual(a, b) short-circuits on a===b. It sorts key arrays and compares lengths. For the 'children' key it treats both empty-ish values as equal. All other keys must be strictly ===. Used as the default propsAreEqual for memo() and dom/index.ts memo().",
+      "paths": ["src/jsx/base.ts:456"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const shallowEqual = (a: Props, b: Props): boolean"
+    },
+
+    {
+      "id": "f:src/jsx/streaming.ts#StreamingContext",
+      "parent": "jsx.streaming",
+      "name": "StreamingContext",
+      "kind": "function",
+      "summary": "Context that carries a scriptNonce for Suspense and ErrorBoundary inline scripts.",
+      "detail": "StreamingContext is created with createContext<{ scriptNonce: string } | null>(null). Both Suspense and ErrorBoundary call useContext(StreamingContext)?.scriptNonce to conditionally add a nonce attribute to their inline <script> tags.",
+      "paths": ["src/jsx/streaming.ts:30"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const StreamingContext: JSXContext<{ scriptNonce: string } | null>"
+    },
+
+    {
+      "id": "f:src/jsx/dom/hooks/index.ts#useOptimistic",
+      "parent": "jsx.hooks",
+      "name": "useOptimistic()",
+      "kind": "function",
+      "summary": "Returns an optimistically updated state that reverts once all pending form actions settle.",
+      "detail": "useOptimistic<T,N>(state, updateState) keeps optimisticState in useState. If actions.size > 0 it schedules Promise.allSettled(actions).then(setOptimisticState(state)) to revert; otherwise it calls setOptimisticState(state) immediately (syncs with real state). The returned dispatch calls setOptimisticState(s => updateState(s, newData)).",
+      "paths": ["src/jsx/dom/hooks/index.ts:56"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useOptimistic = <T, N>(state: T, updateState: (currentState: T, action: N) => T): [T, (action: N) => void]"
+    },
+
+    {
+      "id": "f:src/jsx/dom/intrinsic-element/components.ts#form",
+      "parent": "jsx.intrinsic",
+      "name": "form (DOM)",
+      "kind": "function",
+      "summary": "DOM intrinsic for <form>: handles server action functions by wrapping the form in FormContext.Provider.",
+      "detail": "When action is a function the form component listens for submit events, builds FormData, calls the action async, and uses registerAction for useOptimistic tracking. It wraps the rendered form in a FormContext.Provider with pending/data/method/action so useFormStatus() reads the live state. For string actions it falls through to a plain JSX node.",
+      "paths": ["src/jsx/dom/intrinsic-element/components.ts:319"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const form: FC<PropsWithChildren<{ action?: Function | string; method?: string }>>"
+    },
+
+    {
+      "id": "f:src/jsx/dom/css.ts#css",
+      "parent": "jsx.css",
+      "name": "css()",
+      "kind": "function",
+      "summary": "Tagged-template CSS helper that generates a scoped class name and lazily injects the rule into the page stylesheet.",
+      "detail": "css is the css member of the default createCssContext. Each call to css`...` calls cssCommon (hashes the CSS string to produce a stable class name) and overrides toString() on the returned CssClassName object to call insertRule() when the class name is first stringified inside a JSX className attribute. Nested selectors and @-rules are supported through SELECTORS composition.",
+      "paths": ["src/jsx/dom/css.ts:235"],
+      "status": "live",
+      "tech": ["TypeScript", "CSS"],
+      "signature": "export const css: CssType"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useCallback",
+      "parent": "jsx.hooks",
+      "name": "useCallback()",
+      "kind": "function",
+      "summary": "Returns a stable function reference unless deps change.",
+      "detail": "useCallback stores [callback, deps] at STASH_CALLBACK[hookIndex]. On each render it calls isDepsChanged(prevDeps, deps); if changed it stores the new callback; otherwise it returns the previously stored one. The returned reference is stable across renders when deps are equal.",
+      "paths": ["src/jsx/hooks/index.ts:299"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useCallback = <T extends Function>(callback: T, deps: readonly unknown[]): T"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#NodeObject",
+      "parent": "jsx.dom-renderer",
+      "name": "NodeObject",
+      "kind": "class",
+      "summary": "Runtime virtual-DOM node: extends JSXNode with pP, nN, vC, vR, e (DOM element), context stash and reconciliation flags.",
+      "detail": "NodeObject is the type for a live virtual-DOM node. Key fields: pP (previous props, set during reconciliation to enable prop diffing), nN (next sibling hint for insertion offset), vC (virtual children, rebuilt on each render), vR (children to remove), e (the actual DOM element), p (preserve flag: 1=self only, 2=self and children), s (skip: true means memo skip), f (force rebuild flag), a (cancelled after update), DOM_STASH (hook stash). The DOM_STASH tuple at index 2 holds context values; at index 3 holds the nearest error handler.",
+      "paths": ["src/jsx/dom/render.ts:41"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "type NodeObject = { pP, nN, vC, vR, e, ... } & JSXNode"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useId",
+      "parent": "jsx.hooks",
+      "name": "useId()",
+      "kind": "function",
+      "summary": "Returns a stable unique string id for accessibility attributes, formatted as :rN: where N is a base-32 counter.",
+      "detail": "useId() calls useMemo(() => `:r${(idCounter++).toString(32)}:`, []). idCounter is a module-level integer incremented once per useId call. The empty deps ensure the same value is returned on subsequent renders.",
+      "paths": ["src/jsx/hooks/index.ts:370"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useId = (): string"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#useDeferredValue",
+      "parent": "jsx.hooks",
+      "name": "useDeferredValue()",
+      "kind": "function",
+      "summary": "Defers an expensive re-render of value to after the urgent update that changed it.",
+      "detail": "useDeferredValue<T>(value, initialValue?) holds [previousValue, deferredValue] in useState. If values[1] === value it returns values[1] immediately (up to date). Otherwise it pushes PendingType 3 and a view-transition-like updateHook onto the stacks, calls setValues([values[0], value]) (which schedules a low-priority update that sets values[0]=value), pops the stacks, and returns values[0] (the stale value) for the current render.",
+      "paths": ["src/jsx/hooks/index.ts:158"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useDeferredValue: UseDeferredValue"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#markRenderedJSX",
+      "parent": "jsx.server-render",
+      "name": "markRenderedJSX()",
+      "kind": "function",
+      "summary": "Tags an HtmlEscapedString with the RENDERED_JSX symbol to prevent double-escaping in attribute values.",
+      "detail": "markRenderedJSX(value) sets value[RENDERED_JSX]=true and returns value. Used by jsxTemplate and by JSXNode.toString() when the buffer resolves asynchronously. isEscapedAttribute() checks for HtmlEscaped AND the absence of RENDERED_JSX: if present the value is printed verbatim even if it looks escaped, preventing double-encoding of rendered component subtrees used as attribute values.",
+      "paths": ["src/jsx/base.ts:145"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const markRenderedJSX = (value: HtmlEscapedString): HtmlEscapedString"
+    },
+
+    {
+      "id": "f:src/jsx/dom/hooks/index.ts#useFormStatus",
+      "parent": "jsx.hooks",
+      "name": "useFormStatus()",
+      "kind": "function",
+      "summary": "Returns the current form submission status from the nearest FormContext provider.",
+      "detail": "useFormStatus() calls useContext(FormContext). FormContext is provided by the DOM form intrinsic element component. The returned FormStatus is {pending:false,...} at rest and {pending:true, data:FormData, method, action} while an action function is running.",
+      "paths": ["src/jsx/dom/hooks/index.ts:45"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const useFormStatus = (): FormStatus"
+    },
+
+    {
+      "id": "f:src/jsx/base.ts#cloneElement",
+      "parent": "jsx.node-model",
+      "name": "cloneElement()",
+      "kind": "function",
+      "summary": "Creates a copy of an existing JSXNode with merged props and optionally replaced children.",
+      "detail": "cloneElement(element, props, ...children) spreads element.props and the new props, keeps element.tag, and uses the provided children or element.props.children if none are given. It calls jsx() so the resulting node goes through jsxFn dispatch.",
+      "paths": ["src/jsx/base.ts:520"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const cloneElement = <T extends JSXNode | JSX.Element>(element: T, props: Partial<Props>, ...children: Child[]): T"
+    },
+
+    {
+      "id": "f:src/jsx/hooks/index.ts#startViewTransition",
+      "parent": "jsx.hooks",
+      "name": "startViewTransition()",
+      "kind": "function",
+      "summary": "Wraps a state-update callback in a CSS View Transition, animating old-to-new DOM state.",
+      "detail": "startViewTransition sets updateHook to viewTransitionHook before calling callback, then clears it. viewTransitionHook calls document.startViewTransition (falls back to plain callback when not supported). It runs the update twice: once inside the transition's captured snapshot phase and once after transition.finished to apply the final state if useViewTransition() was called.",
+      "paths": ["src/jsx/hooks/index.ts:79"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const startViewTransition = (callback: () => void): void"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#removeNode",
+      "parent": "jsx.dom-renderer",
+      "name": "removeNode()",
+      "kind": "function",
+      "summary": "Runs cleanup callbacks, removes the DOM element, and clears the NodeObject from update tracking.",
+      "detail": "removeNode(node) first runs all STASH_EFFECT cleanup callbacks. It calls refCleanupMap.get(node.e)?.() to clean up refs. If p===2 it propagates the preserve flag to children before recursing. For non-preserved nodes it calls node.e.remove() and deletes node.e. For function nodes it deletes from updateMap and fallbackUpdateFnArrayMap and sets node.a=true to cancel any in-flight update.",
+      "paths": ["src/jsx/dom/render.ts:343"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "const removeNode = (node: Node): void"
+    },
+
+    {
+      "id": "f:src/jsx/jsx-runtime.ts#jsxAttr",
+      "parent": "jsx.runtime",
+      "name": "jsxAttr()",
+      "kind": "function",
+      "summary": "Escapes and formats a single JSX attribute key=value pair as a raw HtmlEscapedString.",
+      "detail": "jsxAttr(key, v) validates the attribute name, then: strings call escapeToBuffer; objects/other values delegate to attributeToBuffer; function values on action/formaction look up PERMALINK. Used by the automatic JSX transform's jsxattr helper injection.",
+      "paths": ["src/jsx/jsx-runtime.ts:22"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const jsxAttr = (key: string, v: string | Promise<string> | Record<string, ...>): HtmlEscapedString | Promise<HtmlEscapedString>"
+    },
+
+    {
+      "id": "f:src/jsx/dom/render.ts#buildDataStack",
+      "parent": "jsx.dom-renderer",
+      "name": "buildDataStack",
+      "kind": "data",
+      "summary": "Module-level stack of [Context, Node] pairs that all hooks read to identify the current NodeObject.",
+      "detail": "buildDataStack is a plain array used as a stack. invokeTag() pushes [context, node] before calling the component and pops in finally. Hooks read buildDataStack.at(-1) to get the current [context, NodeObject]. An empty stack means the hook is called outside a render (e.g. during server-side rendering), and hooks return safe no-op defaults.",
+      "paths": ["src/jsx/dom/render.ts:106"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "export const buildDataStack: [Context, Node][]"
+    },
+
+    {
+      "id": "f:src/jsx/base.test.tsx",
+      "parent": "jsx.node-model",
+      "name": "base.test.tsx",
+      "kind": "test",
+      "summary": "Unit tests for JSXNode, JSXFunctionNode, Fragment, jsx(), jsxFn, attributeToBuffer, childrenToStringToBuffer and cloneElement.",
+      "paths": ["src/jsx/base.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/jsx-runtime.test.tsx",
+      "parent": "jsx.runtime",
+      "name": "jsx-runtime.test.tsx",
+      "kind": "test",
+      "summary": "Integration tests for the automatic JSX runtime transform with the Hono app, jsxTemplate, jsxAttr and escaping.",
+      "paths": ["src/jsx/jsx-runtime.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/streaming.test.tsx",
+      "parent": "jsx.streaming",
+      "name": "streaming.test.tsx",
+      "kind": "test",
+      "summary": "Tests for Suspense, ErrorBoundary streaming output and renderToReadableStream chunk ordering.",
+      "paths": ["src/jsx/streaming.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/components.test.tsx",
+      "parent": "jsx.components",
+      "name": "components.test.tsx",
+      "kind": "test",
+      "summary": "Tests for server-side ErrorBoundary fallback, fallbackRender, onError and async child handling.",
+      "paths": ["src/jsx/components.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/client.test.tsx",
+      "parent": "jsx.dom-entry",
+      "name": "dom/client.test.tsx",
+      "kind": "test",
+      "summary": "Tests for createRoot render/unmount and hydrateRoot against a JSDOM environment.",
+      "paths": ["src/jsx/dom/client.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/index.test.tsx",
+      "parent": "jsx.dom-entry",
+      "name": "dom/index.test.tsx",
+      "kind": "test",
+      "summary": "Integration tests for the full DOM renderer: mounting, re-rendering, keyed lists, event handling and hooks.",
+      "paths": ["src/jsx/dom/index.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/hooks/index.test.tsx",
+      "parent": "jsx.hooks",
+      "name": "dom/hooks/index.test.tsx",
+      "kind": "test",
+      "summary": "Tests for useActionState, useOptimistic, useFormStatus and FormContext in JSDOM.",
+      "paths": ["src/jsx/dom/hooks/index.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/context.test.tsx",
+      "parent": "jsx.context",
+      "name": "dom/context.test.tsx",
+      "kind": "test",
+      "summary": "Tests for DOM createContext, Provider nesting and useContext update propagation.",
+      "paths": ["src/jsx/dom/context.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/components.test.tsx",
+      "parent": "jsx.components",
+      "name": "dom/components.test.tsx",
+      "kind": "test",
+      "summary": "Tests for DOM Suspense and ErrorBoundary retry/fallback behaviour in JSDOM.",
+      "paths": ["src/jsx/dom/components.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/css.test.tsx",
+      "parent": "jsx.css",
+      "name": "dom/css.test.tsx",
+      "kind": "test",
+      "summary": "Tests for css(), cx(), keyframes(), viewTransition(), Style and createCssContext in JSDOM.",
+      "paths": ["src/jsx/dom/css.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/server.test.tsx",
+      "parent": "jsx.dom-entry",
+      "name": "dom/server.test.tsx",
+      "kind": "test",
+      "summary": "Tests for renderToString (sync) and renderToReadableStream (async) compatibility shims.",
+      "paths": ["src/jsx/dom/server.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/intrinsic-element/components.test.tsx",
+      "parent": "jsx.intrinsic",
+      "name": "intrinsic-element/components.test.tsx",
+      "kind": "test",
+      "summary": "Tests for server-side title/script/style/link/meta head hoisting, deduplication and precedence sorting.",
+      "paths": ["src/jsx/intrinsic-element/components.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/dom/intrinsic-element/components.test.tsx",
+      "parent": "jsx.intrinsic",
+      "name": "dom/intrinsic-element/components.test.tsx",
+      "kind": "test",
+      "summary": "Tests for DOM title/script/style/link/meta portal insertion and form/button/input action handling.",
+      "paths": ["src/jsx/dom/intrinsic-element/components.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/children.test.ts",
+      "parent": "jsx.children",
+      "name": "children.test.ts",
+      "kind": "test",
+      "summary": "Tests for Children.map, forEach, count, only and toArray.",
+      "paths": ["src/jsx/children.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/jsx/context-isolation.test.ts",
+      "parent": "jsx.context",
+      "name": "context-isolation.test.ts",
+      "kind": "test",
+      "summary": "Tests for per-request context isolation: concurrent renders must not leak context values across requests.",
+      "paths": ["src/jsx/context-isolation.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/jsx/hooks/string.test.tsx",
+      "parent": "jsx.hooks",
+      "name": "hooks/string.test.tsx",
+      "kind": "test",
+      "summary": "Tests for hooks in server-side string rendering context: useSyncExternalStore getServerSnapshot requirement.",
+      "paths": ["src/jsx/hooks/string.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/hooks/dom.test.tsx",
+      "parent": "jsx.hooks",
+      "name": "hooks/dom.test.tsx",
+      "kind": "test",
+      "summary": "Tests for DOM hooks in JSDOM: useState, useEffect, useReducer, useTransition and useDeferredValue.",
+      "paths": ["src/jsx/hooks/dom.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/index.test.tsx",
+      "parent": "jsx.index-entry",
+      "name": "index.test.tsx",
+      "kind": "test",
+      "summary": "Smoke tests for the top-level hono/jsx exports and version compatibility string.",
+      "paths": ["src/jsx/index.test.tsx"],
+      "status": "live",
+      "tech": ["TypeScript", "JSX"]
+    },
+
+    {
+      "id": "f:src/jsx/utils.test.ts",
+      "parent": "jsx.utils-module",
+      "name": "utils.test.ts",
+      "kind": "test",
+      "summary": "Tests for isValidAttributeName, isValidTagName, normalizeIntrinsicElementKey and styleObjectForEach.",
+      "paths": ["src/jsx/utils.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    }
+
+  ],
+
+  "edges": [
+
+    { "from": "f:src/jsx/base.ts#jsx", "to": "f:src/jsx/base.ts#jsxFn", "kind": "calls", "label": "delegates after extracting key", "evidence": "src/jsx/base.ts:416" },
+    { "from": "f:src/jsx/base.ts#jsxFn", "to": "f:src/jsx/base.ts#JSXNode", "kind": "calls", "label": "creates intrinsic element nodes", "evidence": "src/jsx/base.ts:452" },
+    { "from": "f:src/jsx/base.ts#jsxFn", "to": "f:src/jsx/base.ts#JSXFunctionNode", "kind": "calls", "label": "creates function component nodes", "evidence": "src/jsx/base.ts:433" },
+    { "from": "f:src/jsx/base.ts#JSXNode", "to": "f:src/jsx/base.ts#childrenToStringToBuffer", "kind": "calls", "label": "serialises children", "evidence": "src/jsx/base.ts:358" },
+    { "from": "f:src/jsx/base.ts#JSXNode", "to": "f:src/jsx/base.ts#attributeToBuffer", "kind": "calls", "label": "serialises each prop", "evidence": "src/jsx/base.ts:347" },
+    { "from": "f:src/jsx/base.ts#JSXNode", "to": "f:src/jsx/context.ts#runWithRenderContext", "kind": "calls", "label": "wraps toString in render context", "evidence": "src/jsx/base.ts:314" },
+    { "from": "f:src/jsx/base.ts#JSXFunctionNode", "to": "f:src/jsx/context.ts#captureRenderContext", "kind": "calls", "label": "captures context for async continuations", "evidence": "src/jsx/base.ts:383" },
+    { "from": "f:src/jsx/base.ts#renderChildren", "to": "f:src/jsx/context.ts#runWithRenderContext", "kind": "calls", "label": "establishes request store before render", "evidence": "src/jsx/base.ts:253" },
+    { "from": "f:src/jsx/base.ts#memo", "to": "f:src/jsx/base.ts#shallowEqual", "kind": "calls", "label": "default props comparator", "evidence": "src/jsx/base.ts:488" },
+    { "from": "f:src/jsx/base.ts#attributeToBuffer", "to": "f:src/jsx/utils.ts#styleObjectForEach", "kind": "calls", "label": "serialises style object to CSS string", "evidence": "src/jsx/base.ts:188" },
+    { "from": "f:src/jsx/jsx-dev-runtime.ts#jsxDEV", "to": "f:src/jsx/base.ts#jsxFn", "kind": "calls", "label": "delegates to shared factory", "evidence": "src/jsx/jsx-dev-runtime.ts:19" },
+    { "from": "f:src/jsx/jsx-runtime.ts#jsxAttr", "to": "f:src/jsx/base.ts#attributeToBuffer", "kind": "calls", "label": "reuses attribute serialisation", "evidence": "src/jsx/jsx-runtime.ts:39" },
+    { "from": "f:src/jsx/jsx-runtime.ts#jsxTemplate", "to": "f:src/jsx/base.ts#markRenderedJSX", "kind": "calls", "label": "marks output to prevent double-escaping", "evidence": "src/jsx/jsx-runtime.ts:17" },
+    { "from": "f:src/jsx/context.ts#createContext", "to": "f:src/jsx/dom/context.ts#createContextProviderFunction", "kind": "calls", "label": "installs DOM provider function via DOM_RENDERER", "evidence": "src/jsx/context.ts:272" },
+    { "from": "f:src/jsx/context.ts#captureRenderContext", "to": "f:src/jsx/context.ts#runWithRenderContext", "kind": "calls", "label": "resumes store in deferred callback", "evidence": "src/jsx/context.ts:199" },
+    { "from": "f:src/jsx/streaming.ts#Suspense", "to": "f:src/jsx/context.ts#captureRenderContext", "kind": "calls", "label": "captures context before suspension", "evidence": "src/jsx/streaming.ts:77" },
+    { "from": "f:src/jsx/streaming.ts#Suspense", "to": "f:src/jsx/context.ts#useContext", "kind": "calls", "label": "reads StreamingContext for nonce", "evidence": "src/jsx/streaming.ts:59" },
+    { "from": "f:src/jsx/streaming.ts#renderToReadableStream", "to": "f:src/jsx/streaming.ts#Suspense", "kind": "calls", "label": "resolves Suspense callbacks via HtmlEscapedCallbackPhase", "evidence": "src/jsx/streaming.ts:174" },
+    { "from": "f:src/jsx/components.ts#ErrorBoundary", "to": "f:src/jsx/context.ts#captureRenderContext", "kind": "calls", "label": "captures context for error fallback render", "evidence": "src/jsx/components.ts:69" },
+    { "from": "f:src/jsx/dom/render.ts#build", "to": "f:src/jsx/dom/render.ts#invokeTag", "kind": "calls", "label": "calls function components during reconciliation", "evidence": "src/jsx/dom/render.ts:526" },
+    { "from": "f:src/jsx/dom/render.ts#build", "to": "f:src/jsx/dom/render.ts#buildNode", "kind": "calls", "label": "converts each Child to a Node", "evidence": "src/jsx/dom/render.ts:548" },
+    { "from": "f:src/jsx/dom/render.ts#invokeTag", "to": "f:src/jsx/dom/render.ts#buildDataStack", "kind": "writes", "label": "pushes/pops context+node for hooks", "evidence": "src/jsx/dom/render.ts:277" },
+    { "from": "f:src/jsx/hooks/index.ts#useState", "to": "f:src/jsx/dom/render.ts#buildDataStack", "kind": "reads", "label": "reads top of stack to find NodeObject", "evidence": "src/jsx/hooks/index.ts:189" },
+    { "from": "f:src/jsx/hooks/index.ts#useState", "to": "f:src/jsx/dom/render.ts#update", "kind": "calls", "label": "schedules reconciliation on state change", "evidence": "src/jsx/hooks/index.ts:238" },
+    { "from": "f:src/jsx/hooks/index.ts#useEffect", "to": "f:src/jsx/dom/render.ts#buildDataStack", "kind": "reads", "label": "reads top of stack for stash", "evidence": "src/jsx/hooks/index.ts:265" },
+    { "from": "f:src/jsx/hooks/index.ts#use", "to": "f:src/jsx/streaming.ts#Suspense", "kind": "calls", "label": "throws Promise caught by Suspense boundary", "evidence": "src/jsx/hooks/index.ts:349" },
+    { "from": "f:src/jsx/dom/render.ts#update", "to": "f:src/jsx/dom/render.ts#build", "kind": "calls", "label": "rebuilds the node subtree after state change", "evidence": "src/jsx/dom/render.ts:823" },
+    { "from": "f:src/jsx/dom/render.ts#update", "to": "f:src/jsx/dom/render.ts#applyNodeObject", "kind": "calls", "label": "mutates DOM after reconciliation", "evidence": "src/jsx/dom/render.ts:793" },
+    { "from": "f:src/jsx/dom/render.ts#render", "to": "f:src/jsx/dom/render.ts#build", "kind": "calls", "label": "initial build of the virtual tree", "evidence": "src/jsx/dom/render.ts:849" },
+    { "from": "f:src/jsx/dom/render.ts#render", "to": "f:src/jsx/dom/render.ts#applyNodeObject", "kind": "calls", "label": "initial DOM mutation", "evidence": "src/jsx/dom/render.ts:856" },
+    { "from": "f:src/jsx/dom/client.ts#createRoot", "to": "f:src/jsx/dom/render.ts#render", "kind": "calls", "label": "mounts the app on first call", "evidence": "src/jsx/dom/client.ts:47" },
+    { "from": "f:src/jsx/dom/server.ts#renderToString", "to": "f:src/jsx/base.ts#renderChildren", "kind": "calls", "label": "falls through to server renderer for string/array input", "evidence": "src/jsx/dom/server.ts:17" },
+    { "from": "f:src/jsx/dom/css.ts#createCssContext", "to": "hono.helpers", "kind": "calls", "label": "delegates CSS hashing to helper/css/common", "evidence": "src/jsx/dom/css.ts:197" },
+    { "from": "f:src/jsx/dom/intrinsic-element/components.ts#form", "to": "f:src/jsx/dom/hooks/index.ts#useActionState", "kind": "calls", "label": "action function forms use action state tracking", "evidence": "src/jsx/dom/intrinsic-element/components.ts:346" },
+    { "from": "f:src/jsx/dom/intrinsic-element/components.ts#form", "to": "f:src/jsx/dom/render.ts#createPortal", "kind": "calls", "label": "head tag components hoist elements via portal", "evidence": "src/jsx/dom/intrinsic-element/components.ts:251" },
+    { "from": "f:src/jsx/intrinsic-element/components.ts#title", "to": "f:src/jsx/base.ts#JSXNode", "kind": "calls", "label": "creates plain node for SVG/head namespace", "evidence": "src/jsx/intrinsic-element/components.ts:128" },
+    { "from": "f:src/jsx/dom/context.ts#createContextProviderFunction", "to": "f:src/jsx/dom/utils.ts#setInternalTagFlag", "kind": "calls", "label": "marks push/pop sentinels as internal", "evidence": "src/jsx/dom/context.ts:19" },
+
+    { "from": "f:src/jsx/base.ts#attributeToBuffer", "to": "hono.utils", "kind": "calls", "label": "calls escapeToBuffer for string values", "evidence": "src/jsx/base.ts:195" },
+    { "from": "f:src/jsx/base.ts#renderChildren", "to": "hono.utils", "kind": "calls", "label": "calls stringBufferToString for async buffers", "evidence": "src/jsx/base.ts:258" },
+    { "from": "f:src/jsx/streaming.ts#renderToReadableStream", "to": "hono.utils", "kind": "calls", "label": "calls resolveCallback for HtmlEscapedCallbackPhase", "evidence": "src/jsx/streaming.ts:172" },
+    { "from": "f:src/jsx/jsx-runtime.ts#jsxTemplate", "to": "hono.helpers", "kind": "calls", "label": "wraps the html tagged-template literal", "evidence": "src/jsx/jsx-runtime.ts:17" },
+    { "from": "f:src/jsx/dom/css.ts#css", "to": "hono.helpers", "kind": "calls", "label": "calls cssCommon for hash and class name", "evidence": "src/jsx/dom/css.ts:197" },
+
+    { "from": "f:src/jsx/base.test.tsx", "to": "f:src/jsx/base.ts#JSXNode", "kind": "tests", "label": "tests JSXNode serialisation and escaping", "evidence": "src/jsx/base.test.tsx:1" },
+    { "from": "f:src/jsx/jsx-runtime.test.tsx", "to": "f:src/jsx/jsx-runtime.ts#jsxTemplate", "kind": "tests", "label": "tests automatic JSX transform output", "evidence": "src/jsx/jsx-runtime.test.tsx:1" },
+    { "from": "f:src/jsx/streaming.test.tsx", "to": "f:src/jsx/streaming.ts#Suspense", "kind": "tests", "label": "tests streaming Suspense placeholders and scripts", "evidence": "src/jsx/streaming.test.tsx:1" },
+    { "from": "f:src/jsx/components.test.tsx", "to": "f:src/jsx/components.ts#ErrorBoundary", "kind": "tests", "label": "tests server ErrorBoundary fallback and onError", "evidence": "src/jsx/components.test.tsx:1" },
+    { "from": "f:src/jsx/dom/client.test.tsx", "to": "f:src/jsx/dom/client.ts#createRoot", "kind": "tests", "label": "tests createRoot render and unmount", "evidence": "src/jsx/dom/client.test.tsx:1" },
+    { "from": "f:src/jsx/dom/index.test.tsx", "to": "f:src/jsx/dom/render.ts#render", "kind": "tests", "label": "tests full DOM render, re-render and keyed lists", "evidence": "src/jsx/dom/index.test.tsx:1" },
+    { "from": "f:src/jsx/dom/hooks/index.test.tsx", "to": "f:src/jsx/dom/hooks/index.ts#useActionState", "kind": "tests", "label": "tests action state, optimistic updates and form status", "evidence": "src/jsx/dom/hooks/index.test.tsx:1" },
+    { "from": "f:src/jsx/dom/context.test.tsx", "to": "f:src/jsx/dom/context.ts#createContextProviderFunction", "kind": "tests", "label": "tests DOM context provider nesting", "evidence": "src/jsx/dom/context.test.tsx:1" },
+    { "from": "f:src/jsx/dom/components.test.tsx", "to": "f:src/jsx/dom/components.ts#Suspense", "kind": "tests", "label": "tests DOM Suspense retry and ErrorBoundary", "evidence": "src/jsx/dom/components.test.tsx:1" },
+    { "from": "f:src/jsx/dom/css.test.tsx", "to": "f:src/jsx/dom/css.ts#createCssContext", "kind": "tests", "label": "tests CSS-in-JS rule insertion and deduplication", "evidence": "src/jsx/dom/css.test.tsx:1" },
+    { "from": "f:src/jsx/dom/server.test.tsx", "to": "f:src/jsx/dom/server.ts#renderToString", "kind": "tests", "label": "tests sync and async rendering via compatibility shims", "evidence": "src/jsx/dom/server.test.tsx:1" },
+    { "from": "f:src/jsx/intrinsic-element/components.test.tsx", "to": "f:src/jsx/intrinsic-element/components.ts#title", "kind": "tests", "label": "tests server head hoisting and deduplication", "evidence": "src/jsx/intrinsic-element/components.test.tsx:1" },
+    { "from": "f:src/jsx/dom/intrinsic-element/components.test.tsx", "to": "f:src/jsx/dom/intrinsic-element/components.ts#form", "kind": "tests", "label": "tests DOM head portal insertion and form actions", "evidence": "src/jsx/dom/intrinsic-element/components.test.tsx:1" },
+    { "from": "f:src/jsx/children.test.ts", "to": "f:src/jsx/children.ts#Children", "kind": "tests", "label": "tests all Children methods", "evidence": "src/jsx/children.test.ts:1" },
+    { "from": "f:src/jsx/context-isolation.test.ts", "to": "f:src/jsx/context.ts#createContext", "kind": "tests", "label": "tests concurrent render isolation", "evidence": "src/jsx/context-isolation.test.ts:1" },
+    { "from": "f:src/jsx/hooks/string.test.tsx", "to": "f:src/jsx/hooks/index.ts#useSyncExternalStore", "kind": "tests", "label": "tests server-side hook stubs", "evidence": "src/jsx/hooks/string.test.tsx:1" },
+    { "from": "f:src/jsx/hooks/dom.test.tsx", "to": "f:src/jsx/hooks/index.ts#useState", "kind": "tests", "label": "tests DOM hooks in JSDOM", "evidence": "src/jsx/hooks/dom.test.tsx:1" },
+    { "from": "f:src/jsx/index.test.tsx", "to": "f:src/jsx/index.ts", "kind": "tests", "label": "tests top-level export surface", "evidence": "src/jsx/index.test.tsx:1" },
+    { "from": "f:src/jsx/utils.test.ts", "to": "f:src/jsx/utils.ts#isValidAttributeName", "kind": "tests", "label": "tests attribute and tag validation functions", "evidence": "src/jsx/utils.test.ts:1" },
+
+    { "from": "f:src/jsx/base.ts#Fragment", "to": "f:src/jsx/base.ts#JSXNode", "kind": "calls", "label": "wraps children in JSXFragmentNode", "evidence": "src/jsx/base.ts:507" },
+    { "from": "f:src/jsx/base.ts#cloneElement", "to": "f:src/jsx/base.ts#jsx", "kind": "calls", "label": "delegates to jsx() with merged props", "evidence": "src/jsx/base.ts:532" },
+    { "from": "f:src/jsx/dom/hooks/index.ts#useFormStatus", "to": "f:src/jsx/context.ts#useContext", "kind": "calls", "label": "reads FormContext value from context stack", "evidence": "src/jsx/dom/hooks/index.ts:46" },
+    { "from": "f:src/jsx/dom/hooks/index.ts#useOptimistic", "to": "f:src/jsx/hooks/index.ts#useState", "kind": "calls", "label": "stores optimistic state via useState", "evidence": "src/jsx/dom/hooks/index.ts:60" },
+    { "from": "f:src/jsx/dom/render.ts#build", "to": "f:src/jsx/dom/render.ts#NodeObject", "kind": "reads", "label": "reads and mutates NodeObject fields during reconciliation", "evidence": "src/jsx/dom/render.ts:41" },
+    { "from": "f:src/jsx/dom/render.ts#applyNodeObject", "to": "f:src/jsx/dom/render.ts#applyProps", "kind": "calls", "label": "applies prop diff to real DOM element", "evidence": "src/jsx/dom/render.ts:444" },
+    { "from": "f:src/jsx/dom/render.ts#flushSync", "to": "f:src/jsx/dom/render.ts#update", "kind": "calls", "label": "synchronously flushes pending update functions", "evidence": "src/jsx/dom/render.ts:874" },
+    { "from": "f:src/jsx/dom/render.ts#applyNodeObject", "to": "f:src/jsx/dom/render.ts#removeNode", "kind": "calls", "label": "removes stale virtual children from the DOM", "evidence": "src/jsx/dom/render.ts:398" },
+    { "from": "f:src/jsx/hooks/index.ts#startTransition", "to": "f:src/jsx/hooks/index.ts#useState", "kind": "calls", "label": "state updates inside callback use PendingType 1", "evidence": "src/jsx/hooks/index.ts:119" },
+    { "from": "f:src/jsx/hooks/index.ts#startViewTransition", "to": "f:src/jsx/dom/render.ts#buildDataStack", "kind": "reads", "label": "sets updateHook consumed by update() during render", "evidence": "src/jsx/hooks/index.ts:79" },
+    { "from": "f:src/jsx/hooks/index.ts#useCallback", "to": "f:src/jsx/dom/render.ts#buildDataStack", "kind": "reads", "label": "reads top of stack to find NodeObject stash", "evidence": "src/jsx/hooks/index.ts:300" },
+    { "from": "f:src/jsx/hooks/index.ts#useDeferredValue", "to": "f:src/jsx/hooks/index.ts#useState", "kind": "calls", "label": "stores previous and deferred values via useState", "evidence": "src/jsx/hooks/index.ts:159" },
+    { "from": "f:src/jsx/hooks/index.ts#useId", "to": "f:src/jsx/hooks/index.ts#useMemo", "kind": "calls", "label": "memoises the generated id string with empty deps", "evidence": "src/jsx/hooks/index.ts:370" },
+    { "from": "f:src/jsx/hooks/index.ts#useMemo", "to": "f:src/jsx/dom/render.ts#buildDataStack", "kind": "reads", "label": "reads top of stack to find NodeObject stash", "evidence": "src/jsx/hooks/index.ts:353" },
+    { "from": "f:src/jsx/hooks/index.ts#useReducer", "to": "f:src/jsx/hooks/index.ts#useState", "kind": "calls", "label": "delegates state storage to useState", "evidence": "src/jsx/hooks/index.ts:256" },
+    { "from": "f:src/jsx/hooks/index.ts#useRef", "to": "f:src/jsx/dom/render.ts#buildDataStack", "kind": "reads", "label": "reads top of stack to find NodeObject stash", "evidence": "src/jsx/hooks/index.ts:324" },
+    { "from": "f:src/jsx/streaming.ts#StreamingContext", "to": "f:src/jsx/context.ts#createContext", "kind": "calls", "label": "creates context for script nonce injection", "evidence": "src/jsx/streaming.ts:30" }
+
+  ],
+
+  "flows": [
+    {
+      "id": "flow.jsx.server-render",
+      "name": "Component tree rendered to HTML string on the server",
+      "summary": "A JSX component tree built by jsx() is serialised to an escaped HTML string with async component support.",
+      "steps": [
+        { "node": "f:src/jsx/base.ts#jsx", "text": "The TypeScript compiler calls jsx(tag, props, ...children) for each JSX element. jsx() strips the key, packs variadic children into props.children, and delegates to jsxFn()." },
+        { "node": "f:src/jsx/base.ts#jsxFn", "text": "jsxFn() dispatches: function tags produce a JSXFunctionNode; recognised HTML tags like <title> produce a JSXFunctionNode wrapping the intrinsic component; svg/head produce a namespace-context wrapper; plain tags produce a JSXNode. The whole tree is built synchronously in memory." },
+        { "node": "f:src/jsx/base.ts#JSXNode", "text": "Calling JSXNode.toString() (or renderChildren) calls runWithRenderContext to establish the per-request AsyncLocalStorage store, then calls toStringToBuffer on a fresh StringBufferWithCallbacks." },
+        { "node": "f:src/jsx/base.ts#attributeToBuffer", "text": "toStringToBuffer opens the HTML tag, then for each prop calls attributeToBuffer: refs and null values are skipped, boolean attributes emit attr=\"\", style objects are serialised via styleObjectForEach, strings are HTML-escaped via escapeToBuffer. Event handler props are silently skipped on the server." },
+        { "node": "f:src/jsx/base.ts#childrenToStringToBuffer", "text": "childrenToStringToBuffer iterates children: strings are HTML-escaped, JSXNodes recurse into toStringToBuffer, Promises are pushed to buffer.unshift (causing async resolution), arrays recurse, numbers append directly." },
+        { "node": "f:src/jsx/base.ts#JSXFunctionNode", "text": "For function components JSXFunctionNode.toStringToBuffer calls the component function. Sync results recurse normally; async results are wrapped in resolveFunctionComponentResult which calls captureRenderContext() so the continuation runs in the same request store." },
+        { "node": "hono.utils", "text": "When all promises resolve, stringBufferToString (from utils/html, owned by the utils area) concatenates the buffer segments, and the final HTML string is returned. HTML escaping ensures untrusted content cannot inject tags or attributes." }
+      ]
+    },
+    {
+      "id": "flow.jsx.client-mount-update",
+      "name": "Client render(<App/>, root) and useState re-render",
+      "summary": "A JSX app is mounted into the DOM and a useState update triggers reconciliation and DOM mutation.",
+      "steps": [
+        { "node": "f:src/jsx/dom/render.ts#render", "text": "render(<App/>, container) wraps the app node in a synthetic root (tag: ''), calls buildNode to construct the NodeObject graph, then calls renderNode which runs build() and apply() against a temporary DocumentFragment, then swaps it into the real container via replaceChildren." },
+        { "node": "f:src/jsx/dom/render.ts#build", "text": "build() calls invokeTag() for function components: it pushes [context, node] onto buildDataStack, calls the component function (or its DOM_RENDERER counterpart), and pops. Children returned by the component are recursively built. Memo'd components with unchanged props set s=true to skip rebuild." },
+        { "node": "f:src/jsx/dom/render.ts#invokeTag", "text": "While the component is on the stack, any hook call (useState, useEffect, etc.) reads buildDataStack.at(-1) to find the current NodeObject and its DOM_STASH. Hook state is initialised on first render and updated on subsequent renders." },
+        { "node": "f:src/jsx/hooks/index.ts#useState", "text": "When the user triggers a state change (e.g. a button click), the useState updater computes the new value, stores it in stateArray[hookIndex], and calls update([0, false, updateHook], node)." },
+        { "node": "f:src/jsx/dom/render.ts#update", "text": "update() records a pending resolve in updateMap and awaits Promise.resolve() to coalesce rapid calls. Only the last update wins: earlier promises are resolved with undefined. The surviving update calls updateSync() which runs build() and apply()." },
+        { "node": "f:src/jsx/dom/render.ts#applyNodeObject", "text": "applyNodeObject() walks the new vC tree: existing DOM elements are reused (via node.e references), new elements are created with document.createElement, changed props are applied via applyProps (events, style, attributes), and inserted into the container at the calculated offset." },
+        { "node": "f:src/jsx/dom/render.ts#applyProps", "text": "applyProps diffs old and new props: event listeners are removed then re-added only when the handler reference changes; style is set via style.setProperty; attributes use setAttribute/removeAttribute; refs call the cleanup function then the new ref. useInsertionEffect and useLayoutEffect callbacks run synchronously; useEffect callbacks run inside requestAnimationFrame." }
+      ]
+    },
+    {
+      "id": "flow.jsx.suspense-streaming",
+      "name": "Suspense streaming: async component resolved mid-stream",
+      "summary": "A Suspense boundary emits a fallback placeholder then streams the resolved content via an inline script.",
+      "steps": [
+        { "node": "f:src/jsx/streaming.ts#Suspense", "text": "Suspense tries to render its children synchronously via serializeBoundaryChild. If a child throws a Promise (from use()) it catches it, calls captureRenderContext() to snapshot the current context state, and stores a deferred resolution in resArray." },
+        { "node": "f:src/jsx/streaming.ts#Suspense", "text": "Because resArray contains Promises, Suspense awaits the fallback, then emits the placeholder HTML: <template id=\"H:N\"></template>{fallbackContent}<!--/$-->. An HtmlEscapedCallback is attached that will fire after the promise resolves." },
+        { "node": "f:src/jsx/streaming.ts#renderToReadableStream", "text": "renderToReadableStream resolves the BeforeStream phase, encodes the initial output (including the placeholder) and enqueues it. It then iterates the Stream-phase callbacks." },
+        { "node": "f:src/jsx/streaming.ts#renderToReadableStream", "text": "When the async component's promise resolves, the Stream callback fires: it emits a <template data-hono-target=\"H:N\"> with the resolved content and an inline <script> that calls replaceWith(). The script uses document.currentScript to find the template and replaces the placeholder range (from <template id> to <!--/$-->) with the new content." },
+        { "node": "f:src/jsx/hooks/index.ts#use", "text": "On the client side the DOM Suspense's DOM_ERROR_HANDLER receives the thrown Promise and returns the fallback; err.finally(retry) schedules a re-render after resolution. On retry build() invokes the component again; use() now finds the promise in resolvedPromiseValueMap and returns the value synchronously, allowing the full subtree to render." }
+      ]
+    }
+  ]
+}

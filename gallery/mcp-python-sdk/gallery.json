@@ -1,0 +1,10 @@
+{
+ "name": "MCP Python SDK",
+ "repository": "https://github.com/modelcontextprotocol/python-sdk",
+ "license": "MIT",
+ "about": "The Model Context Protocol's official Python SDK: clients, servers, the high-level server API, transports and OAuth.",
+ "cost_usd": 36,
+ "minutes": 33,
+ "depth": "standard",
+ "mapped": "2026-11-24"
+}

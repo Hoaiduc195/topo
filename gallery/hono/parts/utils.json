@@ -1,0 +1,1569 @@
+{
+  "area": "utils",
+  "nodes": [
+
+    {
+      "id": "utils.url",
+      "parent": "hono.utils",
+      "name": "URL & path utilities",
+      "kind": "group",
+      "summary": "Functions for extracting, decoding and merging URL paths and query strings, plus path-parameter pattern compilation used by all five routers.",
+      "detail": "This group covers the hot path of every request: `getPath` reads the raw URL string with a hand-rolled scanner instead of calling `new URL()` to avoid allocation; `getPattern` compiles `:param{regex}` and wildcard segments into a three-element tuple and caches the result; `splitPath`/`splitRoutingPath` tokenize a path string for the trie and regexp routers. `mergePath` joins multiple path segments while normalising leading and trailing slashes. `getQueryParam`/`getQueryParams` parse query strings with a fast unencoded-key fast path and a full scan fallback for percent-encoded names. `tryDecodeURI`/`tryDecodeURIComponent` are fault-tolerant decoders that fall back to partial decode on invalid sequences. `checkOptionalParameter` expands `/users/:id?` into two canonical paths consumed at route-registration time.",
+      "paths": ["src/utils/url.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#getPath",
+      "parent": "utils.url",
+      "name": "getPath()",
+      "kind": "function",
+      "summary": "Extracts the decoded URL path from a Request without constructing a URL object.",
+      "detail": "Scans the raw URL string character by character from the first '/' after the scheme and authority. Stops at '?' or '#'. When a '%' is found it uses `indexOf` to find the query or hash and calls `tryDecode` with a normalising decoder that preserves `%25`. A bare invalid percent sign is re-normalised via a temporary `URL` object on the rare occasions it is needed.",
+      "paths": ["src/utils/url.ts:109"],
+      "signature": "getPath(request: Request): string",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const getPath = (request: Request): string => {\n  const url = request.url\n  const start = url.indexOf('/', url.indexOf(':') + 4)\n  let i = start\n  for (; i < url.length; i++) {\n    const charCode = url.charCodeAt(i)\n    if (charCode === 37) { // '%' - path contains percent encoding\n      const qi = url.indexOf('?', i), hi = url.indexOf('#', i)\n      const end = qi === -1 ? (hi === -1 ? undefined : hi)\n        : (hi === -1 ? qi : Math.min(qi, hi))\n      return tryDecode(url.slice(start, end), decodeURIWithPreservedPercent)\n    } else if (charCode === 63 || charCode === 35) { break }\n  }\n  return url.slice(start, i)\n}"
+    },
+
+    {
+      "id": "f:src/utils/url.ts#getPattern",
+      "parent": "utils.url",
+      "name": "getPattern()",
+      "kind": "function",
+      "summary": "Compiles a route segment such as :id or :id{regex} into a cached three-element Pattern tuple.",
+      "detail": "Returns `'*'` for the wildcard segment. For a named parameter with a regex constraint, caches a tuple of `[cacheKey, paramName, RegExp]`; without a constraint, caches `[label, paramName, true]`. Results are stored in a module-level `patternCache` keyed by `label#next` so the lookahead for the following segment can narrow the regex.",
+      "paths": ["src/utils/url.ts:51"],
+      "signature": "getPattern(label: string, next?: string): Pattern | null",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const getPattern = (label: string, next?: string): Pattern | null => {\n  if (label === '*') { return '*' }\n  const match = label.match(/^\\:([^\\{\\}]+)(?:\\{(.+)\\})?$/)\n  if (match) {\n    const k = `${label}#${next}`\n    if (!patternCache[k]) {\n      patternCache[k] = match[2]\n        ? (next && next[0] !== ':' && next[0] !== '*'\n            ? [k, match[1], new RegExp(`^${match[2]}(?=/${next})`)]\n            : [label, match[1], new RegExp(`^${match[2]}$`)])\n        : [label, match[1], true]\n    }\n    return patternCache[k]\n  }; return null\n}"
+    },
+
+    {
+      "id": "f:src/utils/url.ts#splitRoutingPath",
+      "parent": "utils.url",
+      "name": "splitRoutingPath()",
+      "kind": "function",
+      "summary": "Splits a route path into segments, preserving curly-brace groups that would otherwise be misread as separators.",
+      "detail": "Calls `extractGroupsFromPath` to replace `{...}` groups with positional markers, then `splitPath`, then `replaceGroupMarks` to put the original group strings back. This prevents brace-enclosed regex fragments from being split on embedded '/' characters.",
+      "paths": ["src/utils/url.ts:16"],
+      "signature": "splitRoutingPath(routePath: string): string[]",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#mergePath",
+      "parent": "utils.url",
+      "name": "mergePath()",
+      "kind": "function",
+      "summary": "Joins two or more path segments into a single normalised path, collapsing double slashes.",
+      "detail": "Recursively merges the rest of the arguments first, then joins `base` and `sub`, inserting a leading slash if absent, omitting a trailing slash from base and stripping a leading slash from sub when both are present.",
+      "paths": ["src/utils/url.ts:187"],
+      "signature": "mergePath(...paths: string[]): string",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#getQueryParam",
+      "parent": "utils.url",
+      "name": "getQueryParam()",
+      "kind": "function",
+      "summary": "Returns a single decoded query-string value or the full decoded query map from a URL string.",
+      "detail": "Uses an optimised fast path when the key contains no percent, plus, ampersand or equals characters: scans the string with `indexOf` to avoid a full parse. Falls back to a full scan when encoded characters are present or when the caller omits the key.",
+      "paths": ["src/utils/url.ts:345"],
+      "signature": "getQueryParam(url: string, key?: string): string | undefined | Record<string, string>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#tryDecodeURI",
+      "parent": "utils.url",
+      "name": "tryDecodeURI()",
+      "kind": "function",
+      "summary": "Fault-tolerant URI decoder that skips invalid percent sequences rather than throwing.",
+      "detail": "Wraps `decodeURI` in a try-catch; on failure, splits the string into percent-encoded runs and decodes each run individually, returning the best-effort result.",
+      "paths": ["src/utils/url.ts:104"],
+      "signature": "tryDecodeURI(str: string): string",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#checkOptionalParameter",
+      "parent": "utils.url",
+      "name": "checkOptionalParameter()",
+      "kind": "function",
+      "summary": "Expands an optional-parameter path like /users/:id? into the two canonical paths the router registers.",
+      "detail": "Returns `null` when the path has no optional segment. Otherwise returns an array such as `['/users', '/users/:id']` that the router registers as two separate routes, allowing the parameter to match or be absent.",
+      "paths": ["src/utils/url.ts:200"],
+      "signature": "checkOptionalParameter(path: string): string[] | null",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.body",
+      "parent": "hono.utils",
+      "name": "Body & form parsing",
+      "kind": "group",
+      "summary": "Parses request bodies from multipart/form-data and application/x-www-form-urlencoded into typed plain objects.",
+      "detail": "The public entry point `parseBody` reads the Content-Type header, strips parameters from the media type, and delegates to `parseFormData` for form and multipart bodies. JSON bodies are not parsed here; callers use `request.json()` directly. `parseFormData` reads the raw body as an ArrayBuffer, delegates buffering and boundary extraction to `bufferToFormData` in buffer.ts, and caches the FormData on `HonoRequest.bodyCache` so a later `c.req.formData()` call does not re-consume the stream. `convertFormDataToBodyData` turns the FormData entries into a plain object, optionally collecting duplicate keys into arrays (`all` option) and assembling dot-notation keys into nested objects (`dot` option). Both options are depth-limited (32 levels, 10 000 objects) to guard against prototype pollution and stack overflow.",
+      "paths": ["src/utils/body.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/body.ts#parseBody",
+      "parent": "utils.body",
+      "name": "parseBody()",
+      "kind": "function",
+      "summary": "Parses multipart or form-urlencoded bodies into a typed BodyData object.",
+      "detail": "Reads Content-Type, normalises the media type, and delegates to `parseFormData`. Returns an empty object for any other content type. Accepts a `HonoRequest` or a raw `Request`.",
+      "paths": ["src/utils/body.ts:100"],
+      "signature": "parseBody(request: HonoRequest | Request, options?: Partial<ParseBodyOptions>): Promise<BodyData>",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const parseBody: ParseBody = async (\n  request: HonoRequest | Request,\n  options = Object.create(null)\n) => {\n  const { all = false, dot = false } = options\n  const headers = isRawRequest(request) ? request.headers : request.raw.headers\n  const contentType = headers.get('Content-Type')\n  const mediaType = contentType?.split(';')[0].trim().toLowerCase()\n  if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {\n    return parseFormData(request, { all, dot })\n  }\n  return {}\n}"
+    },
+
+    {
+      "id": "f:src/utils/body.ts#handleParsingNestedValues",
+      "parent": "utils.body",
+      "name": "handleParsingNestedValues()",
+      "kind": "function",
+      "summary": "Assigns a value into a nested object by splitting a dot-notation key, with prototype-pollution guard.",
+      "detail": "Rejects keys that contain `__proto__`. Splits the key on dots up to `MAX_NESTING_DEPTH + 1` segments and walks or creates intermediate objects, tracking total object count against `MAX_NESTED_OBJECTS` (10 000).",
+      "paths": ["src/utils/body.ts:226"],
+      "signature": "handleParsingNestedValues(form, key, value, state): void",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "facts": ["MAX_NESTING_DEPTH = 32", "MAX_NESTED_OBJECTS = 10000"]
+    },
+
+    {
+      "id": "utils.buffer",
+      "parent": "hono.utils",
+      "name": "Buffer helpers",
+      "kind": "group",
+      "summary": "Constant-time comparison, timing-safe equality, and FormData construction from an ArrayBuffer.",
+      "detail": "Three concerns: `equal` does a byte-by-byte constant-time comparison of two ArrayBuffers using DataView, checking length first. `timingSafeEqual` hashes both string inputs with SHA-256 (via crypto.ts) before comparing with the constant-time routine, defeating length-extension and timing attacks used in HMAC credential comparisons. `bufferToFormData` wraps an ArrayBuffer in a synthetic Response and calls `response.formData()`, delegating boundary parsing to the platform runtime.",
+      "paths": ["src/utils/buffer.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/buffer.ts#timingSafeEqual",
+      "parent": "utils.buffer",
+      "name": "timingSafeEqual()",
+      "kind": "function",
+      "summary": "Compares two strings or buffers in constant time by hashing both before comparing, preventing timing-based attacks.",
+      "detail": "Hashes both inputs with the provided or default SHA-256 `hashFunction`, then compares hashes and originals with `constantTimeEqualString`, which XOR-reduces all character codes to prevent early exit.",
+      "paths": ["src/utils/buffer.ts:76"],
+      "signature": "timingSafeEqual(a: string | object | boolean, b: string | object | boolean, hashFunction?: Function): Promise<boolean>",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const timingSafeEqual: TimingSafeEqual = async (\n  a, b, hashFunction?: Function\n): Promise<boolean> => {\n  if (typeof a === 'string' && typeof b === 'string') {\n    return timingSafeEqualString(a, b, hashFunction as StringHashFunction)\n  }\n  if (!hashFunction) { hashFunction = sha256 }\n  const [sa, sb] = await Promise.all([hashFunction(a), hashFunction(b)])\n  if (!sa || !sb || typeof sa !== 'string' || typeof sb !== 'string') { return false }\n  return timingSafeEqualString(sa, sb)\n}"
+    },
+
+    {
+      "id": "f:src/utils/buffer.ts#bufferToFormData",
+      "parent": "utils.buffer",
+      "name": "bufferToFormData()",
+      "kind": "function",
+      "summary": "Converts an ArrayBuffer plus Content-Type header into a FormData object using the platform runtime.",
+      "detail": "Wraps the buffer in a Response with a normalised (lowercased media type) Content-Type to ensure consistent boundary parsing across runtimes, then calls `response.formData()`.",
+      "paths": ["src/utils/buffer.ts:106"],
+      "signature": "bufferToFormData(arrayBuffer: ArrayBuffer, contentType: string): Promise<FormData>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.crypto",
+      "parent": "hono.utils",
+      "name": "Crypto hashing",
+      "kind": "group",
+      "summary": "SHA-256, SHA-1 and MD5 hashing wrappers over the Web Crypto API (crypto.subtle.digest).",
+      "detail": "Three convenience exports (`sha256`, `sha1`, `md5`) delegate to `createHash`, which serialises the input to an ArrayBuffer (JSON for objects, TextEncoder for scalars) and calls `crypto.subtle.digest`. When `crypto.subtle` is unavailable the function returns `null`. Results are hex strings. These are consumed by `timingSafeEqual` in buffer.ts, by the ETag middleware, and by signed-cookie verification.",
+      "paths": ["src/utils/crypto.ts"],
+      "status": "live",
+      "tech": ["TypeScript", "Web Crypto"]
+    },
+
+    {
+      "id": "f:src/utils/crypto.ts#sha256",
+      "parent": "utils.crypto",
+      "name": "sha256()",
+      "kind": "function",
+      "summary": "Returns the SHA-256 hex digest of a string, number, boolean, JSON value or binary buffer.",
+      "detail": "Delegates to `createHash` with algorithm `{name: 'SHA-256', alias: 'sha256'}`. Returns `null` if `crypto.subtle` is unavailable.",
+      "paths": ["src/utils/crypto.ts:15"],
+      "signature": "sha256(data: Data): Promise<string | null>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/crypto.ts#createHash",
+      "parent": "utils.crypto",
+      "name": "createHash()",
+      "kind": "function",
+      "summary": "Hashes arbitrary data with a named Web Crypto algorithm and returns a lowercase hex string.",
+      "detail": "Encodes objects via `JSON.stringify` + `TextEncoder.encode`. Calls `crypto.subtle.digest` and maps the resulting Uint8Array to a padded hex string. Returns `null` when the Web Crypto API is absent.",
+      "paths": ["src/utils/crypto.ts:33"],
+      "signature": "createHash(data: Data, algorithm: Algorithm): Promise<string | null>",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const createHash = async (data: Data, algorithm: Algorithm) => {\n  let sourceBuffer: ArrayBufferView | ArrayBuffer\n  if (ArrayBuffer.isView(data) || data instanceof ArrayBuffer) {\n    sourceBuffer = data\n  } else {\n    if (typeof data === 'object') { data = JSON.stringify(data) }\n    sourceBuffer = new TextEncoder().encode(String(data))\n  }\n  if (crypto && crypto.subtle) {\n    const buf = await crypto.subtle.digest({ name: algorithm.name }, sourceBuffer as ArrayBuffer)\n    return Array.prototype.map.call(\n      new Uint8Array(buf), (x) => ('00' + x.toString(16)).slice(-2)).join('')\n  }\n  return null\n}"
+    },
+
+    {
+      "id": "utils.jwt",
+      "parent": "hono.utils",
+      "name": "JWT & JWKS",
+      "kind": "group",
+      "summary": "JSON Web Token signing, verification and decoding plus JSON Web Key Set fetching used by the JWT and JWK middleware.",
+      "detail": "The group implements RFC 7519 (JWT), RFC 7515 (JWS) and RFC 7518 (JWA). `jwt.ts` provides `sign`, `verify`, `decode` and `verifyWithJwks`. `jws.ts` maps algorithm names to Web Crypto parameters and imports private or public keys from raw strings, PEM files, JWK objects, or native CryptoKey handles. `jwa.ts` defines the `AlgorithmTypes` enum with 13 supported algorithms (HS256/384/512, RS256/384/512, PS256/384/512, ES256/384/512, EdDSA). `types.ts` holds the typed error classes and `JWTPayload`. `index.ts` re-exports as the `Jwt` namespace object. `verifyWithJwks` fetches the key set from a remote URL or uses a preloaded list, matches by `kid`, rejects symmetric algorithms (HS*) to prevent algorithm-confusion attacks, and validates against the caller's allowed-algorithm list.",
+      "paths": ["src/utils/jwt"],
+      "status": "live",
+      "tech": ["TypeScript", "Web Crypto", "JWT"]
+    },
+
+    {
+      "id": "f:src/utils/jwt/jwt.ts#sign",
+      "parent": "utils.jwt",
+      "name": "sign()",
+      "kind": "function",
+      "summary": "Signs a JWT payload with the given key and algorithm, returning the compact token string.",
+      "detail": "Base64url-encodes the header and payload, concatenates them as `header.payload`, calls `jws.signing` to produce the signature buffer, base64url-encodes the signature without padding, and returns `header.payload.signature`.",
+      "paths": ["src/utils/jwt/jwt.ts:67"],
+      "signature": "sign(payload: JWTPayload, privateKey: SignatureKey, alg?: SignatureAlgorithm): Promise<string>",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const sign = async (\n  payload: JWTPayload, privateKey: SignatureKey,\n  alg: SignatureAlgorithm = 'HS256'\n): Promise<string> => {\n  const encodedPayload = encodeJwtPart(payload)\n  let encodedHeader\n  if (typeof privateKey === 'object' && 'alg' in privateKey) {\n    alg = privateKey.alg as SignatureAlgorithm\n    encodedHeader = encodeJwtPart({ alg, typ: 'JWT', kid: privateKey.kid })\n  } else { encodedHeader = encodeJwtPart({ alg, typ: 'JWT' }) }\n  const partialToken = `${encodedHeader}.${encodedPayload}`\n  const sig = await signing(privateKey, alg, utf8Encoder.encode(partialToken))\n  return `${partialToken}.${encodeSignaturePart(sig)}`\n}"
+    },
+
+    {
+      "id": "f:src/utils/jwt/jwt.ts#verify",
+      "parent": "utils.jwt",
+      "name": "verify()",
+      "kind": "function",
+      "summary": "Verifies a JWT token against a public key, checks claims (exp, nbf, iat, iss, aud) and returns the payload.",
+      "detail": "Splits the token, decodes the header and payload, validates the header algorithm against the caller-specified algorithm, checks each time-based claim, verifies the signature via `jws.verifying`, and throws typed errors for each failure mode. Only the canonical base64url encoding of the signature is accepted.",
+      "paths": ["src/utils/jwt/jwt.ts:109"],
+      "signature": "verify(token: string, publicKey: SignatureKey, algOrOptions: SignatureAlgorithm | VerifyOptionsWithAlg): Promise<JWTPayload>",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const verify = async (\n  token: string, publicKey: SignatureKey,\n  algOrOptions: SignatureAlgorithm | VerifyOptionsWithAlg\n): Promise<JWTPayload> => {\n  const { alg, exp = true, nbf = true, iat = true, aud, iss, typ } =\n    typeof algOrOptions === 'string' ? { alg: algOrOptions } : algOrOptions\n  const { header, payload } = decode(token)\n  if (!isTokenHeader(header, typ)) { throw new JwtHeaderInvalid(header) }\n  if (header.alg !== alg) { throw new JwtAlgorithmMismatch(alg, header.alg) }\n  // time-based claim checks (exp, nbf, iat) then iss and aud ...\n  const headerPayload = token.substring(0, token.lastIndexOf('.'))\n  const ok = await verifying(publicKey, alg, sig, utf8Encoder.encode(headerPayload))\n  if (!ok) { throw new JwtTokenSignatureMismatched(token) }\n  return payload\n}"
+    },
+
+    {
+      "id": "f:src/utils/jwt/jwt.ts#verifyWithJwks",
+      "parent": "utils.jwt",
+      "name": "verifyWithJwks()",
+      "kind": "function",
+      "summary": "Verifies a JWT against a JSON Web Key Set, fetching from a remote URI if needed.",
+      "detail": "Decodes only the header first to read `kid` and `alg`. Rejects symmetric algorithms (HS256/384/512) to prevent algorithm-confusion attacks. Fetches the JWKS from `jwks_uri` if provided, merges with any preloaded `keys`, matches by `kid`, then delegates to `verify`. Throws if neither source provides matching keys.",
+      "paths": ["src/utils/jwt/jwt.ts:216"],
+      "signature": "verifyWithJwks(token: string, options: { keys?, jwks_uri?, verification?, allowedAlgorithms }, init?: RequestInit): Promise<JWTPayload>",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "facts": ["Symmetric algorithms (HS256/384/512) are always rejected for JWKS verification"]
+    },
+
+    {
+      "id": "f:src/utils/jwt/jwt.ts#decode",
+      "parent": "utils.jwt",
+      "name": "decode()",
+      "kind": "function",
+      "summary": "Decodes a JWT without verifying the signature, returning the header and payload.",
+      "detail": "Splits on '.', base64url-decodes each part with `utf8Decoder.decode`, JSON-parses them, and returns `{header, payload}`. Throws `JwtTokenInvalid` for malformed tokens.",
+      "paths": ["src/utils/jwt/jwt.ts:283"],
+      "signature": "decode(token: string): { header: TokenHeader; payload: JWTPayload }",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/jwt/jws.ts#signing",
+      "parent": "utils.jwt",
+      "name": "signing()",
+      "kind": "function",
+      "summary": "Signs data using the Web Crypto API after importing the private key in the appropriate format.",
+      "detail": "Calls `getKeyAlgorithm` to map an algorithm name to a Web Crypto parameter object, then `importPrivateKey` which accepts raw strings, PEM PKCS8, JWK objects, or native CryptoKey handles, and finally `crypto.subtle.sign`.",
+      "paths": ["src/utils/jwt/jws.ts:29"],
+      "signature": "signing(privateKey: SignatureKey, alg: SignatureAlgorithm, data: BufferSource): Promise<ArrayBuffer>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/jwt/jws.ts#verifying",
+      "parent": "utils.jwt",
+      "name": "verifying()",
+      "kind": "function",
+      "summary": "Verifies a signature using the Web Crypto API after importing the public key.",
+      "detail": "Calls `getKeyAlgorithm` and `importPublicKey`, which extracts the public JWK from a private CryptoKey if necessary. Calls `crypto.subtle.verify` and returns a boolean.",
+      "paths": ["src/utils/jwt/jws.ts:39"],
+      "signature": "verifying(publicKey: SignatureKey, alg: SignatureAlgorithm, signature: BufferSource, data: BufferSource): Promise<boolean>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/jwt/jwa.ts#AlgorithmTypes",
+      "parent": "utils.jwt",
+      "name": "AlgorithmTypes",
+      "kind": "class",
+      "summary": "Enum of all 13 supported JWT signature algorithms (HMAC, RSA PKCS1, RSA-PSS, ECDSA, EdDSA).",
+      "detail": "HS256/384/512 are symmetric (HMAC). RS256/384/512 use RSASSA-PKCS1-v1_5. PS256/384/512 use RSA-PSS. ES256/384/512 use ECDSA. EdDSA uses Ed25519 (supported on Safari, Deno, Node.js only).",
+      "paths": ["src/utils/jwt/jwa.ts:7"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "facts": ["EdDSA (Ed25519) is not supported on all runtimes; only Safari, Deno and Node.js as of map date"]
+    },
+
+    {
+      "id": "utils.cookie",
+      "parent": "hono.utils",
+      "name": "Cookie parse & serialize",
+      "kind": "group",
+      "summary": "Parses Cookie headers and serializes Set-Cookie values with full RFC 6265bis attribute support and HMAC signing.",
+      "detail": "Four public exports: `parse` splits the Cookie header into a plain object, using a relaxed name regex that accepts non-token names as sent by real browsers; `parseSigned` additionally verifies the HMAC-SHA-256 signature appended as `.base64=`. `serialize` URI-encodes the value and delegates to `_serialize`, which enforces `__Secure-` and `__Host-` prefix rules, the 400-day Max-Age/Expires cap, and validates that domain/path/sameSite/priority do not contain control characters. `serializeSigned` appends the HMAC signature before encoding. The signing key is imported once via `getCryptoKey` for reuse.",
+      "paths": ["src/utils/cookie.ts"],
+      "status": "live",
+      "tech": ["TypeScript", "Web Crypto"]
+    },
+
+    {
+      "id": "f:src/utils/cookie.ts#parse",
+      "parent": "utils.cookie",
+      "name": "parse()",
+      "kind": "function",
+      "summary": "Parses a Cookie header string into a name-to-value record, URI-decoding each value.",
+      "detail": "Splits on ';', trims whitespace from each pair, validates the name with a relaxed regex, strips optional surrounding double quotes, validates the value range, and calls `tryDecodeURIComponent` from url.ts on each value.",
+      "paths": ["src/utils/cookie.ts:110"],
+      "signature": "parse(cookie: string, name?: string): Cookie",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const parse = (cookie: string, name?: string): Cookie => {\n  if (name && cookie.indexOf(name) === -1) { return {} }\n  const result: Cookie = Object.create(null)\n  for (const pairStr of cookie.split(';')) {\n    const eq = pairStr.indexOf('=')\n    if (eq === -1) { continue }\n    const cName = trimCookieWhitespace(pairStr.substring(0, eq))\n    if ((name && name !== cName) || !relaxedCookieNameRegEx.test(cName)\n        || cName in result) { continue }\n    let cValue = trimCookieWhitespace(pairStr.substring(eq + 1))\n    if (cValue.length >= 2 && cValue[0] === '\"' && cValue.endsWith('\"')) cValue = cValue.slice(1, -1)\n    if (validCookieValueRegEx.test(cValue)) { result[cName] = tryDecodeURIComponent(cValue); if (name) break }\n  }\n  return result\n}"
+    },
+
+    {
+      "id": "f:src/utils/cookie.ts#serialize",
+      "parent": "utils.cookie",
+      "name": "serialize()",
+      "kind": "function",
+      "summary": "Serializes a cookie name and value to a Set-Cookie string with optional attributes.",
+      "detail": "URI-encodes the value, then calls `_serialize` which enforces `__Secure-`/`__Host-` prefix constraints, the 400-day cap on Max-Age and Expires, and injects all standard attributes in order.",
+      "paths": ["src/utils/cookie.ts:262"],
+      "signature": "serialize<Name extends string>(name: Name, value: string, opt?: CookieConstraint<Name>): string",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "facts": ["Max-Age MUST NOT exceed 34560000 seconds (400 days) per RFC 6265bis"]
+    },
+
+    {
+      "id": "f:src/utils/cookie.ts#parseSigned",
+      "parent": "utils.cookie",
+      "name": "parseSigned()",
+      "kind": "function",
+      "summary": "Parses and HMAC-verifies signed cookies, returning false for cookies whose signature does not match.",
+      "detail": "Imports the secret once with `getCryptoKey`, then for each parsed cookie splits on the last '.' to separate the value and the 44-character base64 HMAC signature, calls `verifySignature`, and sets the value to `false` on mismatch.",
+      "paths": ["src/utils/cookie.ts:147"],
+      "signature": "parseSigned(cookie: string, secret: string | BufferSource, name?: string): Promise<SignedCookie>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.encode",
+      "parent": "hono.utils",
+      "name": "Base64 encoding",
+      "kind": "group",
+      "summary": "Base64 and Base64url encode/decode utilities built on btoa/atob without Node.js Buffer dependency.",
+      "detail": "Four functions: `encodeBase64` iterates the buffer byte by byte to build a binary string then calls `btoa`; `decodeBase64` does the reverse via `atob` with a bidirectional loop that processes both ends simultaneously for speed; `encodeBase64Url` and `decodeBase64Url` swap `/+` with `_-` before or after the standard codec. These are used by the JWT implementation and by the basic-auth utility.",
+      "paths": ["src/utils/encode.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/encode.ts#encodeBase64Url",
+      "parent": "utils.encode",
+      "name": "encodeBase64Url()",
+      "kind": "function",
+      "summary": "Encodes an ArrayBuffer to a URL-safe Base64 string by substituting + and / characters.",
+      "paths": ["src/utils/encode.ts:10"],
+      "signature": "encodeBase64Url(buf: ArrayBufferLike): string",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/encode.ts#decodeBase64Url",
+      "parent": "utils.encode",
+      "name": "decodeBase64Url()",
+      "kind": "function",
+      "summary": "Decodes a URL-safe Base64 string to a Uint8Array by substituting _ and - before decoding.",
+      "paths": ["src/utils/encode.ts:6"],
+      "signature": "decodeBase64Url(str: string): Uint8Array",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.accept",
+      "parent": "hono.utils",
+      "name": "Accept header parsing",
+      "kind": "group",
+      "summary": "Parses the HTTP Accept header into a sorted list of media types with quality factors and parameters.",
+      "detail": "A hand-written, allocation-efficient parser that processes the header string character by character using index cursors. `parseAccept` calls `getNextAcceptValue` in a loop, each of which calls `getNextParam` for each semicolon-delimited parameter. Quality values are parsed by `parseQuality`, which clamps out-of-range numbers and treats non-numeric strings as 1 rather than rejecting them. The list is only sorted when at least one out-of-order quality value is found, avoiding the sort cost on the common case of a pre-sorted header.",
+      "paths": ["src/utils/accept.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/accept.ts#parseAccept",
+      "parent": "utils.accept",
+      "name": "parseAccept()",
+      "kind": "function",
+      "summary": "Parses an Accept header string into an array of Accept objects sorted by quality factor.",
+      "detail": "Returns an empty array for falsy input. Iterates over comma-separated media-type entries, parsing parameters including `q` case-insensitively. Defers the array sort until a quality inversion is detected.",
+      "paths": ["src/utils/accept.ts:211"],
+      "signature": "parseAccept(acceptHeader: string): Accept[]",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const parseAccept = (acceptHeader: string): Accept[] => {\n  if (!acceptHeader) { return [] }\n  const values: Accept[] = []\n  let i = 0, accept: Accept | undefined, requiresSort = false, last: Accept | undefined\n  while (i < acceptHeader.length) {\n    ;[i, accept] = getNextAcceptValue(acceptHeader, i)\n    if (accept) {\n      accept.q = parseQuality(accept.params.q ?? accept.params.Q)\n      values.push(accept)\n      if (last && last.q < accept.q) { requiresSort = true }; last = accept\n    }\n  }\n  if (requiresSort) { values.sort((a, b) => b.q - a.q) }\n  return values\n}"
+    },
+
+    {
+      "id": "utils.mime",
+      "parent": "hono.utils",
+      "name": "MIME type lookup",
+      "kind": "group",
+      "summary": "Maps file extensions to MIME types and reverse-maps MIME types to extensions using a built-in table of about 60 entries.",
+      "detail": "`getMimeType` extracts the extension with a simple regex and looks it up in the `baseMimes` record. `getExtension` iterates the record to find a matching MIME type, comparing stripped base types. The `baseMimes` constant is also re-exported as `mimes` for callers who need raw table access. Used by serve-static helpers.",
+      "paths": ["src/utils/mime.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/mime.ts#getMimeType",
+      "parent": "utils.mime",
+      "name": "getMimeType()",
+      "kind": "function",
+      "summary": "Returns the MIME type string for a given filename based on its file extension.",
+      "paths": ["src/utils/mime.ts:6"],
+      "signature": "getMimeType(filename: string, mimes?: Record<string, string>): string | undefined",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.html",
+      "parent": "hono.utils",
+      "name": "HTML escaping & string buffers",
+      "kind": "group",
+      "summary": "HTML escape helpers, the HtmlEscapedString type, StringBuffer assembly, and callback resolution for the JSX renderer.",
+      "detail": "Three phases are defined: Stringify (synchronous render), BeforeStream (pre-streaming), and Stream (streaming). `escapeToBuffer` scans for `&<>'\"` and writes HTML entities into a StringBuffer in-place. `stringBufferToString` resolves a mixed array of strings and Promises by awaiting them all then building a final string from the tail, collecting and propagating `HtmlEscapedCallback` lists. `resolveCallback` runs a list of callbacks against a phase and context, recursively resolving nested callbacks. `raw` marks a string as already escaped. These are the building blocks of the JSX server renderer.",
+      "paths": ["src/utils/html.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/html.ts#escapeToBuffer",
+      "parent": "utils.html",
+      "name": "escapeToBuffer()",
+      "kind": "function",
+      "summary": "Appends an HTML-escaped string into a StringBuffer in place.",
+      "detail": "Uses `str.search(/[&<>'\"]/` for a fast no-match early return, then walks character codes to substitute HTML entities.",
+      "paths": ["src/utils/html.ts:98"],
+      "signature": "escapeToBuffer(str: string, buffer: StringBuffer): void",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const escapeToBuffer = (str: string, buffer: StringBuffer): void => {\n  const match = str.search(/[&<>'\"]/) // escapeRe\n  if (match === -1) { buffer[0] += str; return }\n  let escape, index, lastIndex = 0\n  for (index = match; index < str.length; index++) {\n    switch (str.charCodeAt(index)) {\n      case 34: escape = '&quot;'; break\n      case 39: escape = '&#39;'; break\n      case 38: escape = '&amp;'; break\n      case 60: escape = '&lt;'; break\n      case 62: escape = '&gt;'; break\n      default: continue\n    }\n    buffer[0] += str.substring(lastIndex, index) + escape; lastIndex = index + 1\n  }; buffer[0] += str.substring(lastIndex, index) }"
+    },
+
+    {
+      "id": "f:src/utils/html.ts#raw",
+      "parent": "utils.html",
+      "name": "raw()",
+      "kind": "function",
+      "summary": "Marks a string as already HTML-escaped so the renderer skips re-escaping.",
+      "paths": ["src/utils/html.ts:40"],
+      "signature": "raw(value: unknown, callbacks?: HtmlEscapedCallback[]): HtmlEscapedString",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/html.ts#stringBufferToString",
+      "parent": "utils.html",
+      "name": "stringBufferToString()",
+      "kind": "function",
+      "summary": "Resolves a StringBuffer (alternating strings and Promises) into a single escaped HtmlEscapedString.",
+      "detail": "Awaits all Promises, iterates the buffer from the tail (even index = resolved string, odd index = async content), escapes non-escaped pieces, and collects callbacks for downstream phases.",
+      "paths": ["src/utils/html.ts:53"],
+      "signature": "stringBufferToString(buffer: StringBuffer, callbacks?: HtmlEscapedCallback[]): Promise<HtmlEscapedString>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.stream",
+      "parent": "hono.utils",
+      "name": "Streaming API",
+      "kind": "group",
+      "summary": "StreamingApi wraps a WritableStream with write, writeln, pipe, close and abort helpers for HTTP streaming and SSE responses.",
+      "detail": "The constructor captures both the writable and readable sides of a TransformStream, sets up a responseReadable that proxies from the readable and calls `abort()` on client disconnect. `write` encodes strings and writes Uint8Arrays; `pipe` releases the writer lock, pipes a ReadableStream, and reacquires. `onAbort` registers listeners called on client disconnect. Used by the streaming and SSE helpers in the helpers area.",
+      "paths": ["src/utils/stream.ts"],
+      "status": "live",
+      "tech": ["TypeScript", "Web Streams"]
+    },
+
+    {
+      "id": "f:src/utils/stream.ts#StreamingApi",
+      "parent": "utils.stream",
+      "name": "StreamingApi",
+      "kind": "class",
+      "summary": "Wraps a WritableStream to provide buffered, abort-aware write, pipe and close operations for streaming responses.",
+      "detail": "Owns a WritableStreamDefaultWriter. `write(input)` silently swallows write errors. `pipe(body)` releases and reacquires the lock around `pipeTo` with preventClose/preventAbort. `abort()` is idempotent and fires all registered abort listeners.",
+      "paths": ["src/utils/stream.ts:6"],
+      "signature": "class StreamingApi",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.filepath",
+      "parent": "hono.utils",
+      "name": "File path helpers",
+      "kind": "group",
+      "summary": "Resolves static file paths from request URLs, appending default documents and rejecting path-traversal sequences.",
+      "detail": "`getFilePath` appends a default document (default: `index.html`) when the path ends in '/' or has no extension. `getFilePathWithoutDefaultDocument` rejects `../` patterns, normalises backslashes to forward slashes, and joins the root prefix. Both functions return `undefined` for unsafe paths. Used by serve-static adapters.",
+      "paths": ["src/utils/filepath.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/filepath.ts#getFilePath",
+      "parent": "utils.filepath",
+      "name": "getFilePath()",
+      "kind": "function",
+      "summary": "Returns the resolved file path for a request URL, appending the default document for directory-style paths.",
+      "paths": ["src/utils/filepath.ts:12"],
+      "signature": "getFilePath(options: { filename, root?, defaultDocument? }): string | undefined",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.mount",
+      "parent": "hono.utils",
+      "name": "Mount path utilities",
+      "kind": "group",
+      "summary": "Builds a child Request by stripping the mount prefix from the parent URL, used by the mount middleware.",
+      "detail": "`createMountedRequest` computes the prefix length by walking the route segments, handling parameterised prefixes via `getPattern`/`splitRoutingPath`. It strips the prefix from `c.req.path`, re-encodes special characters in the new pathname, and constructs a new Request. It rejects path-traversal sequences (dot segments), unsafe URLs with authority-terminating characters in the path, and multiple trailing slashes that could bypass a parent's non-strict routing.",
+      "paths": ["src/utils/mount.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/mount.ts#createMountedRequest",
+      "parent": "utils.mount",
+      "name": "createMountedRequest()",
+      "kind": "function",
+      "summary": "Strips the mount prefix from the parent context's URL and returns a new Request for the child app.",
+      "detail": "Validates no wildcard without a trailing slash, computes prefix length, checks for path-traversal and double-slash attacks, sets the new pathname via `URL.pathname` and re-encodes backslashes and control characters.",
+      "paths": ["src/utils/mount.ts:53"],
+      "signature": "createMountedRequest(c: Context, pathPrefix: string, routePath: string): Request",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.ipaddr",
+      "parent": "hono.utils",
+      "name": "IP address utilities",
+      "kind": "group",
+      "summary": "Parses, converts and normalizes IPv4 and IPv6 addresses to and from binary bigint representations.",
+      "detail": "Four conversion functions: `convertIPv4ToBinary` and `convertIPv6ToBinary` parse address strings to bigint; `convertIPv4BinaryToString` and `convertIPv6BinaryToString` go the other way, with RFC 5952 compression for IPv6. `distinctRemoteAddr` classifies a remote address string as 'IPv4', 'IPv6' or undefined. `expandIPv6` expands a compressed IPv6 address into full colon notation. IPv6 zone IDs are tolerated only for link-local addresses. Used by the conninfo helpers and IP-address middleware.",
+      "paths": ["src/utils/ipaddr.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/ipaddr.ts#convertIPv6ToBinary",
+      "parent": "utils.ipaddr",
+      "name": "convertIPv6ToBinary()",
+      "kind": "function",
+      "summary": "Parses a full or compressed IPv6 address string into a 128-bit bigint.",
+      "detail": "Handles compressed notation (::), embedded IPv4, and zone IDs (rejected unless the address is link-local). Throws `InvalidIPAddressError` with code `ERR_INVALID_IP_ADDRESS` for invalid input.",
+      "paths": ["src/utils/ipaddr.ts:158"],
+      "signature": "convertIPv6ToBinary(ipv6: string): bigint",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/ipaddr.ts#distinctRemoteAddr",
+      "parent": "utils.ipaddr",
+      "name": "distinctRemoteAddr()",
+      "kind": "function",
+      "summary": "Identifies a remote address string as 'IPv4', 'IPv6', or undefined.",
+      "paths": ["src/utils/ipaddr.ts:60"],
+      "signature": "distinctRemoteAddr(remoteAddr: string): AddressType",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.smallprimitives",
+      "parent": "hono.utils",
+      "name": "Small primitives",
+      "kind": "group",
+      "summary": "Miscellaneous single-purpose modules: color control, constants, handler inspection, concurrency pool, HTTP status types, and type utilities.",
+      "detail": "color.ts: `getColorEnabled` reads the `NO_COLOR` env var synchronously (Deno/Node); `getColorEnabledAsync` additionally checks Cloudflare Workers via a dynamic `import('cloudflare:workers')`. constants.ts: exports `COMPOSED_HANDLER`, the string property key that links a composed middleware chain back to its original handler. handler.ts: `isMiddleware` checks arity; `findTargetHandler` traverses `COMPOSED_HANDLER` links to find the innermost handler. concurrent.ts: `createPool` returns a fixed-concurrency pool that queues work via `setTimeout` retries when the pool is full; default concurrency is 1024. http-status.ts: union type definitions for all IANA-registered HTTP status codes. types.ts: re-usable TypeScript generic utilities (Expect, Equal, UnionToIntersection, JSONParsed, Simplify, etc.).",
+      "paths": ["src/utils/color.ts", "src/utils/constants.ts", "src/utils/handler.ts", "src/utils/concurrent.ts", "src/utils/http-status.ts", "src/utils/types.ts", "src/utils/compress.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/concurrent.ts#createPool",
+      "parent": "utils.smallprimitives",
+      "name": "createPool()",
+      "kind": "function",
+      "summary": "Creates a concurrency-limited work pool that queues excess tasks via setTimeout.",
+      "detail": "Tracks in-flight tasks in a Set. When the pool is full, re-schedules via `setTimeout(() => run(fn, promise, resolve))` with a shared Promise. Supports an optional interval delay between task completions to rate-limit throughput. Default concurrency is 1024; `Infinity` returns an unbounded pass-through.",
+      "paths": ["src/utils/concurrent.ts:12"],
+      "signature": "createPool({ concurrency?, interval? }): Pool",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "facts": ["Default concurrency: 1024"]
+    },
+
+    {
+      "id": "f:src/utils/color.ts#getColorEnabled",
+      "parent": "utils.smallprimitives",
+      "name": "getColorEnabled()",
+      "kind": "function",
+      "summary": "Returns true when terminal colour output is enabled, checking NO_COLOR for Deno and Node.js.",
+      "paths": ["src/utils/color.ts:14"],
+      "signature": "getColorEnabled(): boolean",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/handler.ts#findTargetHandler",
+      "parent": "utils.smallprimitives",
+      "name": "findTargetHandler()",
+      "kind": "function",
+      "summary": "Recursively follows COMPOSED_HANDLER links to return the innermost handler function.",
+      "paths": ["src/utils/handler.ts:9"],
+      "signature": "findTargetHandler(handler: Function): Function",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.basic-auth",
+      "parent": "hono.utils",
+      "name": "Basic auth parser",
+      "kind": "group",
+      "summary": "Parses the HTTP Authorization header for Basic credentials, returning username and password.",
+      "detail": "`auth` matches the `Basic <base64>` scheme with a case-insensitive regex, decodes the base64 payload with `decodeBase64` from encode.ts, decodes the UTF-8 buffer, and splits on the first colon. Returns `undefined` for missing or malformed headers.",
+      "paths": ["src/utils/basic-auth.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/basic-auth.ts#auth",
+      "parent": "utils.basic-auth",
+      "name": "auth()",
+      "kind": "function",
+      "summary": "Extracts username and password from an HTTP Basic Authorization header.",
+      "paths": ["src/utils/basic-auth.ts:9"],
+      "signature": "auth(req: Request): { username: string; password: string } | undefined",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.headers",
+      "parent": "hono.utils",
+      "name": "Header name types",
+      "kind": "group",
+      "summary": "TypeScript union-type enumerations of all IANA-registered HTTP request and response header names.",
+      "detail": "Three exported union types: `RequestHeader`, `ResponseHeader` and `AcceptHeader`. Used in Context.header() and c.req.header() signatures to provide autocompletion without runtime overhead. A `CustomHeader` alias (`string & {}`) allows arbitrary header names.",
+      "paths": ["src/utils/headers.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "utils.tests",
+      "parent": "hono.utils",
+      "name": "Utility tests",
+      "kind": "group",
+      "summary": "Unit test files covering all utils modules.",
+      "detail": "One test file per utils module. Tests use Vitest and Web standard APIs. They cover each public function's happy path, edge cases and error branches. JWT tests include every algorithm combination. Cookie tests cover all attribute constraints. URL tests include percent-encoding corner cases and optional parameter expansion.",
+      "paths": [
+        "src/utils/url.test.ts",
+        "src/utils/body.test.ts",
+        "src/utils/buffer.test.ts",
+        "src/utils/crypto.test.ts",
+        "src/utils/cookie.test.ts",
+        "src/utils/encode.test.ts",
+        "src/utils/accept.test.ts",
+        "src/utils/mime.test.ts",
+        "src/utils/html.test.ts",
+        "src/utils/stream.test.ts",
+        "src/utils/filepath.test.ts",
+        "src/utils/mount.test.ts",
+        "src/utils/concurrent.test.ts",
+        "src/utils/ipaddr.test.ts",
+        "src/utils/color.test.ts",
+        "src/utils/basic-auth.test.ts",
+        "src/utils/types.test.ts",
+        "src/utils/jwt/jwa.test.ts",
+        "src/utils/jwt/jwt.test.ts"
+      ],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.test.ts",
+      "parent": "utils.tests",
+      "name": "url tests",
+      "kind": "test",
+      "summary": "Tests for getPath, splitPath, mergePath, getQueryParam, tryDecodeURI and related URL helpers.",
+      "paths": ["src/utils/url.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/body.test.ts",
+      "parent": "utils.tests",
+      "name": "body tests",
+      "kind": "test",
+      "summary": "Tests for parseBody with form-urlencoded and multipart inputs including the dot and all options.",
+      "paths": ["src/utils/body.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/cookie.test.ts",
+      "parent": "utils.tests",
+      "name": "cookie tests",
+      "kind": "test",
+      "summary": "Tests for parse, parseSigned, serialize and serializeSigned including prefix rules and signing.",
+      "paths": ["src/utils/cookie.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/jwt/jwt.test.ts",
+      "parent": "utils.tests",
+      "name": "JWT tests",
+      "kind": "test",
+      "summary": "Tests for sign, verify, decode and verifyWithJwks across all supported algorithms.",
+      "paths": ["src/utils/jwt/jwt.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/ipaddr.test.ts",
+      "parent": "utils.tests",
+      "name": "ipaddr tests",
+      "kind": "test",
+      "summary": "Tests for IPv4 and IPv6 parsing, conversion, normalization and error handling.",
+      "paths": ["src/utils/ipaddr.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/accept.test.ts",
+      "parent": "utils.tests",
+      "name": "accept tests",
+      "kind": "test",
+      "summary": "Tests for parseAccept covering quality values, parameters, edge cases and RFC compliance.",
+      "paths": ["src/utils/accept.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#splitPath",
+      "parent": "utils.url",
+      "name": "splitPath()",
+      "kind": "function",
+      "summary": "Splits a URL path string on '/' and removes the leading empty segment.",
+      "detail": "Splits the path on '/' and shifts off the leading empty string produced by an absolute path starting with '/'. Used internally by splitRoutingPath and by the trie router to tokenise route segments.",
+      "paths": ["src/utils/url.ts:8"],
+      "signature": "splitPath(path: string): string[]",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const splitPath = (path: string): string[] => {\n  const paths = path.split('/')\n  if (paths[0] === '') {\n    paths.shift()\n  }\n  return paths\n}"
+    },
+
+    {
+      "id": "f:src/utils/url.ts#getQueryStrings",
+      "parent": "utils.url",
+      "name": "getQueryStrings()",
+      "kind": "function",
+      "summary": "Returns the raw query string including the leading '?' from a URL string.",
+      "detail": "Deprecated in favour of the URL API. Locates the first '?' after position 8 (past the scheme), then returns the slice up to any '#' hash. Returns an empty string when no query string is present.",
+      "paths": ["src/utils/url.ts:156"],
+      "signature": "getQueryStrings(url: string): string",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "facts": ["Marked @deprecated; callers should use new URL(url).search instead"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#getPathNoStrict",
+      "parent": "utils.url",
+      "name": "getPathNoStrict()",
+      "kind": "function",
+      "summary": "Returns the decoded URL path, stripping a trailing slash for non-strict routing mode.",
+      "detail": "Calls getPath and removes the trailing '/' when the path is longer than one character. Used by the core dispatch when strict-routing is disabled so '/hello/' and '/hello' match the same route.",
+      "paths": ["src/utils/url.ts:170"],
+      "signature": "getPathNoStrict(request: Request): string",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/url.ts#getQueryParams",
+      "parent": "utils.url",
+      "name": "getQueryParams()",
+      "kind": "function",
+      "summary": "Returns all values for a query-string key as an array, or the full multi-value map.",
+      "detail": "Delegates to the internal _getQueryParam with the multi=true flag. When the key is omitted, returns a Record of all keys to string arrays. Used by HonoRequest.queries().",
+      "paths": ["src/utils/url.ts:353"],
+      "signature": "getQueryParams(url: string, key?: string): string[] | undefined | Record<string, string[]>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/ipaddr.ts#expandIPv6",
+      "parent": "utils.ipaddr",
+      "name": "expandIPv6()",
+      "kind": "function",
+      "summary": "Expands a compressed IPv6 address into full eight-group colon notation.",
+      "detail": "Detects an embedded IPv4 suffix and converts each dotted-decimal octet pair to two hex groups. Fills the '::' zero-compression run by inserting empty strings, then pads each group to four hex digits.",
+      "paths": ["src/utils/ipaddr.ts:13"],
+      "signature": "expandIPv6(ipV6: string): string",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const expandIPv6 = (ipV6: string): string => {\n  const sections = ipV6.split(':')\n  const last = sections.at(-1) as string\n  if (IPV4_REGEX.test(last)) {\n    const octets = last.split('.').map(Number)\n    sections.splice(-1, 1,\n      ((octets[0] << 8) | octets[1]).toString(16),\n      ((octets[2] << 8) | octets[3]).toString(16))\n  }\n  for (let i = 0; i < sections.length; i++) {\n    if (sections[i] !== '') { sections[i] = sections[i].padStart(4, '0') }\n  }\n  return sections.join(':')\n}"
+    },
+
+    {
+      "id": "f:src/utils/ipaddr.ts#convertIPv4ToBinary",
+      "parent": "utils.ipaddr",
+      "name": "convertIPv4ToBinary()",
+      "kind": "function",
+      "summary": "Parses an IPv4 address string into a 32-bit bigint.",
+      "detail": "Delegates to the internal `parseIPv4ToBinary` scanner that walks the string and shifts each octet into a 32-bit bigint. Throws `InvalidIPAddressError` for invalid input.",
+      "paths": ["src/utils/ipaddr.ts:149"],
+      "signature": "convertIPv4ToBinary(ipv4: string): bigint",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/ipaddr.ts#convertIPv6BinaryToString",
+      "parent": "utils.ipaddr",
+      "name": "convertIPv6BinaryToString()",
+      "kind": "function",
+      "summary": "Converts a 128-bit bigint IPv6 address back to a normalised string using RFC 5952 compression.",
+      "detail": "Handles the unspecified address (0n) as '::', and IPv4-mapped addresses as '::ffff:x.x.x.x'. Splits the bigint into eight 16-bit groups, finds the longest run of zeros, and replaces it with '::' for RFC 5952 canonical form.",
+      "paths": ["src/utils/ipaddr.ts:328"],
+      "signature": "convertIPv6BinaryToString(ipV6: bigint): string",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/encode.ts#encodeBase64",
+      "parent": "utils.encode",
+      "name": "encodeBase64()",
+      "kind": "function",
+      "summary": "Encodes an ArrayBuffer to a standard Base64 string using btoa.",
+      "detail": "Iterates the Uint8Array view byte by byte building a binary string with String.fromCharCode, then passes it to btoa. This is the MDN-recommended workaround for btoa not supporting non-Latin-1 input.",
+      "paths": ["src/utils/encode.ts:15"],
+      "signature": "encodeBase64(buf: ArrayBufferLike): string",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const encodeBase64 = (buf: ArrayBufferLike): string => {\n  let binary = ''\n  const bytes = new Uint8Array(buf)\n  for (let i = 0, len = bytes.length; i < len; i++) {\n    binary += String.fromCharCode(bytes[i])\n  }\n  return btoa(binary)\n}"
+    },
+
+    {
+      "id": "f:src/utils/encode.ts#decodeBase64",
+      "parent": "utils.encode",
+      "name": "decodeBase64()",
+      "kind": "function",
+      "summary": "Decodes a standard Base64 string to a Uint8Array using atob with a bidirectional loop.",
+      "detail": "Calls atob to get a binary string, allocates a Uint8Array, then fills it from both ends simultaneously (index i from the front, j from the back) so both halves advance in one pass. Handles odd-length buffers with the i <= half condition.",
+      "paths": ["src/utils/encode.ts:25"],
+      "signature": "decodeBase64(str: string): Uint8Array",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const decodeBase64 = (str: string): Uint8Array<ArrayBuffer> => {\n  const binary = atob(str)\n  const bytes = new Uint8Array<ArrayBuffer>(new ArrayBuffer(binary.length))\n  const half = binary.length / 2\n  for (let i = 0, j = binary.length - 1; i <= half; i++, j--) {\n    bytes[i] = binary.charCodeAt(i)\n    bytes[j] = binary.charCodeAt(j)\n  }\n  return bytes\n}"
+    },
+
+    {
+      "id": "f:src/utils/crypto.ts#sha1",
+      "parent": "utils.crypto",
+      "name": "sha1()",
+      "kind": "function",
+      "summary": "Returns the SHA-1 hex digest of data using the Web Crypto API.",
+      "detail": "Delegates to createHash with algorithm {name: 'SHA-1', alias: 'sha1'}. Returns null if crypto.subtle is unavailable. Note: SHA-1 is deprecated for security-sensitive use; it appears here for legacy ETag and cache-related use cases only.",
+      "paths": ["src/utils/crypto.ts:21"],
+      "signature": "sha1(data: Data): Promise<string | null>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/crypto.ts#md5",
+      "parent": "utils.crypto",
+      "name": "md5()",
+      "kind": "function",
+      "summary": "Returns the MD5 hex digest of data using the Web Crypto API.",
+      "detail": "Delegates to createHash with algorithm {name: 'MD5', alias: 'md5'}. Returns null if crypto.subtle is unavailable or if the runtime does not support MD5 (most secure contexts reject MD5 in Web Crypto). Used by the ETag middleware for content hashing.",
+      "paths": ["src/utils/crypto.ts:27"],
+      "signature": "md5(data: Data): Promise<string | null>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/html.ts#resolveCallback",
+      "parent": "utils.html",
+      "name": "resolveCallback()",
+      "kind": "function",
+      "summary": "Runs all HtmlEscapedCallbacks on a string or Promise for a given rendering phase.",
+      "detail": "Awaits any Promise input, extracts the callbacks list from the HtmlEscapedString, appends the string to the buffer, and calls each callback with the phase/buffer/context tuple. Recursively resolves nested callbacks returned by each callback, optionally preserving them on the result for a later phase. Used by the JSX streaming renderer during BeforeStream and Stream phases.",
+      "paths": ["src/utils/html.ts:150"],
+      "signature": "resolveCallback(str, phase, preserveCallbacks, context, buffer?): Promise<string>",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/html.ts#resolveCallbackSync",
+      "parent": "utils.html",
+      "name": "resolveCallbackSync()",
+      "kind": "function",
+      "summary": "Runs HtmlEscapedCallbacks synchronously for the Stringify phase.",
+      "detail": "Synchronous counterpart to resolveCallback. Only runs callbacks at the Stringify phase. Creates a single-element buffer and iterates the callbacks array inline. Used by the synchronous JSX renderer path.",
+      "paths": ["src/utils/html.ts:137"],
+      "signature": "resolveCallbackSync(str: string | HtmlEscapedString): string",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/buffer.ts#equal",
+      "parent": "utils.buffer",
+      "name": "equal()",
+      "kind": "function",
+      "summary": "Compares two ArrayBuffers byte by byte for equality.",
+      "detail": "Returns true immediately on reference equality. Returns false for different byte lengths. Iterates from the last byte to the first using DataView.getUint8, stopping at the first mismatch.",
+      "paths": ["src/utils/buffer.ts:8"],
+      "signature": "equal(a: ArrayBuffer, b: ArrayBuffer): boolean",
+      "status": "live",
+      "tech": ["TypeScript"],
+      "code": "export const equal = (a: ArrayBuffer, b: ArrayBuffer): boolean => {\n  if (a === b) { return true }\n  if (a.byteLength !== b.byteLength) { return false }\n  const va = new DataView(a)\n  const vb = new DataView(b)\n  let i = va.byteLength\n  while (i--) {\n    if (va.getUint8(i) !== vb.getUint8(i)) { return false }\n  }\n  return true\n}"
+    },
+
+    {
+      "id": "f:src/utils/buffer.ts#bufferToString",
+      "parent": "utils.buffer",
+      "name": "bufferToString()",
+      "kind": "function",
+      "summary": "Decodes an ArrayBuffer to a UTF-8 string using TextDecoder.",
+      "detail": "Guards with an instanceof check; if the value is not an ArrayBuffer it is returned as-is (passthrough for already-decoded strings). Used by the JWT implementation to decode the raw body.",
+      "paths": ["src/utils/buffer.ts:98"],
+      "signature": "bufferToString(buffer: ArrayBuffer): string",
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/utils/mime.ts#getExtension",
+      "parent": "utils.mime",
+      "name": "getExtension()",
+      "kind": "function",
+      "summary": "Returns the file extension for a MIME type by reverse-looking up the baseMimes table.",
+      "detail": "Strips parameters from the MIME type, normalises to lower case, then scans all keys of baseMimes comparing both exact match and stripped-base match. Returns the first matching extension string.",
+      "paths": ["src/utils/mime.ts:19"],
+      "signature": "getExtension(mimeType: string): string | undefined",
+      "status": "live",
+      "tech": ["TypeScript"]
+    }
+
+  ],
+
+  "edges": [
+
+    {
+      "from": "f:src/utils/url.ts#getPath",
+      "to": "f:src/utils/url.ts#tryDecodeURI",
+      "kind": "calls",
+      "label": "decodes percent-encoded path segments",
+      "evidence": "src/utils/url.ts:130"
+    },
+    {
+      "from": "f:src/utils/url.ts#splitRoutingPath",
+      "to": "f:src/utils/url.ts#getPattern",
+      "kind": "calls",
+      "label": "used by mount.ts to measure prefix length",
+      "evidence": "src/utils/mount.ts:29"
+    },
+    {
+      "from": "f:src/utils/body.ts#parseBody",
+      "to": "f:src/utils/buffer.ts#bufferToFormData",
+      "kind": "calls",
+      "label": "buffers and parses multipart or form-urlencoded body",
+      "evidence": "src/utils/body.ts:138"
+    },
+    {
+      "from": "f:src/utils/buffer.ts#timingSafeEqual",
+      "to": "f:src/utils/crypto.ts#sha256",
+      "kind": "calls",
+      "label": "hashes both inputs before constant-time comparison",
+      "evidence": "src/utils/buffer.ts:52"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.ts#sign",
+      "to": "f:src/utils/jwt/jws.ts#signing",
+      "kind": "calls",
+      "label": "signs the header.payload string",
+      "evidence": "src/utils/jwt/jwt.ts:83"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.ts#verify",
+      "to": "f:src/utils/jwt/jws.ts#verifying",
+      "kind": "calls",
+      "label": "verifies the signature against the public key",
+      "evidence": "src/utils/jwt/jwt.ts:201"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.ts#verifyWithJwks",
+      "to": "f:src/utils/jwt/jwt.ts#verify",
+      "kind": "calls",
+      "label": "delegates to verify after selecting the matching key",
+      "evidence": "src/utils/jwt/jwt.ts:277"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.ts#sign",
+      "to": "f:src/utils/encode.ts#encodeBase64Url",
+      "kind": "calls",
+      "label": "base64url-encodes header, payload and signature",
+      "evidence": "src/utils/jwt/jwt.ts:32"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.ts#verify",
+      "to": "f:src/utils/encode.ts#decodeBase64Url",
+      "kind": "calls",
+      "label": "decodes the signature part",
+      "evidence": "src/utils/jwt/jwt.ts:193"
+    },
+    {
+      "from": "f:src/utils/cookie.ts#parse",
+      "to": "f:src/utils/url.ts#tryDecodeURI",
+      "kind": "calls",
+      "label": "URI-decodes each cookie value",
+      "evidence": "src/utils/cookie.ts:138"
+    },
+    {
+      "from": "f:src/utils/basic-auth.ts#auth",
+      "to": "f:src/utils/encode.ts#decodeBase64Url",
+      "kind": "calls",
+      "label": "decodes the base64 credentials",
+      "evidence": "src/utils/basic-auth.ts:18"
+    },
+    {
+      "from": "f:src/utils/mount.ts#createMountedRequest",
+      "to": "f:src/utils/url.ts#splitRoutingPath",
+      "kind": "calls",
+      "label": "splits the prefix to compute its length",
+      "evidence": "src/utils/mount.ts:23"
+    },
+    {
+      "from": "f:src/utils/mount.ts#createMountedRequest",
+      "to": "f:src/utils/url.ts#getPattern",
+      "kind": "calls",
+      "label": "matches parameterised prefix segments",
+      "evidence": "src/utils/mount.ts:29"
+    },
+    {
+      "from": "utils.url",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "getPath, getPattern, splitRoutingPath used in dispatch",
+      "evidence": "src/request.ts:1"
+    },
+    {
+      "from": "utils.body",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "parseBody consumed by HonoRequest.parseBody",
+      "evidence": "src/request.ts:1"
+    },
+    {
+      "from": "utils.jwt",
+      "to": "hono.middleware",
+      "kind": "calls",
+      "label": "Jwt.sign/verify/verifyWithJwks used by jwt middleware",
+      "evidence": "src/middleware/jwt/index.ts:1"
+    },
+    {
+      "from": "utils.cookie",
+      "to": "hono.middleware",
+      "kind": "calls",
+      "label": "parse/parseSigned/serialize used by cookie helper",
+      "evidence": "src/helper/cookie/index.ts:1"
+    },
+    {
+      "from": "utils.html",
+      "to": "hono.jsx",
+      "kind": "calls",
+      "label": "escapeToBuffer/stringBufferToString used by JSX renderer",
+      "evidence": "src/jsx/index.ts:1"
+    },
+    {
+      "from": "utils.stream",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "StreamingApi used by streaming and SSE helpers",
+      "evidence": "src/helper/streaming/index.ts:1"
+    },
+    {
+      "from": "utils.ipaddr",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "IP address conversion used by conninfo helpers",
+      "evidence": "src/helper/conninfo/index.ts:1"
+    },
+    {
+      "from": "utils.mime",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "getMimeType used by serve-static middleware",
+      "evidence": "src/middleware/serve-static/index.ts:1"
+    },
+    {
+      "from": "utils.filepath",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "getFilePath used by serve-static middleware",
+      "evidence": "src/middleware/serve-static/index.ts:1"
+    },
+    {
+      "from": "utils.basic-auth",
+      "to": "hono.middleware",
+      "kind": "calls",
+      "label": "auth() used by basic-auth middleware",
+      "evidence": "src/middleware/basic-auth/index.ts:1"
+    },
+    {
+      "from": "utils.crypto",
+      "to": "hono.middleware",
+      "kind": "calls",
+      "label": "sha256/md5 used by ETag and compress middleware",
+      "evidence": "src/middleware/etag/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/jwt/jws.ts#signing",
+      "to": "f:src/utils/jwt/jwa.ts#AlgorithmTypes",
+      "kind": "calls",
+      "label": "getKeyAlgorithm maps enum values to Web Crypto params",
+      "evidence": "src/utils/jwt/jws.ts:122"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.ts#verifyWithJwks",
+      "to": "x:jwks",
+      "kind": "http",
+      "label": "fetches JWKS JSON from remote URI",
+      "evidence": "src/utils/jwt/jwt.ts:250"
+    },
+    {
+      "from": "f:src/utils/url.test.ts",
+      "to": "utils.url",
+      "kind": "tests",
+      "label": "covers getPath, splitPath, mergePath and query helpers",
+      "evidence": "src/utils/url.test.ts:1"
+    },
+    {
+      "from": "f:src/utils/body.test.ts",
+      "to": "utils.body",
+      "kind": "tests",
+      "label": "covers parseBody including dot and all options",
+      "evidence": "src/utils/body.test.ts:1"
+    },
+    {
+      "from": "f:src/utils/cookie.test.ts",
+      "to": "utils.cookie",
+      "kind": "tests",
+      "label": "covers parse, serialize and signing",
+      "evidence": "src/utils/cookie.test.ts:1"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.test.ts",
+      "to": "utils.jwt",
+      "kind": "tests",
+      "label": "covers sign, verify, decode and verifyWithJwks",
+      "evidence": "src/utils/jwt/jwt.test.ts:1"
+    },
+    {
+      "from": "f:src/utils/ipaddr.test.ts",
+      "to": "utils.ipaddr",
+      "kind": "tests",
+      "label": "covers IPv4 and IPv6 parsing, conversion and error handling",
+      "evidence": "src/utils/ipaddr.test.ts:1"
+    },
+    {
+      "from": "f:src/utils/accept.test.ts",
+      "to": "utils.accept",
+      "kind": "tests",
+      "label": "covers parseAccept quality values and RFC compliance",
+      "evidence": "src/utils/accept.test.ts:1"
+    },
+
+    {
+      "from": "f:src/utils/accept.ts#parseAccept",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "used by accepts() helper for content negotiation",
+      "evidence": "src/helper/accepts/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/body.ts#handleParsingNestedValues",
+      "to": "f:src/utils/body.ts#parseBody",
+      "kind": "calls",
+      "label": "called by convertFormDataToBodyData for dot-notation keys",
+      "evidence": "src/utils/body.ts:226"
+    },
+    {
+      "from": "f:src/utils/color.ts#getColorEnabled",
+      "to": "hono.middleware",
+      "kind": "calls",
+      "label": "used by logger middleware to toggle ANSI colour output",
+      "evidence": "src/middleware/logger/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/concurrent.ts#createPool",
+      "to": "hono.middleware",
+      "kind": "calls",
+      "label": "used by compress middleware to bound concurrent operations",
+      "evidence": "src/middleware/compress/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/cookie.ts#parseSigned",
+      "to": "f:src/utils/cookie.ts#parse",
+      "kind": "calls",
+      "label": "calls parse first to split the Cookie header",
+      "evidence": "src/utils/cookie.ts:147"
+    },
+    {
+      "from": "f:src/utils/cookie.ts#serialize",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "used by cookie helper to build Set-Cookie headers",
+      "evidence": "src/helper/cookie/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/crypto.ts#createHash",
+      "to": "f:src/utils/crypto.ts#sha256",
+      "kind": "calls",
+      "label": "sha256 delegates all hashing to createHash",
+      "evidence": "src/utils/crypto.ts:16"
+    },
+    {
+      "from": "f:src/utils/filepath.ts#getFilePath",
+      "to": "hono.adapters",
+      "kind": "calls",
+      "label": "used by serve-static adapters to resolve file paths",
+      "evidence": "src/adapter/deno/serve-static.ts:1"
+    },
+    {
+      "from": "f:src/utils/handler.ts#findTargetHandler",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "traverses COMPOSED_HANDLER links for error context",
+      "evidence": "src/compose.ts:1"
+    },
+    {
+      "from": "f:src/utils/html.ts#escapeToBuffer",
+      "to": "f:src/utils/html.ts#stringBufferToString",
+      "kind": "calls",
+      "label": "calls escapeToBuffer to escape resolved async chunks",
+      "evidence": "src/utils/html.ts:63"
+    },
+    {
+      "from": "f:src/utils/html.ts#raw",
+      "to": "hono.jsx",
+      "kind": "calls",
+      "label": "raw() used by JSX runtime to mark pre-escaped strings",
+      "evidence": "src/jsx/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/html.ts#stringBufferToString",
+      "to": "hono.jsx",
+      "kind": "calls",
+      "label": "used by JSX renderer to assemble the final HTML string",
+      "evidence": "src/jsx/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/ipaddr.ts#convertIPv6ToBinary",
+      "to": "f:src/utils/ipaddr.ts#expandIPv6",
+      "kind": "calls",
+      "label": "calls expandIPv6 to normalise compressed notation",
+      "evidence": "src/utils/ipaddr.ts:158"
+    },
+    {
+      "from": "f:src/utils/ipaddr.ts#distinctRemoteAddr",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "classifies remote address type for conninfo helpers",
+      "evidence": "src/helper/conninfo/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/jwt/jwt.ts#decode",
+      "to": "f:src/utils/jwt/jwt.ts#verify",
+      "kind": "calls",
+      "label": "verify calls decode to split and JSON-parse the token",
+      "evidence": "src/utils/jwt/jwt.ts:140"
+    },
+    {
+      "from": "f:src/utils/mime.ts#getMimeType",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "used by serve-static to set the Content-Type response header",
+      "evidence": "src/middleware/serve-static/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/stream.ts#StreamingApi",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "StreamingApi instantiated by stream() and SSE helpers",
+      "evidence": "src/helper/streaming/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/url.ts#checkOptionalParameter",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "expands optional-parameter paths at route registration",
+      "evidence": "src/hono-base.ts:1"
+    },
+    {
+      "from": "f:src/utils/url.ts#getQueryParam",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "used by HonoRequest.query() to return a single query value",
+      "evidence": "src/request.ts:1"
+    },
+    {
+      "from": "f:src/utils/url.ts#mergePath",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "used by Hono.route() and app.mount() to join path prefixes",
+      "evidence": "src/hono-base.ts:1"
+    },
+
+    {
+      "from": "f:src/utils/url.ts#splitPath",
+      "to": "f:src/utils/url.ts#splitRoutingPath",
+      "kind": "calls",
+      "label": "splitRoutingPath delegates segment splitting to splitPath",
+      "evidence": "src/utils/url.ts:19"
+    },
+    {
+      "from": "f:src/utils/url.ts#getPathNoStrict",
+      "to": "f:src/utils/url.ts#getPath",
+      "kind": "calls",
+      "label": "calls getPath then strips trailing slash",
+      "evidence": "src/utils/url.ts:171"
+    },
+    {
+      "from": "f:src/utils/url.ts#getQueryStrings",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "legacy query-string extraction used in older request helpers",
+      "evidence": "src/request.ts:1"
+    },
+    {
+      "from": "f:src/utils/url.ts#getQueryParams",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "used by HonoRequest.queries() for multi-value params",
+      "evidence": "src/request.ts:1"
+    },
+    {
+      "from": "f:src/utils/ipaddr.ts#convertIPv4ToBinary",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "used by conninfo IP-range matching for IPv4 CIDR checks",
+      "evidence": "src/helper/conninfo/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/ipaddr.ts#convertIPv6BinaryToString",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "converts binary IPv6 back to string for conninfo responses",
+      "evidence": "src/helper/conninfo/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/encode.ts#encodeBase64",
+      "to": "f:src/utils/encode.ts#encodeBase64Url",
+      "kind": "calls",
+      "label": "encodeBase64Url calls encodeBase64 then substitutes + and /",
+      "evidence": "src/utils/encode.ts:10"
+    },
+    {
+      "from": "f:src/utils/encode.ts#decodeBase64",
+      "to": "f:src/utils/encode.ts#decodeBase64Url",
+      "kind": "calls",
+      "label": "decodeBase64Url substitutes _/- then calls decodeBase64",
+      "evidence": "src/utils/encode.ts:7"
+    },
+    {
+      "from": "f:src/utils/crypto.ts#sha1",
+      "to": "f:src/utils/crypto.ts#createHash",
+      "kind": "calls",
+      "label": "sha1 delegates to createHash with SHA-1 algorithm",
+      "evidence": "src/utils/crypto.ts:22"
+    },
+    {
+      "from": "f:src/utils/crypto.ts#md5",
+      "to": "f:src/utils/crypto.ts#createHash",
+      "kind": "calls",
+      "label": "md5 delegates to createHash with MD5 algorithm",
+      "evidence": "src/utils/crypto.ts:28"
+    },
+    {
+      "from": "f:src/utils/html.ts#resolveCallback",
+      "to": "hono.jsx",
+      "kind": "calls",
+      "label": "drives BeforeStream and Stream phase rendering in JSX",
+      "evidence": "src/jsx/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/html.ts#resolveCallbackSync",
+      "to": "hono.jsx",
+      "kind": "calls",
+      "label": "used by synchronous JSX render path at Stringify phase",
+      "evidence": "src/jsx/index.ts:1"
+    },
+    {
+      "from": "f:src/utils/buffer.ts#equal",
+      "to": "f:src/utils/buffer.ts#timingSafeEqual",
+      "kind": "calls",
+      "label": "timingSafeEqual calls equal for constant-time comparison",
+      "evidence": "src/utils/buffer.ts:76"
+    },
+    {
+      "from": "f:src/utils/buffer.ts#bufferToString",
+      "to": "f:src/utils/jwt/jws.ts#signing",
+      "kind": "calls",
+      "label": "used by JWT JWS module to decode raw key bytes to string",
+      "evidence": "src/utils/jwt/jws.ts:1"
+    },
+    {
+      "from": "f:src/utils/mime.ts#getExtension",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "reverse MIME lookup used by content-type negotiation helpers",
+      "evidence": "src/helper/accepts/index.ts:1"
+    }
+  ],
+
+  "flows": [
+    {
+      "id": "flow.utils.parseBody",
+      "name": "parseBody: deciding between form and multipart parsing",
+      "summary": "How an incoming request body is read, buffered and converted to a plain object.",
+      "steps": [
+        {
+          "node": "f:src/utils/body.ts#parseBody",
+          "text": "Called by HonoRequest.parseBody. Reads the Content-Type header and strips parameters to obtain the bare media type. For 'multipart/form-data' or 'application/x-www-form-urlencoded' it delegates to parseFormData. All other content types return an empty object immediately."
+        },
+        {
+          "node": "f:src/utils/buffer.ts#bufferToFormData",
+          "text": "parseFormData calls request.arrayBuffer() to consume the body stream, then passes the buffer and the original Content-Type (with boundary preserved) to bufferToFormData. This wraps the buffer in a synthetic Response and calls response.formData(), letting the platform runtime parse the boundary."
+        },
+        {
+          "node": "f:src/utils/body.ts#handleParsingNestedValues",
+          "text": "convertFormDataToBodyData iterates the FormData entries. With the 'all' option, duplicate keys are collected into arrays. With the 'dot' option, keys containing dots are split and handleParsingNestedValues traverses or creates nested objects, enforcing a depth limit of 32 and an object count limit of 10 000."
+        }
+      ]
+    },
+    {
+      "id": "flow.utils.jwtVerify",
+      "name": "JWT verify: decoding, algorithm check and signature verification",
+      "summary": "How a JWT Bearer token is decoded, its claims validated, and its signature checked against a key.",
+      "steps": [
+        {
+          "node": "f:src/utils/jwt/jwt.ts#verify",
+          "text": "Receives the compact token string and the caller's expected algorithm. Splits on '.' and rejects tokens that do not have exactly three parts. Calls decode() to base64url-decode and JSON-parse the header and payload."
+        },
+        {
+          "node": "f:src/utils/jwt/jwa.ts#AlgorithmTypes",
+          "text": "isTokenHeader checks the header's 'alg' field against the AlgorithmTypes enum. If the header algorithm does not match the caller-specified algorithm, a JwtAlgorithmMismatch error is thrown. Claims (exp, nbf, iat, iss, aud) are validated with current Unix time."
+        },
+        {
+          "node": "f:src/utils/jwt/jws.ts#verifying",
+          "text": "verify calls jws.verifying with the public key, algorithm, decoded signature and the original header.payload bytes. getKeyAlgorithm maps the algorithm name to a Web Crypto parameter object; importPublicKey imports the key in the correct format (raw, PEM SPKI, JWK or CryptoKey). crypto.subtle.verify produces the boolean result."
+        }
+      ]
+    },
+    {
+      "id": "flow.utils.getPath",
+      "name": "getPath: extracting a decoded path from a Request URL",
+      "summary": "How the router reads a request's URL path without constructing a URL object.",
+      "steps": [
+        {
+          "node": "f:src/utils/url.ts#getPath",
+          "text": "Locates the first '/' after the scheme and authority by scanning for '://' then advancing past the authority. Scans forward character by character and stops at '?' (63) or '#' (35), returning the raw slice."
+        },
+        {
+          "node": "f:src/utils/url.ts#tryDecodeURI",
+          "text": "When a '%' is found in the path, getPath switches to indexOf-based scanning to find the query or hash end. The extracted path slice is passed to tryDecode with decodeURIWithPreservedPercent, which re-encodes %25 to prevent double-decoding. tryDecodeURI catches invalid percent sequences and decodes the rest."
+        },
+        {
+          "node": "f:src/utils/url.ts#getPattern",
+          "text": "The decoded path is later split by splitRoutingPath and each segment is matched by getPattern during route registration. getPattern caches compiled regex patterns keyed by the segment label and its successor, enabling lookahead for the next segment in constrained patterns like :id{\\d+}."
+        }
+      ]
+    }
+  ]
+}

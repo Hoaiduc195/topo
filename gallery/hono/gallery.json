@@ -1,0 +1,10 @@
+{
+ "name": "Hono",
+ "repository": "https://github.com/honojs/hono",
+ "license": "MIT",
+ "about": "The TypeScript web framework for every JavaScript runtime: its router, middleware, helpers, JSX and runtime adapters.",
+ "cost_usd": 34,
+ "minutes": 32,
+ "depth": "standard",
+ "mapped": "2026-11-24"
+}

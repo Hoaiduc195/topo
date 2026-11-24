@@ -1,0 +1,190 @@
+{
+ "nodes": [
+  {
+   "id": "app:fastapi",
+   "parent": null,
+   "name": "fastapi",
+   "kind": "app",
+   "summary": "A Python web framework for building APIs from standard type hints: it subclasses Starlette for the ASGI layer and uses Pydantic to validate requests and shape responses, and generates an OpenAPI schema and interactive docs for free.",
+   "repo": "fastapi/fastapi"
+  },
+
+  {
+   "id": "fastapi.core",
+   "parent": "app:fastapi",
+   "name": "Application & CLI",
+   "kind": "group",
+   "summary": "The FastAPI application object (a Starlette subclass) that collects routes, builds the middleware stack and serves the OpenAPI schema, plus the command-line entry point.",
+   "detail": "fastapi/applications.py defines the FastAPI class: it holds a root APIRouter, registers path operations through the get/post/put/... decorators, builds its ASGI middleware stack lazily, caches the generated OpenAPI document and mounts the docs routes in setup(). fastapi/cli.py is a thin shim that delegates to the separately installed fastapi-cli package for the `fastapi dev` and `fastapi run` commands. The package __init__ re-exports the public API (FastAPI, APIRouter, Depends, the parameter functions, Request, Response, and the WebSocket types)."
+  },
+  {
+   "id": "fastapi.routing",
+   "parent": "app:fastapi",
+   "name": "Routing & execution",
+   "kind": "group",
+   "summary": "Turns each path operation into an ASGI handler: matches the request, solves its dependencies, calls the endpoint, serializes the result and runs any background tasks.",
+   "detail": "fastapi/routing.py is the engine. APIRouter collects APIRoute and APIWebSocketRoute objects; get_request_handler builds the per-route coroutine that validates parameters, runs the endpoint (sync endpoints are pushed to a threadpool via fastapi/concurrency.py), serializes the response through serialize_response and sends it. It also carries the newer included-router and frontend static-file routing used for mounting sub-apps and single-page apps. fastapi/background.py exposes BackgroundTasks for work that runs after the response, and fastapi/websockets.py re-exports Starlette's WebSocket types."
+  },
+  {
+   "id": "fastapi.di",
+   "parent": "app:fastapi",
+   "name": "Parameters & dependency injection",
+   "kind": "group",
+   "summary": "Reads each endpoint's type-hinted signature into a tree of dependencies and parameters, then resolves that tree per request.",
+   "detail": "fastapi/param_functions.py provides the Query/Path/Header/Cookie/Body/Form/File/Depends/Security markers an endpoint uses in its signature; fastapi/params.py holds the Param model classes behind them. fastapi/dependencies/utils.py is the core: get_dependant analyzes a callable into a Dependant (fastapi/dependencies/models.py), and solve_dependencies walks that tree per request, caching sub-dependencies, handling generator dependencies with an AsyncExitStack and collecting validation errors. The same analysis feeds both request handling and OpenAPI generation."
+  },
+  {
+   "id": "fastapi.io",
+   "parent": "app:fastapi",
+   "name": "Requests, responses & errors",
+   "kind": "group",
+   "summary": "The request and response types, JSON encoding of arbitrary Python objects, upload and form handling, streaming responses, and the exception handlers that turn errors into HTTP responses.",
+   "detail": "fastapi/encoders.py (jsonable_encoder) converts Pydantic models, dataclasses, enums, datetimes and more into JSON-safe primitives — the heart of response serialization. fastapi/responses.py and fastapi/requests.py re-export and extend Starlette types; fastapi/datastructures.py adds UploadFile and typed form/header containers; fastapi/sse.py streams Server-Sent Events. fastapi/exceptions.py defines HTTPException, WebSocketException, RequestValidationError and friends, and fastapi/exception_handlers.py renders them. fastapi/testclient.py, templating.py and staticfiles.py re-export the Starlette test client and template/static helpers."
+  },
+  {
+   "id": "fastapi.openapi",
+   "parent": "app:fastapi",
+   "name": "OpenAPI & docs",
+   "kind": "group",
+   "summary": "Generates the OpenAPI schema from the collected routes and their dependency trees, and serves the Swagger UI and ReDoc pages that render it.",
+   "detail": "fastapi/openapi/utils.py walks every route, derives path, parameter, request-body and response schemas from each route's Dependant and response model, and assembles the full OpenAPI document; fastapi/openapi/models.py is the Pydantic model of the OpenAPI specification it builds. fastapi/openapi/docs.py returns the small HTML pages that load Swagger UI and ReDoc from a CDN and point them at the generated schema. The result is cached on the app and re-served on every docs request."
+  },
+  {
+   "id": "fastapi.security",
+   "parent": "app:fastapi",
+   "name": "Security schemes",
+   "kind": "group",
+   "summary": "Dependency classes for the common authentication schemes — OAuth2, API keys, HTTP Basic/Bearer/Digest and OpenID Connect — that both guard endpoints and describe themselves in OpenAPI.",
+   "detail": "Each class under fastapi/security/ is a callable dependency: used in an endpoint signature it extracts and checks a credential from the request (an Authorization header, a cookie, a query parameter), raising 401/403 on failure, and it also carries the SecurityScheme metadata that fastapi/openapi/utils.py reads to document the scheme. fastapi/security/oauth2.py implements the password and authorization-code flows and the form bodies they expect; api_key.py, http.py and open_id_connect_url.py cover the other schemes; utils.py holds shared header parsing."
+  },
+  {
+   "id": "fastapi.internals",
+   "parent": "app:fastapi",
+   "name": "Internals: compat, middleware & telemetry",
+   "kind": "group",
+   "summary": "The Pydantic-compatibility layer, the middleware wrappers FastAPI re-exports, and the built-in OpenTelemetry instrumentation.",
+   "detail": "fastapi/_compat/ isolates the rest of the code from Pydantic internals — building field validators, running validation and extracting schemas through one shared interface (the codebase now targets Pydantic v2). fastapi/middleware/ re-exports Starlette middleware (CORS, GZip, trusted-host, HTTPS-redirect, WSGI) plus the AsyncExitStack middleware that scopes generator dependencies to the request. fastapi/telemetry/ auto-configures OpenTelemetry tracing, metrics and logs from environment variables at ASGI lifespan startup and exports them over OTLP. fastapi/utils.py holds assorted shared helpers."
+  },
+
+  {
+   "id": "ext.libs",
+   "parent": "ext",
+   "name": "Upstream libraries",
+   "kind": "group",
+   "summary": "The libraries FastAPI is built on and always requires."
+  },
+  {
+   "id": "ext.optional",
+   "parent": "ext",
+   "name": "Optional integrations",
+   "kind": "group",
+   "summary": "Extras pulled in by fastapi[standard] for the dev server, templates, forms, email validation and the test client."
+  },
+  {
+   "id": "ext.net",
+   "parent": "ext",
+   "name": "Network endpoints",
+   "kind": "group",
+   "summary": "The CDN that serves the docs UI assets and the OpenTelemetry collector telemetry is exported to."
+  },
+
+  {
+   "id": "x:starlette",
+   "parent": "ext.libs",
+   "name": "Starlette",
+   "kind": "external",
+   "summary": "The ASGI toolkit FastAPI subclasses: routing, requests/responses, middleware, WebSockets and the test client all build on it.",
+   "tech": ["ASGI", "Python"]
+  },
+  {
+   "id": "x:pydantic",
+   "parent": "ext.libs",
+   "name": "Pydantic",
+   "kind": "external",
+   "summary": "Validates request data and serializes responses from type hints, and supplies the models the OpenAPI schema is built from (v2 required).",
+   "tech": ["Python"]
+  },
+  {
+   "id": "x:anyio",
+   "parent": "ext.libs",
+   "name": "AnyIO",
+   "kind": "external",
+   "summary": "Async compatibility layer used to run sync endpoints and dependencies in a worker threadpool.",
+   "tech": ["Python", "asyncio"]
+  },
+  {
+   "id": "x:opentelemetry",
+   "parent": "ext.libs",
+   "name": "OpenTelemetry API",
+   "kind": "external",
+   "summary": "The tracing, metrics and logs API FastAPI's built-in telemetry records against; the SDK and OTLP exporter come from the opentelemetry extra.",
+   "tech": ["Python", "OpenTelemetry"]
+  },
+
+  {
+   "id": "x:uvicorn",
+   "parent": "ext.optional",
+   "name": "Uvicorn",
+   "kind": "external",
+   "summary": "The ASGI server the fastapi-cli commands launch to actually run the app.",
+   "tech": ["ASGI"]
+  },
+  {
+   "id": "x:fastapi-cli",
+   "parent": "ext.optional",
+   "name": "fastapi-cli",
+   "kind": "external",
+   "summary": "Separate package that implements the `fastapi dev` and `fastapi run` commands that fastapi/cli.py delegates to.",
+   "tech": ["Python"]
+  },
+  {
+   "id": "x:jinja2",
+   "parent": "ext.optional",
+   "name": "Jinja2",
+   "kind": "external",
+   "summary": "Template engine behind Jinja2Templates for server-rendered HTML responses.",
+   "tech": ["Python"]
+  },
+  {
+   "id": "x:multipart",
+   "parent": "ext.optional",
+   "name": "python-multipart",
+   "kind": "external",
+   "summary": "Parses multipart and urlencoded form bodies and file uploads.",
+   "tech": ["Python"]
+  },
+  {
+   "id": "x:httpx",
+   "parent": "ext.optional",
+   "name": "HTTPX",
+   "kind": "external",
+   "summary": "HTTP client that backs TestClient, driving the app in-process during tests.",
+   "tech": ["Python"]
+  },
+  {
+   "id": "x:email-validator",
+   "parent": "ext.optional",
+   "name": "email-validator",
+   "kind": "external",
+   "summary": "Validates EmailStr fields when email types are used in models.",
+   "tech": ["Python"]
+  },
+
+  {
+   "id": "x:docs-cdn",
+   "parent": "ext.net",
+   "name": "Docs UI CDN",
+   "kind": "external",
+   "summary": "jsDelivr CDN that serves the Swagger UI and ReDoc JavaScript and CSS the generated docs pages load by default.",
+   "tech": ["CDN", "HTTP"]
+  },
+  {
+   "id": "x:otlp",
+   "parent": "ext.net",
+   "name": "OTLP collector",
+   "kind": "external",
+   "summary": "OpenTelemetry collector endpoint (OTEL_EXPORTER_OTLP_ENDPOINT) that auto-configured traces, metrics and logs are exported to over HTTP.",
+   "tech": ["OTLP", "HTTP"]
+  }
+ ]
+}

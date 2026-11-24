@@ -1,0 +1,69 @@
+{
+ "title": "MCP Python SDK",
+ "generated": "24 November 2026",
+ "repos": [
+  {
+   "key": "app:python-sdk",
+   "name": "python-sdk",
+   "url": "https://github.com/modelcontextprotocol/python-sdk",
+   "commit": "77001c96f9507be0f4d009b83210a384a5e08bda",
+   "note": "mapped from its source code (modelcontextprotocol/python-sdk main, last commit 2026-11-05)."
+  }
+ ],
+ "regions": [
+  {
+   "id": "app:python-sdk",
+   "rect": [
+    0,
+    0,
+    2600,
+    1000
+   ],
+   "hue": 262,
+   "sat": 40
+  },
+  {
+   "id": "ext",
+   "rect": [
+    0,
+    1100,
+    2600,
+    1420
+   ],
+   "hue": 212,
+   "sat": 14
+  }
+ ],
+ "apps": {
+  "app:python-sdk": {
+   "provenance": "Mapped from source · November 2026"
+  }
+ },
+ "owners": [
+  ["src/mcp/client/auth/", "auth"],
+  ["src/mcp/client/", "client"],
+  ["src/mcp/server/auth/", "auth"],
+  ["src/mcp/server/mcpserver/", "mcpserver"],
+  ["src/mcp/server/fastmcp.py", "mcpserver"],
+  ["src/mcp/server/", "server"],
+  ["src/mcp/shared/auth.py", "auth"],
+  ["src/mcp/shared/auth_utils.py", "auth"],
+  ["src/mcp/shared/", "shared"],
+  ["src/mcp/cli/", "cli"],
+  ["src/mcp/os/", "shared"],
+  ["src/mcp/types/", "types"],
+  ["src/mcp-types/", "types"],
+  ["src/mcp/__init__.py", "shared"]
+ ],
+ "endpoint_fallback": {},
+ "prefix_fallback": {},
+ "area_names": {
+  "client": "Client",
+  "server": "Server core",
+  "mcpserver": "MCPServer (FastMCP)",
+  "auth": "OAuth 2.0 auth",
+  "shared": "Shared runtime",
+  "types": "Protocol types"
+ },
+ "depth": "standard"
+}

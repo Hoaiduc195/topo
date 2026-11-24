@@ -1,0 +1,1805 @@
+{
+  "area": "adapters",
+  "nodes": [
+    {
+      "id": "adapters.cloudflare-workers",
+      "parent": "hono.adapters",
+      "name": "Cloudflare Workers adapter",
+      "kind": "group",
+      "summary": "Built-in and standalone adapter that wires app.fetch to Cloudflare Workers' module-format fetch handler.",
+      "detail": "The built-in version lives in src/adapter/cloudflare-workers and re-exports serveStatic (via KV Assets), upgradeWebSocket (via WebSocketPair), and getConnInfo (reads cf-connecting-ip header). Every symbol is marked deprecated in v4; the matching standalone package at adapters/cloudflare-workers publishes the same surface as @hono/cloudflare-workers without the deprecation. The module-mode entry re-exports serve-static-module.ts, which omits the namespace option; workers in ES module format use env.__STATIC_CONTENT instead of a global KV binding.",
+      "paths": ["src/adapter/cloudflare-workers", "adapters/cloudflare-workers"],
+      "status": "live",
+      "tech": ["TypeScript", "Cloudflare Workers"]
+    },
+    {
+      "id": "adapters.cloudflare-pages",
+      "parent": "hono.adapters",
+      "name": "Cloudflare Pages adapter",
+      "kind": "group",
+      "summary": "Adapter bridging Cloudflare Pages Functions EventContext to app.fetch, with a serveStatic that proxies env.ASSETS.",
+      "detail": "Exposes handle(app) which wraps the Pages PagesFunction contract: it spreads eventContext.env alongside the eventContext itself, then calls app.fetch(request, env, ctx). handleMiddleware lets a single Hono MiddlewareHandler act as a PagesFunction without a full app. The serveStatic simply forwards the request to env.ASSETS.fetch and calls c.notFound() on 404. getConnInfo reads the same cf-connecting-ip header as the Workers adapter. All symbols are deprecated in v4; Cloudflare now recommends Workers with static assets.",
+      "paths": ["src/adapter/cloudflare-pages"],
+      "status": "live",
+      "tech": ["TypeScript", "Cloudflare Pages"]
+    },
+    {
+      "id": "adapters.deno",
+      "parent": "hono.adapters",
+      "name": "Deno adapter",
+      "kind": "group",
+      "summary": "Built-in and standalone adapter providing serve-static, WebSocket upgrade, SSG and conninfo for the Deno runtime.",
+      "detail": "serveStatic wraps the base middleware using Deno.open for content and Deno.lstatSync for directory detection. upgradeWebSocket delegates to Deno.upgradeWebSocket, negotiates the first requested subprotocol, and wires all four socket events including onOpen. getConnInfo reads remoteAddr.hostname, port, and transport from c.env, which Deno.serve supplies as the second argument to fetch. The ssg module provides denoFileSystemModule (Deno.writeFile, Deno.mkdir) and delegates to the shared helper/ssg. The deno.d.ts file supplies ambient declarations for Deno globals when needed. The standalone package at adapters/deno uses .ts extensions in its imports for Deno native resolution.",
+      "paths": ["src/adapter/deno", "adapters/deno"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"]
+    },
+    {
+      "id": "adapters.bun",
+      "parent": "hono.adapters",
+      "name": "Bun adapter",
+      "kind": "group",
+      "summary": "Built-in and standalone adapter providing serve-static, WebSocket upgrade, SSG and conninfo for the Bun runtime.",
+      "detail": "serveStatic uses Bun.file to open content and node:fs/promises stat for directory checks. The WebSocket implementation defers to server.upgrade (from getBunServer) to hand the upgrade to Bun.serve; events are attached through the exported websocket object that Bun.serve's websocket: option receives. createBunWebSocket is a convenience wrapper that bundles upgradeWebSocket and websocket into one object. getBunServer extracts the Bun server from either c.env.server or c.env directly, covering both Bun.serve signatures. getConnInfo calls server.requestIP(c.req.raw). toSSG wraps the shared helper with bunFileSystemModule that uses Bun.write.",
+      "paths": ["src/adapter/bun", "adapters/bun"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"]
+    },
+    {
+      "id": "adapters.aws-lambda",
+      "parent": "hono.adapters",
+      "name": "AWS Lambda adapter",
+      "kind": "group",
+      "summary": "Built-in and standalone adapter converting API Gateway, ALB and Lambda function URL events to Web Request and back.",
+      "detail": "EventProcessor is an abstract class. Its four concrete subclasses (EventV1Processor, EventV2Processor, ALBProcessor, LatticeV2Processor) each implement getPath, getMethod, getQueryString, getHeaders, getCookies and setCookiesToResult. createRequest builds a full Web API Request including base64 body decoding and content-length injection. createResult converts a Response to APIGatewayProxyResult including optional base64 encoding for binary content types. handle() calls getProcessor to dispatch and runs app.fetch. streamHandle() wraps the same flow in awslambda.streamifyResponse for Lambda streaming. getConnInfo branches on requestContext shape (identity.sourceIp for v1, http.sourceIp for v2, x-forwarded-for for ALB).",
+      "paths": ["src/adapter/aws-lambda", "adapters/aws-lambda"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda", "Node.js"]
+    },
+    {
+      "id": "adapters.lambda-edge",
+      "parent": "hono.adapters",
+      "name": "Lambda@Edge adapter",
+      "kind": "group",
+      "summary": "Built-in and standalone adapter mapping CloudFront Lambda@Edge events to app.fetch and results back to CloudFrontResult.",
+      "detail": "handle(app) reads event.Records[0].cf, calls createRequest to build a Web API Request from CloudFrontRequest fields (host from CF headers or config.distributionDomainName), then awaits app.fetch. The result is turned into CloudFrontResult via createResult, which base64-encodes binary content. A special case skips the body field for 204 to prevent CloudFront 502 errors. The callback mechanism allows handlers to pass a CloudFrontRequest or CloudFrontResult through the Lambda callback. polyfills globalThis.crypto from node:crypto on startup. getConnInfo reads event.Records[0].cf.request.clientIp.",
+      "paths": ["src/adapter/lambda-edge", "adapters/lambda-edge"],
+      "status": "live",
+      "tech": ["TypeScript", "Lambda@Edge", "Node.js"]
+    },
+    {
+      "id": "adapters.netlify",
+      "parent": "hono.adapters",
+      "name": "Netlify adapter",
+      "kind": "group",
+      "summary": "Thin adapter wrapping app.fetch for Netlify Edge Functions, with conninfo reading the Netlify context.ip field.",
+      "detail": "handle(app) returns a function matching Netlify Edge Functions' (req, context) signature and forwards directly to app.fetch(req, { context }). getConnInfo reads c.env.context.ip from the Netlify context object that Netlify supplies as the second argument to the edge function. No serve-static is included because Netlify handles static files at the CDN layer. The module re-exports through mod.ts. The standalone package is in adapters/netlify; there is no test directory for the standalone package.",
+      "paths": ["src/adapter/netlify", "adapters/netlify"],
+      "status": "live",
+      "tech": ["TypeScript", "Netlify"]
+    },
+    {
+      "id": "adapters.vercel",
+      "parent": "hono.adapters",
+      "name": "Vercel adapter",
+      "kind": "group",
+      "summary": "Minimal adapter for Vercel Edge and serverless functions, delegating directly to app.fetch with conninfo from x-real-ip.",
+      "detail": "handle(app) returns a function (req: Request) => Response | Promise<Response> and simply calls app.fetch(req) with no env argument. Because Vercel Edge Functions receive a plain Web API Request and no second argument is needed for routing, the adapter is the simplest in the codebase. getConnInfo reads the x-real-ip header that Vercel injects. No serve-static or WebSocket helpers exist for Vercel.",
+      "paths": ["src/adapter/vercel", "adapters/vercel"],
+      "status": "live",
+      "tech": ["TypeScript", "Vercel"]
+    },
+    {
+      "id": "adapters.service-worker",
+      "parent": "hono.adapters",
+      "name": "Service Worker adapter",
+      "kind": "group",
+      "summary": "Adapter registering a Hono app as the fetch event handler inside a browser Service Worker context.",
+      "detail": "fire(app) calls addEventListener('fetch', handle(app, options)) to register on the global scope. handle(app) returns a FetchEvent handler that calls evt.respondWith(app.fetch(evt.request, {}, evt)). If the response is 404 and opts.fetch is provided, it falls through to the original fetch, enabling a network-first cache strategy. HandleOptions.fetch defaults to globalThis.fetch.bind(globalThis) so the global fetch call is correctly bound in the service worker context. No conninfo or serve-static helpers exist for this target.",
+      "paths": ["src/adapter/service-worker", "adapters/service-worker"],
+      "status": "live",
+      "tech": ["TypeScript", "Service Worker API"]
+    },
+
+    {
+      "id": "f:src/adapter/cloudflare-workers/index.ts",
+      "parent": "adapters.cloudflare-workers",
+      "name": "Cloudflare Workers entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports serveStatic, upgradeWebSocket and getConnInfo for the built-in hono/cloudflare-workers subpath.",
+      "detail": "Three-line barrel that re-exports from serve-static-module, websocket, and conninfo. The @deprecated JSDoc comment on the module points users to @hono/cloudflare-workers. The module export uses serve-static-module.ts (ES module mode) rather than serve-static.ts (Service Worker mode) so apps that import hono/cloudflare-workers get the right variant automatically.",
+      "paths": ["src/adapter/cloudflare-workers/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/serve-static.ts",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW serve-static (KV, built-in)",
+      "kind": "module",
+      "summary": "Serves static assets from a Cloudflare KV namespace using the shared serve-static base middleware.",
+      "detail": "serveStatic wraps baseServeStatic with a getContent closure that calls getContentFromKVAsset. The KV namespace falls back from options.namespace to c.env.__STATIC_CONTENT. The manifest falls back from options.manifest to the global __STATIC_CONTENT_MANIFEST string. This variant accepts a namespace option (Service Worker mode); serve-static-module.ts omits it.",
+      "paths": ["src/adapter/cloudflare-workers/serve-static.ts:24-45"],
+      "status": "live",
+      "tech": ["TypeScript", "Cloudflare KV"],
+      "code": "return async function serveStatic(c, next) {\n  const getContent = async (path: string) => {\n    return getContentFromKVAsset(path, {\n      manifest: options.manifest,\n      namespace: options.namespace\n        ? options.namespace\n        : c.env\n          ? c.env.__STATIC_CONTENT\n          : undefined,\n    })\n  }\n  return baseServeStatic({ ...options, getContent })(c, next)\n}"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/serve-static-module.ts",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW serve-static (module mode)",
+      "kind": "module",
+      "summary": "Thin wrapper over serve-static.ts that drops the namespace option for Cloudflare Workers ES module mode.",
+      "detail": "In ES module format Workers, the KV namespace is passed via env.__STATIC_CONTENT rather than a global binding, making the namespace option unnecessary. This wrapper re-exports a narrowed serveStatic that calls the full serve-static implementation with the namespace option omitted.",
+      "paths": ["src/adapter/cloudflare-workers/serve-static-module.ts:6-12"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/utils.ts#getContentFromKVAsset",
+      "parent": "adapters.cloudflare-workers",
+      "name": "getContentFromKVAsset()",
+      "kind": "function",
+      "summary": "Looks up a hashed key in the KV asset manifest and streams the file from a KV namespace.",
+      "detail": "Resolves the manifest (from options.manifest or the global __STATIC_CONTENT_MANIFEST) and the namespace (from options.namespace or the global __STATIC_CONTENT). Looks up path in the manifest to find the content-hashed key, then calls namespace.get(key, { type: 'stream' }) to return a ReadableStream. Returns null when the key is absent or the KV fetch returns null.",
+      "paths": ["src/adapter/cloudflare-workers/utils.ts:17-56"],
+      "status": "live",
+      "tech": ["TypeScript", "Cloudflare KV"],
+      "signature": "getContentFromKVAsset(path: string, options?: KVAssetOptions): Promise<ReadableStream | null>",
+      "code": "export const getContentFromKVAsset = async (\n  path: string,\n  options?: KVAssetOptions\n): Promise<ReadableStream | null> => {\n  // resolve manifest and namespace from options or globals\n  const key = ASSET_MANIFEST[path]\n  if (!key) { return null }\n  const content = await ASSET_NAMESPACE.get(key, { type: 'stream' })\n  if (!content) { return null }\n  return content as unknown as ReadableStream\n}"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/websocket.ts#upgradeWebSocket",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW upgradeWebSocket()",
+      "kind": "function",
+      "summary": "Upgrades a Cloudflare Workers request to a WebSocket using WebSocketPair, omitting the unsupported onOpen event.",
+      "detail": "Uses defineWebSocketHelper with a factory that creates a WebSocketPair, wraps the server socket in WSContext, attaches onClose, onMessage and onError listeners, calls server.accept() (the older ServiceWorker-mode accept), and returns a Response with status 101 and webSocket: client. The Cloudflare Workers runtime does not fire an 'open' event, so the UpgradeWebSocket type omits onOpen.",
+      "paths": ["src/adapter/cloudflare-workers/websocket.ts:8-56"],
+      "status": "live",
+      "tech": ["TypeScript", "Cloudflare Workers WebSocket"],
+      "signature": "upgradeWebSocket: UpgradeWebSocket<WebSocket, any, Omit<WSEvents<WebSocket>, 'onOpen'>>",
+      "code": "export const upgradeWebSocket: UpgradeWebSocket<\n  WebSocket,\n  any,\n  Omit<WSEvents<WebSocket>, 'onOpen'>\n> = defineWebSocketHelper(async (c, events) => {\n  const upgradeHeader = c.req.header('Upgrade')\n  if (upgradeHeader !== 'websocket') { return }\n  const webSocketPair = new WebSocketPair()\n  const client: WebSocket = webSocketPair[0]\n  const server: WebSocket = webSocketPair[1]\n  // ... attach events, server.accept?.(), return 101 response\n})"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/conninfo.ts#getConnInfo",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW getConnInfo()",
+      "kind": "function",
+      "summary": "Returns the client remote address by reading the cf-connecting-ip request header.",
+      "paths": ["src/adapter/cloudflare-workers/conninfo.ts:6-10"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/conninfo.test.ts",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW conninfo test",
+      "kind": "test",
+      "summary": "Verifies that getConnInfo reads the cf-connecting-ip header value as the remote address.",
+      "paths": ["src/adapter/cloudflare-workers/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/websocket.test.ts",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW WebSocket test",
+      "kind": "test",
+      "summary": "Exercises upgradeWebSocket with a mocked WebSocketPair: message, close and error events.",
+      "paths": ["src/adapter/cloudflare-workers/websocket.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/serve-static.test.ts",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW serve-static test",
+      "kind": "test",
+      "summary": "Tests KV asset manifest lookup and streaming from a mock KV namespace.",
+      "paths": ["src/adapter/cloudflare-workers/serve-static.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/cloudflare-workers/utils.test.ts",
+      "parent": "adapters.cloudflare-workers",
+      "name": "CW utils test",
+      "kind": "test",
+      "summary": "Unit tests for getContentFromKVAsset covering manifest parsing and namespace fallback paths.",
+      "paths": ["src/adapter/cloudflare-workers/utils.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/cloudflare-pages/index.ts",
+      "parent": "adapters.cloudflare-pages",
+      "name": "Cloudflare Pages entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports handle, handleMiddleware, serveStatic and getConnInfo for hono/cloudflare-pages.",
+      "detail": "Barrel that re-exports all public symbols from handler.ts and conninfo.ts. The @deprecated JSDoc on the module points users to Workers with static assets. The EventContext type is also exported for use in typed Pages Functions.",
+      "paths": ["src/adapter/cloudflare-pages/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/cloudflare-pages/handler.ts#handle",
+      "parent": "adapters.cloudflare-pages",
+      "name": "Pages handle()",
+      "kind": "function",
+      "summary": "Returns a Cloudflare Pages PagesFunction that calls app.fetch with env plus the EventContext.",
+      "detail": "The returned function spreads eventContext.env and injects eventContext as a binding, then passes waitUntil and passThroughOnException via the ExecutionContext argument. The app receives the full Pages runtime: KV namespaces, Durable Objects, and the ASSETS fetcher are all available in env.",
+      "paths": ["src/adapter/cloudflare-pages/handler.ts:38-52"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "handle<E, S, BasePath>(app: Hono<E, S, BasePath>): PagesFunction<E['Bindings']>",
+      "code": "export const handle =\n  <E extends Env = Env, S extends Schema = BlankSchema, BasePath extends string = '/'>\n  (app: Hono<E, S, BasePath>): PagesFunction<E['Bindings']> =>\n  (eventContext) => {\n    return app.fetch(\n      eventContext.request,\n      { ...eventContext.env, eventContext },\n      {\n        waitUntil: eventContext.waitUntil,\n        passThroughOnException: eventContext.passThroughOnException,\n        props: {},\n      }\n    )\n  }"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-pages/handler.ts#handleMiddleware",
+      "parent": "adapters.cloudflare-pages",
+      "name": "Pages handleMiddleware()",
+      "kind": "function",
+      "summary": "Wraps a Hono MiddlewareHandler as a Cloudflare Pages PagesFunction for use in advanced mode.",
+      "detail": "Creates a Context manually from the Pages ExecutionContext, calls the middleware with a next that proxies to executionCtx.next(), then returns context.res. HTTPException responses are unwrapped before returning.",
+      "paths": ["src/adapter/cloudflare-pages/handler.ts:58-110"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "handleMiddleware<E, P, I>(middleware: MiddlewareHandler): PagesFunction<E['Bindings']>"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-pages/handler.ts#serveStatic",
+      "parent": "adapters.cloudflare-pages",
+      "name": "Pages serveStatic()",
+      "kind": "function",
+      "summary": "Proxies every request to env.ASSETS.fetch for Cloudflare Pages advanced mode static serving.",
+      "paths": ["src/adapter/cloudflare-pages/handler.ts:124-133"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "serveStatic(): MiddlewareHandler"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-pages/conninfo.ts#getConnInfo",
+      "parent": "adapters.cloudflare-pages",
+      "name": "Pages getConnInfo()",
+      "kind": "function",
+      "summary": "Returns the client remote address by reading the cf-connecting-ip request header (same as Workers adapter).",
+      "paths": ["src/adapter/cloudflare-pages/conninfo.ts:23-27"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/cloudflare-pages/conninfo.test.ts",
+      "parent": "adapters.cloudflare-pages",
+      "name": "Pages conninfo test",
+      "kind": "test",
+      "summary": "Verifies that the Pages getConnInfo reads cf-connecting-ip.",
+      "paths": ["src/adapter/cloudflare-pages/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/cloudflare-pages/handler.test.ts",
+      "parent": "adapters.cloudflare-pages",
+      "name": "Pages handler test",
+      "kind": "test",
+      "summary": "Tests handle, handleMiddleware and serveStatic against mock EventContext objects.",
+      "paths": ["src/adapter/cloudflare-pages/handler.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/deno/index.ts",
+      "parent": "adapters.deno",
+      "name": "Deno entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports serveStatic, toSSG, denoFileSystemModule, upgradeWebSocket and getConnInfo for hono/deno.",
+      "detail": "Barrel for the built-in Deno adapter. Five exports cover the full Deno runtime surface: static file serving, Static Site Generation (SSG), WebSocket upgrade, and connection info. The @deprecated JSDoc directs users to @hono/deno.",
+      "paths": ["src/adapter/deno/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/deno/websocket.ts#upgradeWebSocket",
+      "parent": "adapters.deno",
+      "name": "Deno upgradeWebSocket()",
+      "kind": "function",
+      "summary": "Upgrades a Deno request to a WebSocket using Deno.upgradeWebSocket, negotiating the first requested subprotocol.",
+      "detail": "Calls Deno.upgradeWebSocket(c.req.raw, options), wraps the socket in WSContext, then assigns all four event handlers including onOpen (which Cloudflare Workers lacks). The subprotocol negotiation reads the first entry of the Sec-WebSocket-Protocol header to prevent browser rejection when a subprotocol was requested.",
+      "paths": ["src/adapter/deno/websocket.ts:7-41"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"],
+      "signature": "upgradeWebSocket: UpgradeWebSocket<WebSocket, Deno.UpgradeWebSocketOptions>",
+      "code": "export const upgradeWebSocket: UpgradeWebSocket<WebSocket, Deno.UpgradeWebSocketOptions> =\n  defineWebSocketHelper(async (c, events, options) => {\n    if (c.req.header('upgrade') !== 'websocket') { return }\n    const subprotocol = c.req.header('sec-websocket-protocol')?.split(',')[0]?.trim()\n    const { response, socket } = Deno.upgradeWebSocket(c.req.raw, {\n      ...(subprotocol ? { protocol: subprotocol } : {}),\n      ...options,\n    })\n    socket.onopen = (evt) => events.onOpen?.(evt, wsContext)\n    socket.onmessage = (evt) => events.onMessage?.(evt, wsContext)\n    return response\n  })"
+    },
+    {
+      "id": "f:src/adapter/deno/serve-static.ts#serveStatic",
+      "parent": "adapters.deno",
+      "name": "Deno serveStatic()",
+      "kind": "function",
+      "summary": "Serves static files using Deno.open for content streams and Deno.lstatSync for directory detection.",
+      "paths": ["src/adapter/deno/serve-static.ts:11-45"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"],
+      "signature": "serveStatic<E>(options?: ServeStaticOptions<E>): MiddlewareHandler"
+    },
+    {
+      "id": "f:src/adapter/deno/conninfo.ts#getConnInfo",
+      "parent": "adapters.deno",
+      "name": "Deno getConnInfo()",
+      "kind": "function",
+      "summary": "Returns address, port and transport from c.env.remoteAddr, which Deno.serve provides as the fetch second argument.",
+      "paths": ["src/adapter/deno/conninfo.ts:9-18"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/deno/ssg.ts#denoFileSystemModule",
+      "parent": "adapters.deno",
+      "name": "denoFileSystemModule",
+      "kind": "function",
+      "summary": "FileSystemModule implementation using Deno.writeFile and Deno.mkdir for Static Site Generation output.",
+      "paths": ["src/adapter/deno/ssg.ts:10-19"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"],
+      "signature": "denoFileSystemModule: FileSystemModule"
+    },
+    {
+      "id": "f:src/adapter/deno/conninfo.test.ts",
+      "parent": "adapters.deno",
+      "name": "Deno conninfo test",
+      "kind": "test",
+      "summary": "Tests getConnInfo against a mock remoteAddr on the context env.",
+      "paths": ["src/adapter/deno/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/deno/websocket.test.ts",
+      "parent": "adapters.deno",
+      "name": "Deno WebSocket test",
+      "kind": "test",
+      "summary": "Tests the Deno WebSocket upgrade flow with mocked Deno.upgradeWebSocket.",
+      "paths": ["src/adapter/deno/websocket.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/bun/index.ts",
+      "parent": "adapters.bun",
+      "name": "Bun entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports serveStatic, SSG helpers, WebSocket primitives, getConnInfo and getBunServer for hono/bun.",
+      "detail": "Barrel that exposes the complete Bun runtime surface: serve-static (Bun.file based), SSG (bunFileSystemModule and toSSG), createBunWebSocket/upgradeWebSocket/websocket for the WebSocket trio, getConnInfo and getBunServer. The @deprecated JSDoc points to @hono/bun.",
+      "paths": ["src/adapter/bun/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/bun/server.ts#getBunServer",
+      "parent": "adapters.bun",
+      "name": "getBunServer()",
+      "kind": "function",
+      "summary": "Retrieves the Bun server object from the Context env, checking both c.env and c.env.server.",
+      "detail": "Bun.serve calls fetch(request, server) so the server is passed as the second env argument. Some integration patterns wrap it as { server } while others pass the server directly. getBunServer handles both cases by checking 'server' in c.env first.",
+      "paths": ["src/adapter/bun/server.ts:14-15"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "getBunServer<T>(c: Context): T | undefined",
+      "code": "export const getBunServer = <T>(c: Context): T | undefined =>\n  ('server' in c.env ? c.env.server : c.env) as T | undefined"
+    },
+    {
+      "id": "f:src/adapter/bun/websocket.ts#upgradeWebSocket",
+      "parent": "adapters.bun",
+      "name": "Bun upgradeWebSocket()",
+      "kind": "function",
+      "summary": "Triggers Bun.serve's server.upgrade to hand off the connection; attaches events through the websocket handler object.",
+      "detail": "Unlike Deno, Bun requires the upgrade to happen in the fetch handler synchronously via server.upgrade(req, { data }). The data payload carries the WSEvents, url and protocol. The exported websocket object (BunWebSocketHandler) receives open/close/message callbacks from Bun and dispatches them to the stored WSEvents via createWSContext.",
+      "paths": ["src/adapter/bun/websocket.ts:59-85"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "upgradeWebSocket: UpgradeWebSocket<any>"
+    },
+    {
+      "id": "f:src/adapter/bun/websocket.ts#websocket",
+      "parent": "adapters.bun",
+      "name": "Bun websocket handler",
+      "kind": "function",
+      "summary": "BunWebSocketHandler that routes Bun open/close/message lifecycle callbacks into WSEvents handlers.",
+      "paths": ["src/adapter/bun/websocket.ts:110-145"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "websocket: BunWebSocketHandler<BunWebSocketData>"
+    },
+    {
+      "id": "f:src/adapter/bun/websocket.ts#createBunWebSocket",
+      "parent": "adapters.bun",
+      "name": "createBunWebSocket()",
+      "kind": "function",
+      "summary": "Returns an object bundling upgradeWebSocket and websocket for passing directly to Bun.serve.",
+      "paths": ["src/adapter/bun/websocket.ts:151-154"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "createBunWebSocket<T>(): { upgradeWebSocket: UpgradeWebSocket<T>; websocket: BunWebSocketHandler<BunWebSocketData> }"
+    },
+    {
+      "id": "f:src/adapter/bun/conninfo.ts#getConnInfo",
+      "parent": "adapters.bun",
+      "name": "Bun getConnInfo()",
+      "kind": "function",
+      "summary": "Returns IP address, address family and port from server.requestIP(c.req.raw).",
+      "paths": ["src/adapter/bun/conninfo.ts:11-44"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/bun/conninfo.test.ts",
+      "parent": "adapters.bun",
+      "name": "Bun conninfo test",
+      "kind": "test",
+      "summary": "Tests getConnInfo with a mock server.requestIP function on the context env.",
+      "paths": ["src/adapter/bun/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/bun/server.test.ts",
+      "parent": "adapters.bun",
+      "name": "Bun server test",
+      "kind": "test",
+      "summary": "Tests that getBunServer returns the server from both env and env.server shapes.",
+      "paths": ["src/adapter/bun/server.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/bun/websocket.test.ts",
+      "parent": "adapters.bun",
+      "name": "Bun WebSocket test",
+      "kind": "test",
+      "summary": "Tests upgradeWebSocket and the websocket event handler with a mock Bun server.",
+      "paths": ["src/adapter/bun/websocket.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/aws-lambda/index.ts",
+      "parent": "adapters.aws-lambda",
+      "name": "Lambda entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports handle, streamHandle, defaultIsContentTypeBinary, getConnInfo and Lambda types for hono/aws-lambda.",
+      "detail": "Barrel for the built-in AWS Lambda adapter. Exports the two handler factories (handle and streamHandle), the binary content type predicate, getConnInfo, and all event and context type definitions. The @deprecated JSDoc directs users to @hono/aws-lambda.",
+      "paths": ["src/adapter/aws-lambda/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/handler.ts#handle",
+      "parent": "adapters.aws-lambda",
+      "name": "Lambda handle()",
+      "kind": "function",
+      "summary": "Converts an API Gateway / ALB / Lambda function URL event to a Request, calls app.fetch, and converts the Response back.",
+      "detail": "Calls getProcessor to pick a concrete EventProcessor, calls processor.createRequest(event) to build a Web API Request, awaits app.fetch with the event and requestContext in the env argument, then calls processor.createResult to build APIGatewayProxyResult. An isContentTypeBinary option overrides the default binary detection function. Invalid request errors return 400; other errors return 500.",
+      "paths": ["src/adapter/aws-lambda/handler.ts:265-302"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "handle<E, S, BasePath>(app: Hono<E, S, BasePath>, options?: HandleOptions): (event: LambdaEvent, lambdaContext?: LambdaContext) => Promise<APIGatewayProxyResult>",
+      "code": "export const handle = <E extends Env = Env, S extends Schema = {}, BasePath extends string = '/'>(\n  app: Hono<E, S, BasePath>,\n  { isContentTypeBinary }: HandleOptions = { isContentTypeBinary: undefined }\n) => {\n  return async (event, lambdaContext?) => {\n    const processor = getProcessor(event)\n    const req = processor.createRequest(event)\n    const requestContext = getRequestContext(event)\n    const res = await app.fetch(req, { event, requestContext, lambdaContext })\n    return processor.createResult(event, res, { isContentTypeBinary })\n  }\n}"
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/handler.ts#streamHandle",
+      "parent": "adapters.aws-lambda",
+      "name": "Lambda streamHandle()",
+      "kind": "function",
+      "summary": "Wraps app.fetch inside awslambda.streamifyResponse to pipe the Response body to Lambda's streaming API.",
+      "detail": "Uses awslambda.streamifyResponse (a Lambda-specific global) so the function URL can send chunked responses. Builds a Request the same way as handle(), awaits app.fetch, then pipes the ReadableStream to the Lambda responseStream via node:stream/promises pipeline. Sets httpResponseMetadata (status, headers, cookies) through awslambda.HttpResponseStream.from.",
+      "paths": ["src/adapter/aws-lambda/handler.ts:163-218"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "streamHandle<E, S, BasePath>(app: Hono<E, S, BasePath>): Handler"
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/handler.ts#EventProcessor",
+      "parent": "adapters.aws-lambda",
+      "name": "EventProcessor",
+      "kind": "class",
+      "summary": "Abstract base class for the four Lambda event shapes, providing createRequest and createResult with binary encoding logic.",
+      "detail": "Abstract methods getPath, getMethod, getQueryString, getHeaders, getCookies and setCookiesToResult are implemented by four concrete subclasses. createRequest assembles a URL from domainName plus path plus querystring, decodes base64 bodies, and injects content-length. createResult reads the response body, base64-encodes it when the content type is binary or the content-encoding is non-identity, and builds the APIGatewayProxyResult.",
+      "paths": ["src/adapter/aws-lambda/handler.ts:307-433"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "abstract class EventProcessor<E extends LambdaEvent>"
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/handler.ts#getProcessor",
+      "parent": "adapters.aws-lambda",
+      "name": "getProcessor()",
+      "kind": "function",
+      "summary": "Dispatches to the correct EventProcessor subclass based on the event shape.",
+      "detail": "Checks for ALB (requestContext.elb), then V2 (rawPath + requestContext.http), then Lattice (requestContext.serviceArn), falling back to V1Processor. A comment in the code explains why rawPath alone is not enough to identify V2 (a V1 event behind a custom domain base path mapping also has rawPath).",
+      "paths": ["src/adapter/aws-lambda/handler.ts:671-683"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getProcessor(event: LambdaEvent): EventProcessor<LambdaEvent>",
+      "code": "export const getProcessor = (event: LambdaEvent): EventProcessor<LambdaEvent> => {\n  if (isProxyEventALB(event)) { return albProcessor }\n  if (isProxyEventV2(event)) { return v2Processor }\n  if (isLatticeEventV2(event)) { return latticeV2Processor }\n  return v1Processor\n}"
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/handler.ts#defaultIsContentTypeBinary",
+      "parent": "adapters.aws-lambda",
+      "name": "defaultIsContentTypeBinary()",
+      "kind": "function",
+      "summary": "Returns true when a content type requires base64 encoding in a Lambda response body.",
+      "detail": "Returns true for application/vnd.apple.installer+xml and application/vnd.mozilla.xul+xml. Returns false for text/plain, text/html, text/css, text/javascript, text/csv and content types ending in /json or /xml. All other content types are treated as binary.",
+      "paths": ["src/adapter/aws-lambda/handler.ts:713-721"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "defaultIsContentTypeBinary(contentType: string): boolean"
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/conninfo.ts#getConnInfo",
+      "parent": "adapters.aws-lambda",
+      "name": "Lambda getConnInfo()",
+      "kind": "function",
+      "summary": "Extracts the client IP from the Lambda requestContext: identity.sourceIp (v1), http.sourceIp (v2), or x-forwarded-for last entry (ALB).",
+      "paths": ["src/adapter/aws-lambda/conninfo.ts:46-74"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/handler.test.ts",
+      "parent": "adapters.aws-lambda",
+      "name": "Lambda handler test",
+      "kind": "test",
+      "summary": "Comprehensive tests for handle() covering API Gateway v1/v2, ALB, Lattice, binary responses and streaming.",
+      "paths": ["src/adapter/aws-lambda/handler.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/aws-lambda/conninfo.test.ts",
+      "parent": "adapters.aws-lambda",
+      "name": "Lambda conninfo test",
+      "kind": "test",
+      "summary": "Tests getConnInfo for all three requestContext shapes and the x-forwarded-for ALB fallback.",
+      "paths": ["src/adapter/aws-lambda/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/lambda-edge/index.ts",
+      "parent": "adapters.lambda-edge",
+      "name": "Lambda@Edge entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports handle, getConnInfo and CloudFront event types for hono/lambda-edge.",
+      "detail": "Barrel for the built-in Lambda@Edge adapter. Exports handle, getConnInfo, and the five CloudFront type definitions (Callback, CloudFrontConfig, CloudFrontRequest, CloudFrontResponse, CloudFrontEdgeEvent). The @deprecated JSDoc directs users to @hono/lambda-edge.",
+      "paths": ["src/adapter/lambda-edge/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/lambda-edge/handler.ts#handle",
+      "parent": "adapters.lambda-edge",
+      "name": "Lambda@Edge handle()",
+      "kind": "function",
+      "summary": "Converts a CloudFront Lambda@Edge event to a Request, calls app.fetch, and returns a CloudFrontResult.",
+      "detail": "Reads event.Records[0].cf via getCloudFrontRecord (throws TypeError if missing). Passes callback via the env so app handlers can directly modify the CloudFront response without going through app.fetch. createRequest uses the host from CloudFront headers or config.distributionDomainName, decodes base64 bodies, and injects content-length. createResult base64-encodes binary bodies; for status 204 it omits the body field entirely to avoid CloudFront 502.",
+      "paths": ["src/adapter/lambda-edge/handler.ts:133-165"],
+      "status": "live",
+      "tech": ["TypeScript", "Lambda@Edge"],
+      "signature": "handle(app: Hono<any>): (event: CloudFrontEdgeEvent, context?: CloudFrontContext, callback?: Callback) => Promise<CloudFrontResult | CloudFrontRequest>",
+      "code": "export const handle = (app: Hono<any>) => {\n  return async (event, ...args) => {\n    const cf = getCloudFrontRecord(event)\n    const res = await app.fetch(createRequest(cf), {\n      event, context, callback: ..., config: cf.config,\n      request: cf.request, response: cf.response,\n    })\n    return callbackResult ?? createResult(res)\n  }\n}"
+    },
+    {
+      "id": "f:src/adapter/lambda-edge/handler.ts#createBody",
+      "parent": "adapters.lambda-edge",
+      "name": "createBody()",
+      "kind": "function",
+      "summary": "Decodes the CloudFront body field: base64-decodes when encoding is 'base64', returns raw string otherwise, undefined for GET/HEAD.",
+      "paths": ["src/adapter/lambda-edge/handler.ts:243-257"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "createBody(method: string, requestBody: CloudFrontRequest['body']): string | Uint8Array | undefined"
+    },
+    {
+      "id": "f:src/adapter/lambda-edge/conninfo.ts#getConnInfo",
+      "parent": "adapters.lambda-edge",
+      "name": "Lambda@Edge getConnInfo()",
+      "kind": "function",
+      "summary": "Returns the client IP from the CloudFrontRequest clientIp field stored in c.env.event.",
+      "paths": ["src/adapter/lambda-edge/conninfo.ts:14-18"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/lambda-edge/handler.test.ts",
+      "parent": "adapters.lambda-edge",
+      "name": "Lambda@Edge handler test",
+      "kind": "test",
+      "summary": "Tests the CloudFront event handler including the 204 body-omission fix and base64 body encoding.",
+      "paths": ["src/adapter/lambda-edge/handler.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/lambda-edge/conninfo.test.ts",
+      "parent": "adapters.lambda-edge",
+      "name": "Lambda@Edge conninfo test",
+      "kind": "test",
+      "summary": "Tests that getConnInfo reads clientIp from the event Records[0].cf.request.",
+      "paths": ["src/adapter/lambda-edge/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/netlify/index.ts",
+      "parent": "adapters.netlify",
+      "name": "Netlify entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports handle and getConnInfo from mod.ts for hono/netlify.",
+      "detail": "Single-line barrel (`export * from './mod'`) that re-exports mod.ts, which re-exports handle from handler.ts and getConnInfo from conninfo.ts. The @deprecated JSDoc on the module points users to @hono/netlify.",
+      "paths": ["src/adapter/netlify/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/netlify/handler.ts#handle",
+      "parent": "adapters.netlify",
+      "name": "Netlify handle()",
+      "kind": "function",
+      "summary": "Returns a Netlify Edge Function handler (req, context) that forwards to app.fetch with context in the env.",
+      "paths": ["src/adapter/netlify/handler.ts:7-13"],
+      "status": "live",
+      "tech": ["TypeScript", "Netlify"],
+      "signature": "handle(app: Hono): (req: Request, context: any) => Response | Promise<Response>"
+    },
+    {
+      "id": "f:src/adapter/netlify/conninfo.ts#getConnInfo",
+      "parent": "adapters.netlify",
+      "name": "Netlify getConnInfo()",
+      "kind": "function",
+      "summary": "Returns the client IP from the Netlify context.ip field stored in c.env.context.",
+      "paths": ["src/adapter/netlify/conninfo.ts:54-58"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/netlify/conninfo.test.ts",
+      "parent": "adapters.netlify",
+      "name": "Netlify conninfo test",
+      "kind": "test",
+      "summary": "Tests getConnInfo with a mock Netlify context object on c.env.",
+      "paths": ["src/adapter/netlify/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/vercel/index.ts",
+      "parent": "adapters.vercel",
+      "name": "Vercel entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports handle and getConnInfo for hono/vercel.",
+      "detail": "Barrel for the built-in Vercel adapter. Exports only handle and getConnInfo; there is no serve-static or WebSocket support because Vercel handles those at the platform level. The @deprecated JSDoc points users to @hono/vercel.",
+      "paths": ["src/adapter/vercel/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/vercel/handler.ts#handle",
+      "parent": "adapters.vercel",
+      "name": "Vercel handle()",
+      "kind": "function",
+      "summary": "Returns a Vercel Edge Function handler (req) that calls app.fetch with no env argument.",
+      "paths": ["src/adapter/vercel/handler.ts:4-11"],
+      "status": "live",
+      "tech": ["TypeScript", "Vercel"],
+      "signature": "handle(app: Hono): (req: Request) => Response | Promise<Response>",
+      "code": "export const handle =\n  (app: Hono<any, any, any>) =>\n  (req: Request): Response | Promise<Response> => {\n    return app.fetch(req)\n  }"
+    },
+    {
+      "id": "f:src/adapter/vercel/conninfo.ts#getConnInfo",
+      "parent": "adapters.vercel",
+      "name": "Vercel getConnInfo()",
+      "kind": "function",
+      "summary": "Returns the client remote address from the x-real-ip header injected by Vercel's proxy.",
+      "paths": ["src/adapter/vercel/conninfo.ts:3-11"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:src/adapter/vercel/conninfo.test.ts",
+      "parent": "adapters.vercel",
+      "name": "Vercel conninfo test",
+      "kind": "test",
+      "summary": "Tests that getConnInfo reads the x-real-ip header.",
+      "paths": ["src/adapter/vercel/conninfo.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/vercel/handler.test.ts",
+      "parent": "adapters.vercel",
+      "name": "Vercel handler test",
+      "kind": "test",
+      "summary": "Tests that handle delegates the request to app.fetch.",
+      "paths": ["src/adapter/vercel/handler.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/adapter/service-worker/index.ts",
+      "parent": "adapters.service-worker",
+      "name": "Service Worker entry (built-in)",
+      "kind": "module",
+      "summary": "Re-exports handle and fire for hono/service-worker.",
+      "detail": "Barrel that imports handle from handler.ts and declares the fire convenience wrapper in the same file. fire(app) is the top-level entry point: it calls addEventListener('fetch', handle(app, options)). The @deprecated JSDoc points users to @hono/service-worker.",
+      "paths": ["src/adapter/service-worker/index.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+    {
+      "id": "f:src/adapter/service-worker/index.ts#fire",
+      "parent": "adapters.service-worker",
+      "name": "fire()",
+      "kind": "function",
+      "summary": "Registers the Hono app as the global fetch event listener in a Service Worker.",
+      "detail": "Calls addEventListener('fetch', handle(app, options)) on the global scope. This is the primary entry point: users call fire(app) at the top level of their service worker script. The @ts-expect-error suppresses TypeScript's incomplete ServiceWorker type definitions.",
+      "paths": ["src/adapter/service-worker/index.ts:32-38"],
+      "status": "live",
+      "tech": ["TypeScript", "Service Worker API"],
+      "signature": "fire<E, S, BasePath>(app: Hono<E, S, BasePath>, options?: HandleOptions): void",
+      "code": "const fire = <E extends Env, S extends Schema, BasePath extends string>(\n  app: Hono<E, S, BasePath>,\n  options?: HandleOptions\n): void => {\n  // @ts-expect-error addEventListener is not typed well in ServiceWorker-like contexts\n  addEventListener('fetch', handle(app, options))\n}"
+    },
+    {
+      "id": "f:src/adapter/service-worker/handler.ts#handle",
+      "parent": "adapters.service-worker",
+      "name": "SW handle()",
+      "kind": "function",
+      "summary": "Returns a FetchEvent handler that calls evt.respondWith(app.fetch(evt.request)) with 404 passthrough.",
+      "detail": "The 404 passthrough forwards to opts.fetch (defaults to globalThis.fetch.bind(globalThis)) when the app returns a 404 response, enabling a network-first strategy. The event is passed as ExecutionContext so app handlers can call evt.waitUntil.",
+      "paths": ["src/adapter/service-worker/handler.ts:22-41"],
+      "status": "live",
+      "tech": ["TypeScript", "Service Worker API"],
+      "signature": "handle<E, S, BasePath>(app: Hono<E, S, BasePath>, opts?: HandleOptions): Handler"
+    },
+    {
+      "id": "f:src/adapter/service-worker/handler.test.ts",
+      "parent": "adapters.service-worker",
+      "name": "Service Worker handler test",
+      "kind": "test",
+      "summary": "Tests handle and fire with mocked FetchEvent, verifying 404 passthrough and normal response paths.",
+      "paths": ["src/adapter/service-worker/handler.test.ts:1"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "d:adapters/aws-lambda",
+      "parent": "adapters.aws-lambda",
+      "name": "@hono/aws-lambda package",
+      "kind": "module",
+      "summary": "Standalone npm package publishing the same Lambda adapter surface without the v4 deprecation.",
+      "detail": "Package name @hono/aws-lambda, version 1.0.2. The source under adapters/aws-lambda/src mirrors src/adapter/aws-lambda exactly, importing from 'hono' as a peer dependency instead of using relative paths. The test directory (adapters/aws-lambda/test) includes integration tests with real event fixtures, a stream backpressure test, and WebSocket tests. Build uses vp pack (vite-plugin-packer) targeting ES module output. Peer dependency requires hono >=4.13.9 or ^5.0.0-0.",
+      "paths": ["adapters/aws-lambda"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "facts": [
+        "Package: @hono/aws-lambda@1.0.2",
+        "Peer: hono >=4.13.9 || ^5.0.0-0",
+        "Build: vp pack (vite-plugin-packer)"
+      ]
+    },
+    {
+      "id": "d:adapters/bun",
+      "parent": "adapters.bun",
+      "name": "@hono/bun package",
+      "kind": "module",
+      "summary": "Standalone npm package for the Bun adapter: same surface as hono/bun but published independently.",
+      "detail": "Package name @hono/bun, version 1.0.1. Source in adapters/bun/src mirrors src/adapter/bun, importing from 'hono' peer. Test script uses bun test directly (not vp test). Exports only the root index via ESM.",
+      "paths": ["adapters/bun"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "facts": [
+        "Package: @hono/bun@1.0.1",
+        "Test runner: bun test (not vitest)"
+      ]
+    },
+    {
+      "id": "d:adapters/cloudflare-workers",
+      "parent": "adapters.cloudflare-workers",
+      "name": "@hono/cloudflare-workers package",
+      "kind": "module",
+      "summary": "Standalone npm package for the Cloudflare Workers adapter, published as @hono/cloudflare-workers.",
+      "detail": "Package name @hono/cloudflare-workers, version 1.0.1. Peer dependencies include wrangler 4.107.0 as a dev dependency and @types/ws for websocket types. Source mirrors src/adapter/cloudflare-workers. The module-format serve-static is the only export; the Service Worker format is not re-exported from the standalone package entry.",
+      "paths": ["adapters/cloudflare-workers"],
+      "status": "live",
+      "tech": ["TypeScript", "Cloudflare Workers"],
+      "facts": [
+        "Package: @hono/cloudflare-workers@1.0.1",
+        "Dev deps: wrangler@4.107.0, ws@^8.21.0"
+      ]
+    },
+    {
+      "id": "d:adapters/deno",
+      "parent": "adapters.deno",
+      "name": "@hono/deno package",
+      "kind": "module",
+      "summary": "Standalone package for the Deno adapter, using .ts import extensions for Deno native resolution.",
+      "detail": "Unlike the built-in src/adapter/deno where imports omit extensions, adapters/deno/src/index.ts uses .ts extensions (e.g. from './serve-static.ts') for compatibility with Deno's native import resolution. Has a deno.json alongside package.json for JSR compatibility.",
+      "paths": ["adapters/deno"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"]
+    },
+    {
+      "id": "d:adapters/lambda-edge",
+      "parent": "adapters.lambda-edge",
+      "name": "@hono/lambda-edge package",
+      "kind": "module",
+      "summary": "Standalone npm package for the Lambda@Edge adapter without the v4 deprecation.",
+      "detail": "Source in adapters/lambda-edge/src mirrors src/adapter/lambda-edge, importing from 'hono' and 'hono/utils/encode' as peer dependencies. Includes one test file (adapters/lambda-edge/test/index.test.ts). Build uses vp pack.",
+      "paths": ["adapters/lambda-edge"],
+      "status": "live",
+      "tech": ["TypeScript", "Lambda@Edge"]
+    },
+    {
+      "id": "d:adapters/netlify",
+      "parent": "adapters.netlify",
+      "name": "@hono/netlify package",
+      "kind": "module",
+      "summary": "Standalone npm package for the Netlify adapter; has a deno.json alongside package.json.",
+      "detail": "Source in adapters/netlify/src mirrors src/adapter/netlify, importing from 'hono' as peer. Has a deno.json for JSR publishing. No test directory is present in this standalone package.",
+      "paths": ["adapters/netlify"],
+      "status": "live",
+      "tech": ["TypeScript", "Netlify"]
+    },
+    {
+      "id": "d:adapters/service-worker",
+      "parent": "adapters.service-worker",
+      "name": "@hono/service-worker package",
+      "kind": "module",
+      "summary": "Standalone npm package for the Service Worker adapter; no test directory in this package.",
+      "detail": "Source in adapters/service-worker/src mirrors src/adapter/service-worker, importing from 'hono' and 'hono/types'. No test directory. Build uses vp pack. The standalone version removes the @deprecated annotations present in the built-in.",
+      "paths": ["adapters/service-worker"],
+      "status": "live",
+      "tech": ["TypeScript", "Service Worker API"]
+    },
+    {
+      "id": "d:adapters/vercel",
+      "parent": "adapters.vercel",
+      "name": "@hono/vercel package",
+      "kind": "module",
+      "summary": "Standalone npm package for the Vercel adapter, identical surface to hono/vercel without deprecation.",
+      "detail": "Source in adapters/vercel/src mirrors src/adapter/vercel, importing from 'hono' and 'hono/conninfo' as peers. Exports handle and getConnInfo without deprecation annotations. Build uses vp pack.",
+      "paths": ["adapters/vercel"],
+      "status": "live",
+      "tech": ["TypeScript", "Vercel"]
+    },
+
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#streamHandle",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg streamHandle()",
+      "kind": "function",
+      "summary": "Standalone-package streamHandle: wraps app.fetch in awslambda.streamifyResponse to pipe Response to Lambda streaming API.",
+      "detail": "Identical in logic to the built-in src/adapter/aws-lambda version but imports from 'hono' peer instead of relative paths. Calls getProcessor, buildRequest, app.fetch, then pipes the ReadableStream body through node:stream/promises pipeline into the Lambda responseStream, writing httpResponseMetadata via awslambda.HttpResponseStream.from.",
+      "paths": ["adapters/aws-lambda/src/handler.ts:142"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "streamHandle<E, S, BasePath>(app: Hono<E, S, BasePath>): Handler",
+      "code": "export const streamHandle = <E extends Env = Env, S extends Schema = {}, BasePath extends string = '/' >(\n  app: Hono<E, S, BasePath>\n): Handler => {\n  // @ts-expect-error awslambda is not a standard API\n  return awslambda.streamifyResponse(\n    async (event, responseStream, context) => {\n      const processor = getProcessor(event)\n      const req = processor.createRequest(event)\n      const res = await app.fetch(req, { event, requestContext: getRequestContext(event), context })\n      // @ts-expect-error awslambda is not a standard API\n      responseStream = awslambda.HttpResponseStream.from(responseStream, httpResponseMetadata)\n      if (res.body) { await streamToNodeStream(res.body.getReader(), responseStream) }\n    }\n  )\n}"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#handle",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg handle()",
+      "kind": "function",
+      "summary": "Standalone-package handle: converts API Gateway / ALB / Lambda function URL events to Request, calls app.fetch, converts Response back.",
+      "detail": "Same logic as the built-in version but sourced from the @hono/aws-lambda package. Calls getProcessor to pick a concrete EventProcessor, calls processor.createRequest(event) to build a Web API Request, awaits app.fetch, then calls processor.createResult. Errors from createRequest return 400 for TypeError and 500 otherwise.",
+      "paths": ["adapters/aws-lambda/src/handler.ts:243"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "handle<E, S, BasePath>(app: Hono<E, S, BasePath>, options?: HandleOptions): (event: LambdaEvent, lambdaContext?: LambdaContext) => Promise<APIGatewayProxyResult>"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg EventProcessor",
+      "kind": "class",
+      "summary": "Abstract base class (standalone package) for the four Lambda event shapes, providing createRequest and createResult.",
+      "detail": "Abstract methods getPath, getMethod, getQueryString, getHeaders, getCookies and setCookiesToResult are overridden by four concrete subclasses. createRequest assembles a URL, decodes base64 bodies, injects content-length. createResult reads the Response body, base64-encodes binary content, and builds APIGatewayProxyResult.",
+      "paths": ["adapters/aws-lambda/src/handler.ts:282"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "abstract class EventProcessor<E extends LambdaEvent>"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#EventV2Processor",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg EventV2Processor",
+      "kind": "class",
+      "summary": "Standalone EventV2Processor: handles API Gateway HTTP API (v2) events using rawPath and requestContext.http.",
+      "detail": "Extends EventProcessor. getPath returns rawPath, getMethod reads requestContext.http.method, getCookies merges the cookies array into a Cookie header, setCookiesToResult writes cookies to the result.cookies array (HTTP API v2 format).",
+      "paths": ["adapters/aws-lambda/src/handler.ts:410"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "class EventV2Processor extends EventProcessor<APIGatewayProxyEventV2>"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#EventV1Processor",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg EventV1Processor",
+      "kind": "class",
+      "summary": "Standalone EventV1Processor: handles API Gateway REST API (v1) events, re-encoding query params to preserve URL encoding.",
+      "detail": "Extends EventProcessor. getPath returns event.path, getMethod returns httpMethod, getQueryString re-encodes multiValueQueryStringParameters or queryStringParameters to preserve URL encoding that API Gateway decodes. setCookiesToResult writes set-cookie to multiValueHeaders.",
+      "paths": ["adapters/aws-lambda/src/handler.ts:449"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "class EventV1Processor extends EventProcessor<APIGatewayProxyEvent>"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#ALBProcessor",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg ALBProcessor",
+      "kind": "class",
+      "summary": "Standalone ALBProcessor: handles Application Load Balancer events, supporting both single-value and multi-value headers.",
+      "detail": "Extends EventProcessor. Handles both single-value and multi-value headers (ALB passes multiValueHeaders when that feature is enabled on the target group). setCookiesToResult writes cookies to result.multiValueHeaders['set-cookie'] when multi-value is active, otherwise result.headers['set-cookie'].",
+      "paths": ["adapters/aws-lambda/src/handler.ts:509"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "class ALBProcessor extends EventProcessor<ALBProxyEvent>"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#LatticeV2Processor",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg LatticeV2Processor",
+      "kind": "class",
+      "summary": "Standalone LatticeV2Processor: handles VPC Lattice v2 events (Lambda Function URLs via service network).",
+      "detail": "Extends EventProcessor. getPath returns event.path, getMethod returns event.method, getQueryString always returns empty string (Lattice v2 does not carry a query string field), and getHeaders iterates the multi-value headers map. setCookiesToResult spreads cookies into result.headers.",
+      "paths": ["adapters/aws-lambda/src/handler.ts:590"],
+      "status": "live",
+      "tech": ["TypeScript", "AWS Lambda"],
+      "signature": "class LatticeV2Processor extends EventProcessor<LatticeProxyEventV2>"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/handler.ts#getProcessor",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg getProcessor()",
+      "kind": "function",
+      "summary": "Standalone getProcessor: dispatches to the correct EventProcessor subclass based on the event shape.",
+      "detail": "Checks for ALB (requestContext.elb), then V2 (rawPath + requestContext.http), then Lattice (requestContext.serviceArn), falling back to V1Processor. Mirrors the built-in handler exactly.",
+      "paths": ["adapters/aws-lambda/src/handler.ts:631"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getProcessor(event: LambdaEvent): EventProcessor<LambdaEvent>",
+      "code": "export const getProcessor = (event: LambdaEvent): EventProcessor<LambdaEvent> => {\n  if (isProxyEventALB(event)) { return albProcessor }\n  if (isProxyEventV2(event)) { return v2Processor }\n  if (isLatticeEventV2(event)) { return latticeV2Processor }\n  return v1Processor\n}"
+    },
+    {
+      "id": "f:adapters/aws-lambda/src/conninfo.ts#getConnInfo",
+      "parent": "adapters.aws-lambda",
+      "name": "pkg Lambda getConnInfo()",
+      "kind": "function",
+      "summary": "Standalone Lambda getConnInfo: extracts client IP from requestContext (v1 identity.sourceIp, v2 http.sourceIp, ALB x-forwarded-for).",
+      "paths": ["adapters/aws-lambda/src/conninfo.ts:45"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "getConnInfo: GetConnInfo"
+    },
+    {
+      "id": "f:adapters/bun/src/serve-static.ts#serveStatic",
+      "parent": "adapters.bun",
+      "name": "pkg Bun serveStatic()",
+      "kind": "function",
+      "summary": "Standalone Bun serveStatic: serves files via Bun.file for content and node:fs/promises stat for directory detection.",
+      "detail": "Uses Bun.file(path) to get a file object (checks existence via file.exists()), and node:fs/promises stat for isDirectory detection. Delegates to baseServeStatic from hono/serve-static with the runtime-specific getContent and isDir callbacks.",
+      "paths": ["adapters/bun/src/serve-static.ts:8"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "serveStatic<E extends Env>(options?: ServeStaticOptions<E>): MiddlewareHandler",
+      "code": "export const serveStatic = <E extends Env = Env>(\n  options: ServeStaticOptions<E> = {}\n): MiddlewareHandler => {\n  return async function serveStatic(c, next) {\n    const getContent = async (path: string) => {\n      // @ts-ignore\n      const file = Bun.file(path)\n      return (await file.exists()) ? file : null\n    }\n    return baseServeStatic({ ...options, getContent, join, isDir })(c, next)\n  }\n}"
+    },
+    {
+      "id": "f:adapters/bun/src/server.ts#getBunServer",
+      "parent": "adapters.bun",
+      "name": "pkg getBunServer()",
+      "kind": "function",
+      "summary": "Standalone getBunServer: retrieves the Bun server object from Context env, checking both c.env and c.env.server.",
+      "paths": ["adapters/bun/src/server.ts:13"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "getBunServer<T>(c: Context): T | undefined"
+    },
+    {
+      "id": "f:adapters/bun/src/websocket.ts#upgradeWebSocket",
+      "parent": "adapters.bun",
+      "name": "pkg Bun upgradeWebSocket()",
+      "kind": "function",
+      "summary": "Standalone Bun upgradeWebSocket: triggers server.upgrade synchronously to hand the connection to Bun.serve's WebSocket handler.",
+      "detail": "Calls getBunServer then server.upgrade<BunWebSocketData>(req, { data: { events, url, protocol } }). The data payload stores WSEvents, URL and negotiated subprotocol for use in the websocket handler callbacks. Returns an empty 101 Response on successful upgrade.",
+      "paths": ["adapters/bun/src/websocket.ts:68"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "upgradeWebSocket: UpgradeWebSocket<any>"
+    },
+    {
+      "id": "f:adapters/bun/src/websocket.ts#createBunWebSocket",
+      "parent": "adapters.bun",
+      "name": "pkg createBunWebSocket()",
+      "kind": "function",
+      "summary": "Standalone createBunWebSocket: convenience wrapper returning upgradeWebSocket and websocket bundled for Bun.serve.",
+      "paths": ["adapters/bun/src/websocket.ts:137"],
+      "status": "live",
+      "tech": ["TypeScript", "Bun"],
+      "signature": "createBunWebSocket<T>(): { upgradeWebSocket: UpgradeWebSocket<T>; websocket: BunWebSocketHandler<BunWebSocketData> }"
+    },
+    {
+      "id": "f:adapters/deno/src/serve-static.ts#serveStatic",
+      "parent": "adapters.deno",
+      "name": "pkg Deno serveStatic()",
+      "kind": "function",
+      "summary": "Standalone Deno serveStatic: serves files using Deno.open for streams and Deno.lstatSync for directory detection.",
+      "detail": "Uses Deno.open(path).readable for content streams and Deno.lstatSync(path).isDirectory for directory detection. Delegates to baseServeStatic from hono/serve-static. Uses .ts extension imports for Deno native resolution, unlike the built-in src/adapter/deno version.",
+      "paths": ["adapters/deno/src/serve-static.ts:8"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"],
+      "signature": "serveStatic<E extends Env>(options?: ServeStaticOptions<E>): MiddlewareHandler",
+      "code": "export const serveStatic = <E extends Env = Env>(\n  options: ServeStaticOptions<E> = {}\n): MiddlewareHandler => {\n  return async function serveStatic(c, next) {\n    const getContent = async (path: string) => {\n      try {\n        if (isDir(path)) { return null }\n        const file = await open(path)\n        return file.readable\n      } catch (e) { return null }\n    }\n    return baseServeStatic({ ...options, getContent, join, isDir })(c, next)\n  }\n}"
+    },
+    {
+      "id": "f:adapters/deno/src/websocket.ts#upgradeWebSocket",
+      "parent": "adapters.deno",
+      "name": "pkg Deno upgradeWebSocket()",
+      "kind": "function",
+      "summary": "Standalone Deno upgradeWebSocket: delegates to Deno.upgradeWebSocket, negotiating the first requested subprotocol.",
+      "detail": "Calls Deno.upgradeWebSocket(c.req.raw, options), assigns all four socket event handlers (onopen, onmessage, onclose, onerror) including onOpen which Cloudflare Workers lacks. The subprotocol negotiation prevents browser rejection when a protocol was requested.",
+      "paths": ["adapters/deno/src/websocket.ts:4"],
+      "status": "live",
+      "tech": ["TypeScript", "Deno"],
+      "signature": "upgradeWebSocket: UpgradeWebSocket<WebSocket, Deno.UpgradeWebSocketOptions>",
+      "code": "export const upgradeWebSocket: UpgradeWebSocket<WebSocket, Deno.UpgradeWebSocketOptions> =\n  defineWebSocketHelper(async (c, events, options) => {\n    if (c.req.header('upgrade') !== 'websocket') { return }\n    const subprotocol = c.req.header('sec-websocket-protocol')?.split(',')[0]?.trim()\n    const { response, socket } = Deno.upgradeWebSocket(c.req.raw, {\n      ...(subprotocol ? { protocol: subprotocol } : {}), ...options,\n    })\n    socket.onopen = (evt) => events.onOpen?.(evt, wsContext)\n    socket.onmessage = (evt) => events.onMessage?.(evt, wsContext)\n    return response\n  })"
+    },
+    {
+      "id": "f:adapters/cloudflare-workers/src/serve-static.ts#serveStatic",
+      "parent": "adapters.cloudflare-workers",
+      "name": "pkg CW serveStatic()",
+      "kind": "function",
+      "summary": "Standalone Cloudflare Workers serveStatic: looks up assets from a KV namespace using the KV asset manifest.",
+      "detail": "Wraps baseServeStatic with a getContent closure that calls getContentFromKVAsset. The KV namespace falls back from options.namespace to c.env.__STATIC_CONTENT. Marked @deprecated because Cloudflare Static Assets is now preferred.",
+      "paths": ["adapters/cloudflare-workers/src/serve-static.ts:21"],
+      "status": "live",
+      "tech": ["TypeScript", "Cloudflare KV"],
+      "signature": "serveStatic<E extends Env>(options?: ServeStaticOptions<E>): MiddlewareHandler"
+    },
+    {
+      "id": "f:adapters/netlify/src/handler.ts#handle",
+      "parent": "adapters.netlify",
+      "name": "pkg Netlify handle()",
+      "kind": "function",
+      "summary": "Standalone Netlify handle: returns a Netlify Edge Function handler (req, context) that forwards to app.fetch.",
+      "paths": ["adapters/netlify/src/handler.ts:4"],
+      "status": "live",
+      "tech": ["TypeScript", "Netlify"],
+      "signature": "handle(app: Hono<any, any>): (req: Request, context: any) => Response | Promise<Response>",
+      "code": "export const handle = (\n  app: Hono<any, any>\n): ((req: Request, context: any) => Response | Promise<Response>) => {\n  return (req: Request, context: any) => {\n    return app.fetch(req, { context })\n  }\n}"
+    },
+    {
+      "id": "f:adapters/vercel/src/handler.ts#handle",
+      "parent": "adapters.vercel",
+      "name": "pkg Vercel handle()",
+      "kind": "function",
+      "summary": "Standalone Vercel handle: returns a Vercel Edge Function handler (req) that calls app.fetch with no env argument.",
+      "paths": ["adapters/vercel/src/handler.ts:4"],
+      "status": "live",
+      "tech": ["TypeScript", "Vercel"],
+      "signature": "handle(app: Hono<any, any, any>): (req: Request) => Response | Promise<Response>",
+      "code": "export const handle =\n  (app: Hono<any, any, any>) =>\n  (req: Request): Response | Promise<Response> => {\n    return app.fetch(req)\n  }"
+    },
+    {
+      "id": "f:adapters/service-worker/src/handler.ts#handle",
+      "parent": "adapters.service-worker",
+      "name": "pkg SW handle()",
+      "kind": "function",
+      "summary": "Standalone Service Worker handle: returns a FetchEvent handler calling evt.respondWith(app.fetch) with 404 passthrough.",
+      "detail": "Identical to the built-in src/adapter/service-worker/handler.ts version. The handler calls evt.respondWith(app.fetch(evt.request, {}, evt)). If response is 404 and opts.fetch is provided, falls through to the original fetch for a network-first cache strategy.",
+      "paths": ["adapters/service-worker/src/handler.ts:18"],
+      "status": "live",
+      "tech": ["TypeScript", "Service Worker API"],
+      "signature": "handle<E, S, BasePath>(app: Hono<E, S, BasePath>, opts?: HandleOptions): Handler"
+    },
+    {
+      "id": "f:adapters/lambda-edge/src/handler.ts#handle",
+      "parent": "adapters.lambda-edge",
+      "name": "pkg Lambda@Edge handle()",
+      "kind": "function",
+      "summary": "Standalone Lambda@Edge handle: converts a CloudFront event to a Request, calls app.fetch, returns CloudFrontResult.",
+      "detail": "Reads event.Records[0].cf via getCloudFrontRecord, builds a Web API Request via createRequest (using host from CloudFront headers or config.distributionDomainName), awaits app.fetch with the full CF context, then returns callbackResult or createResult(res). Omits body for 204 to prevent CloudFront 502.",
+      "paths": ["adapters/lambda-edge/src/handler.ts:115"],
+      "status": "live",
+      "tech": ["TypeScript", "Lambda@Edge"],
+      "signature": "handle(app: Hono<any>): (event: CloudFrontEdgeEvent, context?: CloudFrontContext, callback?: Callback) => Promise<CloudFrontResult | CloudFrontRequest>"
+    }
+  ],
+  "edges": [
+    {
+      "from": "f:src/adapter/cloudflare-workers/serve-static.ts",
+      "to": "f:src/adapter/cloudflare-workers/utils.ts#getContentFromKVAsset",
+      "kind": "calls",
+      "label": "fetches asset content from KV",
+      "evidence": "src/adapter/cloudflare-workers/serve-static.ts:29"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-workers/serve-static-module.ts",
+      "to": "f:src/adapter/cloudflare-workers/serve-static.ts",
+      "kind": "calls",
+      "label": "delegates without namespace option",
+      "evidence": "src/adapter/cloudflare-workers/serve-static-module.ts:7-10"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-workers/websocket.ts#upgradeWebSocket",
+      "to": "f:src/helper/websocket/index.ts",
+      "kind": "calls",
+      "label": "uses defineWebSocketHelper and WSContext",
+      "evidence": "src/adapter/cloudflare-workers/websocket.ts:1-2"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-workers/conninfo.ts#getConnInfo",
+      "to": "f:src/helper/conninfo/index.ts",
+      "kind": "reads",
+      "label": "implements GetConnInfo interface",
+      "evidence": "src/adapter/cloudflare-workers/conninfo.ts:1"
+    },
+    {
+      "from": "adapters.cloudflare-workers",
+      "to": "x:cloudflare-workers",
+      "kind": "calls",
+      "label": "runs on Cloudflare Workers runtime",
+      "evidence": "src/adapter/cloudflare-workers/index.ts:1"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-workers/conninfo.test.ts",
+      "to": "f:src/adapter/cloudflare-workers/conninfo.ts#getConnInfo",
+      "kind": "tests",
+      "label": "tests cf-connecting-ip header extraction",
+      "evidence": "src/adapter/cloudflare-workers/conninfo.test.ts:3"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-workers/websocket.test.ts",
+      "to": "f:src/adapter/cloudflare-workers/websocket.ts#upgradeWebSocket",
+      "kind": "tests",
+      "label": "tests message, close and error events",
+      "evidence": "src/adapter/cloudflare-workers/websocket.test.ts:1"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-workers/serve-static.test.ts",
+      "to": "f:src/adapter/cloudflare-workers/serve-static.ts",
+      "kind": "tests",
+      "label": "tests KV asset manifest and streaming",
+      "evidence": "src/adapter/cloudflare-workers/serve-static.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/cloudflare-pages/handler.ts#handle",
+      "to": "f:src/hono.ts",
+      "kind": "calls",
+      "label": "calls app.fetch with env and EventContext",
+      "evidence": "src/adapter/cloudflare-pages/handler.ts:43"
+    },
+    {
+      "from": "adapters.cloudflare-pages",
+      "to": "x:cloudflare-pages",
+      "kind": "calls",
+      "label": "runs as a Cloudflare Pages Function",
+      "evidence": "src/adapter/cloudflare-pages/handler.ts:33"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-pages/handler.test.ts",
+      "to": "f:src/adapter/cloudflare-pages/handler.ts#handle",
+      "kind": "tests",
+      "label": "tests Pages handle and handleMiddleware",
+      "evidence": "src/adapter/cloudflare-pages/handler.test.ts:1"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-pages/conninfo.test.ts",
+      "to": "f:src/adapter/cloudflare-pages/conninfo.ts#getConnInfo",
+      "kind": "tests",
+      "label": "tests cf-connecting-ip header",
+      "evidence": "src/adapter/cloudflare-pages/conninfo.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/deno/websocket.ts#upgradeWebSocket",
+      "to": "f:src/helper/websocket/index.ts",
+      "kind": "calls",
+      "label": "uses defineWebSocketHelper and WSContext",
+      "evidence": "src/adapter/deno/websocket.ts:1-2"
+    },
+    {
+      "from": "f:src/adapter/deno/serve-static.ts#serveStatic",
+      "to": "f:src/middleware/serve-static/index.ts",
+      "kind": "calls",
+      "label": "delegates to base serve-static middleware",
+      "evidence": "src/adapter/deno/serve-static.ts:3"
+    },
+    {
+      "from": "f:src/adapter/deno/ssg.ts#denoFileSystemModule",
+      "to": "f:src/helper/ssg/index.ts",
+      "kind": "calls",
+      "label": "provides FileSystemModule to base toSSG",
+      "evidence": "src/adapter/deno/ssg.ts:1"
+    },
+    {
+      "from": "adapters.deno",
+      "to": "x:deno",
+      "kind": "calls",
+      "label": "runs on the Deno runtime",
+      "evidence": "src/adapter/deno/index.ts:1"
+    },
+    {
+      "from": "f:src/adapter/deno/websocket.test.ts",
+      "to": "f:src/adapter/deno/websocket.ts#upgradeWebSocket",
+      "kind": "tests",
+      "label": "tests Deno WebSocket upgrade",
+      "evidence": "src/adapter/deno/websocket.test.ts:1"
+    },
+    {
+      "from": "f:src/adapter/deno/conninfo.test.ts",
+      "to": "f:src/adapter/deno/conninfo.ts#getConnInfo",
+      "kind": "tests",
+      "label": "tests remoteAddr extraction",
+      "evidence": "src/adapter/deno/conninfo.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/bun/server.ts#getBunServer",
+      "to": "f:src/context.ts",
+      "kind": "reads",
+      "label": "reads c.env to find the Bun server object",
+      "evidence": "src/adapter/bun/server.ts:14"
+    },
+    {
+      "from": "f:src/adapter/bun/websocket.ts#upgradeWebSocket",
+      "to": "f:src/adapter/bun/server.ts#getBunServer",
+      "kind": "calls",
+      "label": "retrieves server for server.upgrade()",
+      "evidence": "src/adapter/bun/websocket.ts:60"
+    },
+    {
+      "from": "f:src/adapter/bun/websocket.ts#upgradeWebSocket",
+      "to": "f:src/helper/websocket/index.ts",
+      "kind": "calls",
+      "label": "uses defineWebSocketHelper and WSContext",
+      "evidence": "src/adapter/bun/websocket.ts:1"
+    },
+    {
+      "from": "f:src/adapter/bun/serve-static.ts",
+      "to": "f:src/middleware/serve-static/index.ts",
+      "kind": "calls",
+      "label": "delegates to base serve-static middleware",
+      "evidence": "src/adapter/bun/serve-static.ts:4"
+    },
+    {
+      "from": "f:src/adapter/bun/conninfo.ts#getConnInfo",
+      "to": "f:src/adapter/bun/server.ts#getBunServer",
+      "kind": "calls",
+      "label": "retrieves Bun server for requestIP call",
+      "evidence": "src/adapter/bun/conninfo.ts:19"
+    },
+    {
+      "from": "adapters.bun",
+      "to": "x:bun",
+      "kind": "calls",
+      "label": "runs on the Bun runtime",
+      "evidence": "src/adapter/bun/index.ts:1"
+    },
+    {
+      "from": "f:src/adapter/bun/server.test.ts",
+      "to": "f:src/adapter/bun/server.ts#getBunServer",
+      "kind": "tests",
+      "label": "tests env and env.server lookup",
+      "evidence": "src/adapter/bun/server.test.ts:1"
+    },
+    {
+      "from": "f:src/adapter/bun/websocket.test.ts",
+      "to": "f:src/adapter/bun/websocket.ts#upgradeWebSocket",
+      "kind": "tests",
+      "label": "tests Bun WebSocket upgrade and event dispatch",
+      "evidence": "src/adapter/bun/websocket.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/aws-lambda/handler.ts#handle",
+      "to": "f:src/adapter/aws-lambda/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "delegates event conversion to EventProcessor",
+      "evidence": "src/adapter/aws-lambda/handler.ts:279"
+    },
+    {
+      "from": "f:src/adapter/aws-lambda/handler.ts#handle",
+      "to": "f:src/hono.ts",
+      "kind": "calls",
+      "label": "calls app.fetch with Web API Request",
+      "evidence": "src/adapter/aws-lambda/handler.ts:294"
+    },
+    {
+      "from": "f:src/adapter/aws-lambda/handler.ts#getProcessor",
+      "to": "f:src/adapter/aws-lambda/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "returns concrete EventProcessor subclass",
+      "evidence": "src/adapter/aws-lambda/handler.ts:671-683"
+    },
+    {
+      "from": "adapters.aws-lambda",
+      "to": "x:aws-lambda",
+      "kind": "calls",
+      "label": "runs as an AWS Lambda function",
+      "evidence": "src/adapter/aws-lambda/index.ts:1"
+    },
+    {
+      "from": "f:src/adapter/aws-lambda/handler.test.ts",
+      "to": "f:src/adapter/aws-lambda/handler.ts#handle",
+      "kind": "tests",
+      "label": "tests all event shapes and binary encoding",
+      "evidence": "src/adapter/aws-lambda/handler.test.ts:1"
+    },
+    {
+      "from": "f:src/adapter/aws-lambda/conninfo.test.ts",
+      "to": "f:src/adapter/aws-lambda/conninfo.ts#getConnInfo",
+      "kind": "tests",
+      "label": "tests all three requestContext shapes",
+      "evidence": "src/adapter/aws-lambda/conninfo.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/lambda-edge/handler.ts#handle",
+      "to": "f:src/hono.ts",
+      "kind": "calls",
+      "label": "calls app.fetch with CloudFront Request",
+      "evidence": "src/adapter/lambda-edge/handler.ts:146"
+    },
+    {
+      "from": "adapters.lambda-edge",
+      "to": "x:lambda-edge",
+      "kind": "calls",
+      "label": "runs as a Lambda@Edge function at CloudFront",
+      "evidence": "src/adapter/lambda-edge/index.ts:1"
+    },
+    {
+      "from": "f:src/adapter/lambda-edge/handler.test.ts",
+      "to": "f:src/adapter/lambda-edge/handler.ts#handle",
+      "kind": "tests",
+      "label": "tests CloudFront event conversion and 204 fix",
+      "evidence": "src/adapter/lambda-edge/handler.test.ts:1"
+    },
+    {
+      "from": "f:src/adapter/lambda-edge/conninfo.test.ts",
+      "to": "f:src/adapter/lambda-edge/conninfo.ts#getConnInfo",
+      "kind": "tests",
+      "label": "tests clientIp extraction",
+      "evidence": "src/adapter/lambda-edge/conninfo.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/netlify/handler.ts#handle",
+      "to": "f:src/hono.ts",
+      "kind": "calls",
+      "label": "forwards to app.fetch with Netlify context in env",
+      "evidence": "src/adapter/netlify/handler.ts:11"
+    },
+    {
+      "from": "adapters.netlify",
+      "to": "x:netlify",
+      "kind": "calls",
+      "label": "runs as a Netlify Edge Function",
+      "evidence": "src/adapter/netlify/index.ts:1"
+    },
+    {
+      "from": "f:src/adapter/netlify/conninfo.test.ts",
+      "to": "f:src/adapter/netlify/conninfo.ts#getConnInfo",
+      "kind": "tests",
+      "label": "tests context.ip extraction",
+      "evidence": "src/adapter/netlify/conninfo.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/vercel/handler.ts#handle",
+      "to": "f:src/hono.ts",
+      "kind": "calls",
+      "label": "calls app.fetch with no env argument",
+      "evidence": "src/adapter/vercel/handler.ts:9"
+    },
+    {
+      "from": "adapters.vercel",
+      "to": "x:vercel",
+      "kind": "calls",
+      "label": "runs as a Vercel Edge or serverless function",
+      "evidence": "src/adapter/vercel/index.ts:1"
+    },
+    {
+      "from": "f:src/adapter/vercel/conninfo.test.ts",
+      "to": "f:src/adapter/vercel/conninfo.ts#getConnInfo",
+      "kind": "tests",
+      "label": "tests x-real-ip extraction",
+      "evidence": "src/adapter/vercel/conninfo.test.ts:1"
+    },
+    {
+      "from": "f:src/adapter/vercel/handler.test.ts",
+      "to": "f:src/adapter/vercel/handler.ts#handle",
+      "kind": "tests",
+      "label": "tests request delegation to app.fetch",
+      "evidence": "src/adapter/vercel/handler.test.ts:1"
+    },
+
+    {
+      "from": "f:src/adapter/service-worker/index.ts#fire",
+      "to": "f:src/adapter/service-worker/handler.ts#handle",
+      "kind": "calls",
+      "label": "registers handle as the fetch event listener",
+      "evidence": "src/adapter/service-worker/index.ts:37"
+    },
+    {
+      "from": "f:src/adapter/service-worker/handler.ts#handle",
+      "to": "f:src/hono.ts",
+      "kind": "calls",
+      "label": "calls app.fetch inside evt.respondWith",
+      "evidence": "src/adapter/service-worker/handler.ts:33"
+    },
+    {
+      "from": "f:src/adapter/service-worker/handler.test.ts",
+      "to": "f:src/adapter/service-worker/handler.ts#handle",
+      "kind": "tests",
+      "label": "tests FetchEvent dispatch and 404 passthrough",
+      "evidence": "src/adapter/service-worker/handler.test.ts:1"
+    },
+
+    {
+      "from": "d:adapters/aws-lambda",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/aws-lambda to npm",
+      "evidence": "adapters/aws-lambda/package.json:2"
+    },
+    {
+      "from": "d:adapters/bun",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/bun to npm",
+      "evidence": "adapters/bun/package.json:2"
+    },
+    {
+      "from": "d:adapters/cloudflare-workers",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/cloudflare-workers to npm",
+      "evidence": "adapters/cloudflare-workers/package.json:2"
+    },
+    {
+      "from": "d:adapters/deno",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/deno to npm",
+      "evidence": "adapters/deno/package.json:2"
+    },
+    {
+      "from": "d:adapters/lambda-edge",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/lambda-edge to npm",
+      "evidence": "adapters/lambda-edge/package.json:2"
+    },
+    {
+      "from": "d:adapters/netlify",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/netlify to npm",
+      "evidence": "adapters/netlify/package.json:2"
+    },
+    {
+      "from": "d:adapters/service-worker",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/service-worker to npm",
+      "evidence": "adapters/service-worker/package.json:2"
+    },
+    {
+      "from": "d:adapters/vercel",
+      "to": "x:npm",
+      "kind": "deploys",
+      "label": "published as @hono/vercel to npm",
+      "evidence": "adapters/vercel/package.json:2"
+    },
+
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#streamHandle",
+      "to": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "calls getProcessor then processor.createRequest",
+      "evidence": "adapters/aws-lambda/src/handler.ts:152"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#streamHandle",
+      "to": "x:aws-lambda",
+      "kind": "calls",
+      "label": "uses awslambda.streamifyResponse for Lambda streaming",
+      "evidence": "adapters/aws-lambda/src/handler.ts:150"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#handle",
+      "to": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "delegates event conversion to EventProcessor",
+      "evidence": "adapters/aws-lambda/src/handler.ts:257"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#handle",
+      "to": "x:aws-lambda",
+      "kind": "calls",
+      "label": "runs as an AWS Lambda handler",
+      "evidence": "adapters/aws-lambda/src/handler.ts:243"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#getProcessor",
+      "to": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "returns concrete EventProcessor subclass",
+      "evidence": "adapters/aws-lambda/src/handler.ts:631"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#EventV2Processor",
+      "to": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "extends EventProcessor for API Gateway HTTP API v2",
+      "evidence": "adapters/aws-lambda/src/handler.ts:410"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#EventV1Processor",
+      "to": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "extends EventProcessor for API Gateway REST API v1",
+      "evidence": "adapters/aws-lambda/src/handler.ts:449"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#ALBProcessor",
+      "to": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "extends EventProcessor for Application Load Balancer events",
+      "evidence": "adapters/aws-lambda/src/handler.ts:509"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/handler.ts#LatticeV2Processor",
+      "to": "f:adapters/aws-lambda/src/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "extends EventProcessor for VPC Lattice v2 events",
+      "evidence": "adapters/aws-lambda/src/handler.ts:590"
+    },
+    {
+      "from": "f:adapters/aws-lambda/src/conninfo.ts#getConnInfo",
+      "to": "x:aws-lambda",
+      "kind": "reads",
+      "label": "reads requestContext from Lambda event env",
+      "evidence": "adapters/aws-lambda/src/conninfo.ts:45"
+    },
+    {
+      "from": "f:adapters/bun/src/serve-static.ts#serveStatic",
+      "to": "f:src/middleware/serve-static/index.ts",
+      "kind": "calls",
+      "label": "delegates to base serve-static middleware",
+      "evidence": "adapters/bun/src/serve-static.ts:4"
+    },
+    {
+      "from": "f:adapters/bun/src/server.ts#getBunServer",
+      "to": "x:bun",
+      "kind": "reads",
+      "label": "reads server object provided by Bun.serve",
+      "evidence": "adapters/bun/src/server.ts:13"
+    },
+    {
+      "from": "f:adapters/bun/src/websocket.ts#upgradeWebSocket",
+      "to": "f:adapters/bun/src/server.ts#getBunServer",
+      "kind": "calls",
+      "label": "retrieves server for server.upgrade()",
+      "evidence": "adapters/bun/src/websocket.ts:69"
+    },
+    {
+      "from": "f:adapters/bun/src/websocket.ts#createBunWebSocket",
+      "to": "f:adapters/bun/src/websocket.ts#upgradeWebSocket",
+      "kind": "calls",
+      "label": "bundles upgradeWebSocket and websocket handler",
+      "evidence": "adapters/bun/src/websocket.ts:137"
+    },
+    {
+      "from": "f:adapters/deno/src/serve-static.ts#serveStatic",
+      "to": "f:src/middleware/serve-static/index.ts",
+      "kind": "calls",
+      "label": "delegates to base serve-static middleware",
+      "evidence": "adapters/deno/src/serve-static.ts:3"
+    },
+    {
+      "from": "f:adapters/deno/src/websocket.ts#upgradeWebSocket",
+      "to": "x:deno",
+      "kind": "calls",
+      "label": "calls Deno.upgradeWebSocket for WebSocket handshake",
+      "evidence": "adapters/deno/src/websocket.ts:15"
+    },
+    {
+      "from": "f:adapters/cloudflare-workers/src/serve-static.ts#serveStatic",
+      "to": "x:cloudflare-workers",
+      "kind": "calls",
+      "label": "reads KV namespace from Cloudflare Workers env",
+      "evidence": "adapters/cloudflare-workers/src/serve-static.ts:21"
+    },
+    {
+      "from": "f:adapters/netlify/src/handler.ts#handle",
+      "to": "x:netlify",
+      "kind": "calls",
+      "label": "runs as a Netlify Edge Function handler",
+      "evidence": "adapters/netlify/src/handler.ts:4"
+    },
+    {
+      "from": "f:adapters/vercel/src/handler.ts#handle",
+      "to": "x:vercel",
+      "kind": "calls",
+      "label": "runs as a Vercel Edge or serverless function",
+      "evidence": "adapters/vercel/src/handler.ts:4"
+    },
+    {
+      "from": "f:adapters/service-worker/src/handler.ts#handle",
+      "to": "x:cloudflare-workers",
+      "kind": "calls",
+      "label": "registers fetch event handler on Service Worker global scope",
+      "evidence": "adapters/service-worker/src/handler.ts:18"
+    },
+    {
+      "from": "f:adapters/lambda-edge/src/handler.ts#handle",
+      "to": "x:lambda-edge",
+      "kind": "calls",
+      "label": "runs as a Lambda@Edge function at CloudFront",
+      "evidence": "adapters/lambda-edge/src/handler.ts:115"
+    },
+
+    {
+      "from": "f:src/adapter/aws-lambda/handler.ts#defaultIsContentTypeBinary",
+      "to": "f:src/adapter/aws-lambda/handler.ts#handle",
+      "kind": "calls",
+      "label": "used as default isContentTypeBinary option in handle",
+      "evidence": "src/adapter/aws-lambda/handler.ts:245"
+    },
+    {
+      "from": "f:src/adapter/aws-lambda/handler.ts#streamHandle",
+      "to": "f:src/adapter/aws-lambda/handler.ts#EventProcessor",
+      "kind": "calls",
+      "label": "calls getProcessor then processor.createRequest",
+      "evidence": "src/adapter/aws-lambda/handler.ts:173"
+    },
+    {
+      "from": "f:src/adapter/aws-lambda/handler.ts#streamHandle",
+      "to": "f:src/hono.ts",
+      "kind": "calls",
+      "label": "calls app.fetch inside awslambda.streamifyResponse",
+      "evidence": "src/adapter/aws-lambda/handler.ts:178"
+    },
+    {
+      "from": "f:src/adapter/bun/websocket.ts#createBunWebSocket",
+      "to": "f:src/adapter/bun/websocket.ts#upgradeWebSocket",
+      "kind": "calls",
+      "label": "bundles upgradeWebSocket and websocket handler together",
+      "evidence": "src/adapter/bun/websocket.ts:151-154"
+    },
+    {
+      "from": "f:src/adapter/bun/websocket.ts#websocket",
+      "to": "f:src/helper/websocket/index.ts",
+      "kind": "calls",
+      "label": "dispatches Bun events to WSEvents via createWSContext",
+      "evidence": "src/adapter/bun/websocket.ts:114"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-pages/handler.ts#handleMiddleware",
+      "to": "f:src/context.ts",
+      "kind": "calls",
+      "label": "creates Context manually from Pages ExecutionContext",
+      "evidence": "src/adapter/cloudflare-pages/handler.ts:70"
+    },
+    {
+      "from": "f:src/adapter/cloudflare-pages/handler.ts#serveStatic",
+      "to": "x:cloudflare-pages",
+      "kind": "calls",
+      "label": "proxies request to env.ASSETS for Pages advanced mode",
+      "evidence": "src/adapter/cloudflare-pages/handler.ts:127"
+    },
+    {
+      "from": "f:src/adapter/lambda-edge/handler.ts#createBody",
+      "to": "f:src/adapter/lambda-edge/handler.ts#handle",
+      "kind": "calls",
+      "label": "called by createRequest to decode the CF request body",
+      "evidence": "src/adapter/lambda-edge/handler.ts:224"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow.adapters.cloudflare-workers-request",
+      "name": "Cloudflare Workers request to app.fetch",
+      "summary": "A Web Standard Request arriving at the Cloudflare Workers module default export flows through the adapter to app.fetch.",
+      "steps": [
+        {
+          "node": "f:src/adapter/cloudflare-workers/index.ts",
+          "text": "The user exports their Hono app directly as the default export of the Worker module (export default app). The Workers runtime calls app.fetch(request, env, ctx) directly because Hono implements the Fetch handler interface natively -- no adapter handle() wrapper is needed for Workers module format."
+        },
+        {
+          "node": "f:src/hono.ts",
+          "text": "app.fetch receives the Request, env bindings (KV, Durable Objects, secrets) and the ExecutionContext. It runs the matched handlers through the middleware compose chain."
+        },
+        {
+          "node": "f:src/adapter/cloudflare-workers/websocket.ts#upgradeWebSocket",
+          "text": "If a route uses upgradeWebSocket(), the middleware checks the Upgrade header. It creates a WebSocketPair, attaches event listeners to the server socket, calls server.accept() and returns a 101 Response with the client socket in the webSocket field."
+        },
+        {
+          "node": "f:src/adapter/cloudflare-workers/serve-static.ts",
+          "text": "If serve-static middleware is mounted, getContentFromKVAsset looks up the requested path in the KV asset manifest and streams the file from the __STATIC_CONTENT KV namespace back to the client."
+        }
+      ]
+    },
+    {
+      "id": "flow.adapters.aws-lambda-request",
+      "name": "AWS Lambda API Gateway event through adapter to Response",
+      "summary": "An API Gateway v1/v2 or ALB event arrives at handle(app), is converted to a Web Request, passed to app.fetch, and the Response is converted back to an APIGatewayProxyResult.",
+      "steps": [
+        {
+          "node": "f:src/adapter/aws-lambda/handler.ts#handle",
+          "text": "The Lambda runtime calls the exported handler(event, context). handle() calls getProcessor(event) to pick the right EventProcessor subclass based on the event shape (ALB vs V2 HTTP API vs Lattice vs V1 REST API)."
+        },
+        {
+          "node": "f:src/adapter/aws-lambda/handler.ts#getProcessor",
+          "text": "getProcessor checks for requestContext.elb (ALB), rawPath + requestContext.http (V2), requestContext.serviceArn (Lattice VPC Lattice), and falls back to V1Processor for REST API events. Each subclass implements createRequest and createResult for its specific event shape."
+        },
+        {
+          "node": "f:src/adapter/aws-lambda/handler.ts#EventProcessor",
+          "text": "EventProcessor.createRequest assembles a full HTTPS URL from the domain name in the requestContext and the event path, decodes base64 bodies, and injects content-length. The resulting Request is a standard Web API object."
+        },
+        {
+          "node": "f:src/hono.ts",
+          "text": "app.fetch(req, { event, requestContext, lambdaContext }) runs the Hono middleware chain. Handlers access requestContext via c.env.requestContext to read authentication context, authorizer claims, or the source IP."
+        },
+        {
+          "node": "f:src/adapter/aws-lambda/handler.ts#EventProcessor",
+          "text": "createResult converts the Response back to APIGatewayProxyResult. It base64-encodes the body when the content type is binary or the content-encoding is non-identity, splits set-cookie headers according to the event shape (cookies array for V2, multiValueHeaders for V1 and ALB), and serializes all response headers."
+        }
+      ]
+    },
+    {
+      "id": "flow.adapters.service-worker-fire",
+      "name": "Service Worker startup and fetch event dispatch",
+      "summary": "fire(app) registers the Hono app as the global fetch listener; each browser request goes through handle() and app.fetch.",
+      "steps": [
+        {
+          "node": "f:src/adapter/service-worker/index.ts#fire",
+          "text": "The service worker script calls fire(app) at the top level. This calls addEventListener('fetch', handle(app)) on the global ServiceWorkerGlobalScope, registering the handler for all fetch events triggered by the controlled pages."
+        },
+        {
+          "node": "f:src/adapter/service-worker/handler.ts#handle",
+          "text": "For each FetchEvent, handle calls evt.respondWith(async () => app.fetch(evt.request, {}, evt)). The FetchEvent itself is passed as the ExecutionContext so handlers can call evt.waitUntil() for background work."
+        },
+        {
+          "node": "f:src/hono.ts",
+          "text": "app.fetch processes the request through the registered routes and middleware. If no route matches, Hono returns a 404 response."
+        },
+        {
+          "node": "f:src/adapter/service-worker/handler.ts#handle",
+          "text": "If the response status is 404 and opts.fetch is defined, the handler falls through to opts.fetch(evt.request), delegating to the browser's native fetch. This implements a network-first cache strategy without the app needing to know about the service worker layer."
+        }
+      ]
+    }
+  ]
+}

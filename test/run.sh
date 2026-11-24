@@ -34,10 +34,19 @@ for map in maps/*/; do
   fi
 done
 
+step "the gallery rebuilds exactly as committed"
+run python3 -I gallery/build.py
+if [ -n "$(git status --porcelain -- gallery)" ]; then
+  echo "FAILED: the rebuild changed gallery/ (its sources changed and need a commit, or the build is no"
+  echo "longer deterministic):"
+  git status --short -- gallery
+  fail=1
+fi
+
 step "browser smoke test"
 export NODE_PATH="${NODE_PATH:-$HOME/.topo-tools/node_modules}"
 if node -e "require('playwright')" 2>/dev/null; then
-  for page in maps/*/dist/index.html; do
+  for page in maps/*/dist/index.html gallery/*/dist/index.html; do
     run node test/smoke.cjs "$page" "$LOGS/$(basename "$(dirname "$(dirname "$page")")")"
   done
 else

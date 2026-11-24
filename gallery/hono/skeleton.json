@@ -1,0 +1,117 @@
+{
+ "nodes": [
+  {
+   "id": "app:hono",
+   "parent": null,
+   "name": "hono",
+   "kind": "app",
+   "summary": "Hono (Japanese for \"flame\") is a small, ultrafast web framework built on Web Standards that runs on any JavaScript runtime.",
+   "detail": "Hono is a dependency-free web framework whose only runtime requirement is the Web Standard API (Request, Response, fetch). An app is a `Hono` instance: you register routes with `app.get(path, handler)` and middleware with `app.use`, then expose `app.fetch(request, env, ctx)` as the runtime entry point. Each request is matched by a pluggable `Router`, wrapped in a `Context`, and run through a `koa-compose`-style middleware chain. The same application code runs on Cloudflare Workers, Deno, Bun, AWS Lambda, Lambda@Edge, Netlify, Vercel, Fastly Compute and Node.js through thin runtime adapters. Published to npm (and JSR) as the `hono` package, version 4.13.21.",
+   "repo": "honojs/hono",
+   "tech": ["TypeScript", "Web Standards"]
+  },
+
+  {
+   "id": "hono.core",
+   "parent": "app:hono",
+   "name": "Core & lifecycle",
+   "kind": "group",
+   "summary": "The Hono app class, request dispatch, middleware composition, Context, HonoRequest, error handling, validator and presets.",
+   "detail": "The heart of the framework. `Hono` (in hono-base.ts) collects routes into its `Router`, and its `fetch`/`dispatch` entry point matches a request, builds a `Context`, and either calls a single handler directly or runs the matched handlers through `compose()` (a koa-compose chain with onError/onNotFound). `Context` carries the request/response, env bindings, per-request variables and the `c.json`/`c.text`/`c.html` response helpers; `HonoRequest` wraps the raw `Request` with param/query/body parsing. `HTTPException` is the framework error type. The `validator` factory turns per-target (json/query/form/header/param) validation into typed middleware, and the `tiny`/`quick` presets bundle a router choice for common cases.",
+   "paths": ["src/hono.ts", "src/hono-base.ts", "src/compose.ts", "src/context.ts", "src/request.ts", "src/http-exception.ts", "src/types.ts", "src/validator", "src/preset"],
+   "tech": ["TypeScript"]
+  },
+  {
+   "id": "hono.router",
+   "parent": "app:hono",
+   "name": "Routers",
+   "kind": "group",
+   "summary": "Five interchangeable router implementations that map an HTTP method and path to the matching handlers.",
+   "detail": "Every router implements the `Router` interface (`add(method, path, handler)` and `match(method, path)`). `RegExpRouter` compiles all routes into a single large regular expression for the fastest matching; `TrieRouter` walks a trie node tree and supports every pattern; `SmartRouter` picks between them at first match by trying each until one succeeds without error; `LinearRouter` matches routes one by one (cheap to build, good for short-lived workers); `PatternRouter` uses the URLPattern-style approach for the smallest code size. The default app uses `SmartRouter([RegExpRouter, TrieRouter])`.",
+   "paths": ["src/router", "src/router.ts"],
+   "tech": ["TypeScript"]
+  },
+  {
+   "id": "hono.middleware",
+   "parent": "app:hono",
+   "name": "Built-in middleware",
+   "kind": "group",
+   "summary": "Batteries-included middleware: auth, CORS, CSRF, cache, compression, ETag, logging, JWT/JWK, secure headers, serve-static and more.",
+   "detail": "Each middleware is a small module exporting a factory that returns a `MiddlewareHandler` `(c, next) => ...`. They cover authentication (basic-auth, bearer-auth, jwt, jwk), request/response shaping (cors, csrf, secure-headers, etag, compress, body-limit, pretty-json, trailing-slash, request-id, powered-by), delivery (serve-static, cache, jsx-renderer), and control flow (combine, method-override, method-not-allowed, timeout, timing, context-storage, mount, language). Most are published as their own subpath export (e.g. `hono/cors`).",
+   "paths": ["src/middleware"],
+   "tech": ["TypeScript"]
+  },
+  {
+   "id": "hono.helpers",
+   "parent": "app:hono",
+   "name": "Helpers & RPC client",
+   "kind": "group",
+   "summary": "Response and request helpers (cookie, html, css, streaming, SSG, proxy, conninfo, WebSocket, factory, testing) plus the typed RPC client.",
+   "detail": "Helpers are standalone utilities an app imports as needed: `cookie` reads and writes cookies, `html`/`css` are tagged-template renderers, `streaming` builds streamed/SSE responses, `ssg` renders the whole app to static files, `proxy` forwards requests upstream, `conninfo` and `websocket` abstract runtime-specific connection info and sockets, `factory`/`createFactory` builds reusable typed handlers, and `testing` gives a typed test client. The `client` (`hc<AppType>()`) is Hono's RPC feature: it reads the exported app type to produce a fully typed fetch client whose calls mirror the server routes.",
+   "paths": ["src/helper", "src/client"],
+   "tech": ["TypeScript"]
+  },
+  {
+   "id": "hono.utils",
+   "parent": "app:hono",
+   "name": "Utilities",
+   "kind": "group",
+   "summary": "Low-level, dependency-free helpers for URLs, headers, bodies, cookies, crypto, JWT, MIME, streams and more, shared across the framework.",
+   "detail": "The internal toolbox every other subsystem builds on. Modules parse and build URLs and paths (url, filepath, mount), negotiate content (accept, mime), read and serialize request bodies and cookies (body, buffer, cookie), encode and hash data (encode, crypto, html), implement the JWT algorithms and JWKS handling (utils/jwt), and provide small primitives for streams, concurrency, IP addresses, colors, HTTP status and shared constants. These are published under the `hono/utils/*` export path.",
+   "paths": ["src/utils"],
+   "tech": ["TypeScript"]
+  },
+  {
+   "id": "hono.jsx",
+   "parent": "app:hono",
+   "name": "JSX runtime & renderers",
+   "kind": "group",
+   "summary": "Hono's own JSX implementation: a server-side string renderer, a client-side DOM renderer with hooks, streaming and a small CSS-in-JS layer.",
+   "detail": "Hono ships its own JSX runtime so apps can return components without React. `jsx()`/the runtime build a virtual node tree; `render` turns it into an HTML string on the server, escaping output and resolving async components. A separate DOM build (`jsx/dom`) renders and updates real DOM nodes in the browser with a React-compatible hooks API (useState, useEffect, useContext, and more) and its own client entry. `streaming` emits components as they resolve (Suspense-style), `intrinsic-element` handles elements like `<title>`/`<script>` with hoisting, and `css` provides a styled/CSS-in-JS helper that works in both renderers.",
+   "paths": ["src/jsx"],
+   "tech": ["TypeScript", "JSX"]
+  },
+  {
+   "id": "hono.adapters",
+   "parent": "app:hono",
+   "name": "Runtime adapters",
+   "kind": "group",
+   "summary": "Thin per-runtime glue that wires app.fetch to each platform plus matching serve-static, conninfo and WebSocket helpers.",
+   "detail": "Adapters let the same app run everywhere. The built-in `src/adapter/*` modules target Cloudflare Workers and Pages, Deno, Bun, AWS Lambda, Lambda@Edge, Netlify, Vercel and the Service Worker API: each adapts the platform's handler signature to `app.fetch`, and supplies platform-specific `serve-static`, `conninfo` (remote address) and WebSocket helpers where the runtime differs. The top-level `adapters/*` folders are the same adapters published as standalone npm packages (e.g. `@hono/node-server` lives outside this repo). Presets and the service-worker `fire()` register the global fetch listener on worker-style runtimes.",
+   "paths": ["src/adapter", "adapters"],
+   "tech": ["TypeScript"]
+  },
+
+  {
+   "id": "ext.hosting",
+   "parent": "ext",
+   "name": "Runtimes & platforms",
+   "kind": "group",
+   "summary": "The JavaScript runtimes and serverless platforms Hono's adapters target.",
+   "eyebrow": "Outside world"
+  },
+  {
+   "id": "ext.providers",
+   "parent": "ext",
+   "name": "Registries & remote services",
+   "kind": "group",
+   "summary": "Package registries Hono publishes to and remote endpoints its auth middleware calls.",
+   "eyebrow": "Outside world"
+  },
+
+  {"id": "x:cloudflare-workers", "parent": "ext.hosting", "name": "Cloudflare Workers", "kind": "external", "summary": "Edge serverless runtime; the cloudflare-workers adapter wires app.fetch into the Workers module/ServiceWorker handler.", "tech": ["Cloudflare Workers"]},
+  {"id": "x:cloudflare-pages", "parent": "ext.hosting", "name": "Cloudflare Pages", "kind": "external", "summary": "Cloudflare's full-stack hosting; the cloudflare-pages adapter exposes app as a Pages Functions handler.", "tech": ["Cloudflare Pages"]},
+  {"id": "x:deno", "parent": "ext.hosting", "name": "Deno", "kind": "external", "summary": "Deno runtime and Deno Deploy; the deno adapter serves app.fetch and provides Deno serve-static and WebSocket helpers.", "tech": ["Deno"]},
+  {"id": "x:bun", "parent": "ext.hosting", "name": "Bun", "kind": "external", "summary": "Bun runtime; the bun adapter uses Bun.serve, with Bun serve-static, WebSocket and SSG helpers.", "tech": ["Bun"]},
+  {"id": "x:aws-lambda", "parent": "ext.hosting", "name": "AWS Lambda", "kind": "external", "summary": "AWS Lambda functions; the aws-lambda adapter converts API Gateway / function URL events to Request and back.", "tech": ["AWS Lambda"]},
+  {"id": "x:lambda-edge", "parent": "ext.hosting", "name": "AWS Lambda@Edge", "kind": "external", "summary": "CloudFront Lambda@Edge; the lambda-edge adapter adapts CloudFront request/response events to app.fetch.", "tech": ["Lambda@Edge"]},
+  {"id": "x:netlify", "parent": "ext.hosting", "name": "Netlify", "kind": "external", "summary": "Netlify Edge Functions; the netlify adapter exposes app.fetch and conninfo for the Netlify runtime.", "tech": ["Netlify"]},
+  {"id": "x:vercel", "parent": "ext.hosting", "name": "Vercel", "kind": "external", "summary": "Vercel Edge/serverless functions; the vercel adapter wraps app.fetch as a Vercel handler.", "tech": ["Vercel"]},
+  {"id": "x:fastly", "parent": "ext.hosting", "name": "Fastly Compute", "kind": "external", "summary": "Fastly Compute@Edge; Hono runs on Fastly's WebAssembly runtime (covered by runtime tests and the fetch-event path).", "tech": ["Fastly Compute"]},
+  {"id": "x:nodejs", "parent": "ext.hosting", "name": "Node.js", "kind": "external", "summary": "Node.js via the external @hono/node-server package, which bridges Node's http server to app.fetch.", "tech": ["Node.js"]},
+
+  {"id": "x:npm", "parent": "ext.providers", "name": "npm registry", "kind": "external", "summary": "Hono and its standalone adapter packages are published to the npm registry as the hono package and @hono/* packages."},
+  {"id": "x:jsr", "parent": "ext.providers", "name": "JSR", "kind": "external", "summary": "Hono is also published to the JavaScript Registry (JSR) as @hono/hono, configured via jsr.json."},
+  {"id": "x:jwks", "parent": "ext.providers", "name": "Remote JWKS / OIDC", "kind": "external", "summary": "The jwk middleware fetches a remote JSON Web Key Set over HTTP to verify JWT signatures.", "tech": ["HTTP", "JWKS"]}
+ ]
+}

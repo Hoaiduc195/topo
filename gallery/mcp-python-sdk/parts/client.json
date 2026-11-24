@@ -1,0 +1,1597 @@
+{
+  "area": "client",
+  "nodes": [
+
+    {
+      "id": "client.transports",
+      "parent": "client",
+      "name": "Transports",
+      "kind": "group",
+      "summary": "The three wire transports (stdio, Server-Sent Events, Streamable HTTP) and the in-memory bridge used for in-process testing.",
+      "detail": "Each transport is an async context manager that yields a (read_stream, write_stream) pair. stdio_client launches a subprocess and bridges its stdin/stdout through anyio pipes. sse_client opens an SSE GET stream and POSTs messages to the server-supplied endpoint URL. streamable_http_client uses one POST per request with optional SSE streaming for the response, plus an optional persistent GET stream for server-initiated messages. InMemoryTransport wraps a Server instance for in-process use without JSON serialization.",
+      "status": "live",
+      "tech": ["Python", "anyio", "httpx2"]
+    },
+    {
+      "id": "client.session_layer",
+      "parent": "client",
+      "name": "Session layer",
+      "kind": "group",
+      "summary": "ClientSession and its protocol-negotiation, request dispatch, and server-callback machinery.",
+      "detail": "ClientSession owns the typed MCP layer. It wraps a Dispatcher (JSON-RPC or DirectDispatcher), carries the request stamp (pre-connect, handshake-era, or modern), routes server-initiated requests through sampling/elicitation/roots callbacks, dispatches notifications to the message handler and extension bindings, and manages subscriptions/listen demux routes. Protocol version is set by initialize(), discover(), or adopt().",
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "client.high_level",
+      "parent": "client",
+      "name": "High-level Client",
+      "kind": "group",
+      "summary": "The Client dataclass: transport selection, handshake, response caching, input-required driver, and extension wiring.",
+      "detail": "Client resolves a transport from the server argument at construction: URL to streamable_http_client, StdioServerParameters to stdio_client, Server/MCPServer to in-process connector, any Transport directly. __aenter__ enters the connector, creates ClientSession, runs the handshake (initialize, discover, or adopt), and publishes _session only on success. Response caching, InputRequiredResult retry, extension folding, and HEADER_MISMATCH recovery are all layered here.",
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "client.plumbing",
+      "parent": "client",
+      "name": "Private plumbing",
+      "kind": "group",
+      "summary": "Era negotiation, in-process transport, response caching internals, subscriptions, extensions, and input-required driver.",
+      "detail": "Covers _probe.py (auto-mode negotiate_auto), _memory.py (InMemoryTransport), _input_required.py (run_input_required_driver), caching.py (ClientResponseCache + stores), subscriptions.py (listen() context manager, ListenRoute, Subscription), extension.py (ClientExtension, ResultClaim, NotificationBinding), and extensions/skills.py (Skills/SkillsClient).",
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/client/client.py",
+      "parent": "client.high_level",
+      "name": "Client module",
+      "kind": "module",
+      "summary": "High-level MCP client: transport selection, protocol negotiation, caching, extension wiring, and tool/resource/prompt verbs.",
+      "detail": "Defines Client (a frozen dataclass), _Connector (a resolved async callable), and the two connector factories: _connect_transport for stream-backed paths and _connect_inproc for in-process Server/MCPServer. __post_init__ resolves the connector and wires the response cache. __aenter__ drives the handshake (legacy initialize, auto discover/fallback, or direct adopt), and publishes _session only after the handshake succeeds. call_tool handles HEADER_MISMATCH recovery, InputRequiredResult retry via _drive_input_required, and extension claim resolution.",
+      "status": "live",
+      "tech": ["Python"],
+      "paths": ["src/mcp/client/client.py"],
+      "facts": [
+        "_RELIST_PAGE_CAP = 100 (page cap for tools/list walk after HEADER_MISMATCH)",
+        "DEFAULT_INPUT_REQUIRED_MAX_ROUNDS = 10 inherited from _input_required",
+        "mode= accepts 'legacy', 'auto', or a modern protocol-version string",
+        "cache= defaults to CacheConfig() (in-memory, server ttlMs honored)"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client",
+      "parent": "f:src/mcp/client/client.py",
+      "name": "Client",
+      "kind": "class",
+      "summary": "High-level MCP client dataclass; pass a URL, StdioServerParameters, Transport, or in-process Server.",
+      "detail": "A frozen dataclass holding server, callbacks, mode, cache config, and extensions. __post_init__ validates mode, folds extensions, resolves the _Connector, and builds the response cache. __aenter__ enters the connector, creates ClientSession, runs the negotiation, and sets _session. __aexit__ unwinds the exit stack. The public verbs (call_tool, list_tools, read_resource, etc.) delegate to ClientSession while adding caching and retry logic.",
+      "status": "live",
+      "tech": ["Python"],
+      "paths": ["src/mcp/client/client.py:268-1002"],
+      "signature": "@dataclass\nclass Client",
+      "code": "async def __aenter__(self) -> Client:\n    if self._entered:\n        raise RuntimeError(\"Client is already entered; cannot reenter\")\n    self._entered = True\n    async with AsyncExitStack() as exit_stack:\n        session = await self._build_session(exit_stack)\n        session = await exit_stack.enter_async_context(session)\n        if self.mode == \"legacy\":\n            await session.initialize()\n        elif self.mode == \"auto\":\n            await negotiate_auto(session)\n        else:\n            session.adopt(self.prior_discover or _synthesize_discover(self.mode))\n        self._session = session\n        self._exit_stack = exit_stack.pop_all()"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client.__post_init__",
+      "parent": "f:src/mcp/client/client.py#Client",
+      "name": "Client.__post_init__()",
+      "kind": "function",
+      "summary": "Validates mode, folds extensions, resolves the transport connector, and builds the response cache.",
+      "detail": "Rejects invalid mode values. Calls _fold_extensions to validate and merge extension contributions. Dispatches srv to _connect_inproc (Server/MCPServer), _connect_transport(streamable_http_client) (URL string), _connect_transport(stdio_client) (StdioServerParameters), or _connect_transport(srv) (bare Transport). Hashes the target URL (stripping userinfo) for cache partitioning; raises if a custom store is supplied without a target_id for non-URL servers.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:382-431"],
+      "signature": "def __post_init__(self) -> None"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client.call_tool",
+      "parent": "f:src/mcp/client/client.py#Client",
+      "name": "Client.call_tool()",
+      "kind": "function",
+      "summary": "Calls a tool, handling HEADER_MISMATCH recovery, InputRequiredResult retry, and extension claim resolution.",
+      "detail": "Wraps session.call_tool with two retry layers: an outer retry() catches HEADER_MISMATCH (-32xxx) on modern connections and refetches the tool listing before resending; an inner _drive_input_required loop runs up to input_required_max_rounds of InputRequiredResult rounds. For claimed extension results the owning ResultClaim.resolve is awaited and its CallToolResult validated against the tool's output schema.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:772-867"],
+      "signature": "async def call_tool(self, name: str, arguments: dict[str, Any] | None = None, ...) -> CallToolResult",
+      "code": "async def retry(r, s):\n    try:\n        return await send(r, s)\n    except MCPError as mismatch:\n        if mismatch.code != HEADER_MISMATCH or self.protocol_version not in MODERN_PROTOCOL_VERSIONS:\n            raise\n        timeout = read_timeout_seconds if read_timeout_seconds is not None else self.read_timeout_seconds\n        try:\n            with anyio.fail_after(timeout):\n                await self._relist_tool(name)\n        except (MCPError, TimeoutError, ValidationError) as relist_error:\n            raise mismatch from relist_error\n        return await send(r, s)"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#_connect_transport",
+      "parent": "f:src/mcp/client/client.py",
+      "name": "_connect_transport()",
+      "kind": "function",
+      "summary": "Returns a Connector for stream-backed transports (URL-resolved or user-supplied Transport).",
+      "detail": "Called by Client.__post_init__ for URL strings (after wrapping in streamable_http_client), StdioServerParameters (after wrapping in stdio_client), and any user-supplied Transport. The returned async callable enters the transport context manager, then wraps the resulting streams in a JSONRPCDispatcher for ClientSession.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:99-106"],
+      "signature": "def _connect_transport(transport: Transport) -> _Connector",
+      "code": "def _connect_transport(transport: Transport) -> _Connector:\n    async def connect(exit_stack: AsyncExitStack, _mode: ConnectMode, _raise_exceptions: bool) -> Dispatcher[Any]:\n        read_stream, write_stream = await exit_stack.enter_async_context(transport)\n        return JSONRPCDispatcher(read_stream, write_stream)\n    return connect"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#_connect_inproc",
+      "parent": "f:src/mcp/client/client.py",
+      "name": "_connect_inproc()",
+      "kind": "function",
+      "summary": "Returns a Connector for an in-process Server: legacy mode uses InMemoryTransport, modern uses DirectDispatcher.",
+      "detail": "In legacy mode wraps the Server in InMemoryTransport (JSON-RPC framing over in-memory streams). In any modern mode it enters the server's lifespan, creates a create_direct_dispatcher_pair, spawns server_disp.run in a task group via modern_on_request, and returns the client-side DirectDispatcher. This avoids JSON serialization and the initialize handshake for in-process use.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:109-127"],
+      "signature": "def _connect_inproc(server: Server[Any]) -> _Connector",
+      "code": "async def connect(exit_stack, mode, raise_exceptions):\n    if mode == \"legacy\":\n        transport = InMemoryTransport(server, raise_exceptions=raise_exceptions)\n        read_stream, write_stream = await exit_stack.enter_async_context(transport)\n        return JSONRPCDispatcher(read_stream, write_stream)\n    lifespan_state = await exit_stack.enter_async_context(server.lifespan(server))\n    client_disp, server_disp = create_direct_dispatcher_pair(raise_handler_exceptions=raise_exceptions)\n    tg = await exit_stack.enter_async_context(anyio.create_task_group())\n    exit_stack.callback(server_disp.close)\n    on_request = modern_on_request(server, lifespan_state)\n    await tg.start(server_disp.run, on_request, _no_inbound_client_notifications)\n    return client_disp"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client._cached_fetch",
+      "parent": "f:src/mcp/client/client.py#Client",
+      "name": "Client._cached_fetch()",
+      "kind": "function",
+      "summary": "Serves list verbs through the response cache: read, capture, send, write.",
+      "detail": "Called by list_tools, list_resources, list_resource_templates, and list_prompts. Bypasses cache when _response_cache is None, mode is bypass, or cursor is set (paginated pages). A cache hit deep-copies the entry before returning; for tools/list an absorb callback re-applies per-tool derived state to the served copy. An INVALID_PARAMS error on a continuation cursor evicts the base entry (spec SHOULD).",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:574-611"]
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client.listen",
+      "parent": "f:src/mcp/client/client.py#Client",
+      "name": "Client.listen()",
+      "kind": "function",
+      "summary": "Opens a subscriptions/listen stream and hooks cache eviction before each event delivery.",
+      "detail": "Delegates to subscriptions.listen(), passing _evict_for_listen_event as the on_event barrier when a response cache is present. This ensures cache eviction completes before the iterator consumer can refetch, closing the race where a stale cached entry would be served on the first refetch after a change notification.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:709-740"],
+      "signature": "def listen(self, *, tools_list_changed: bool = False, ...) -> AbstractAsyncContextManager[Subscription]"
+    },
+
+    {
+      "id": "f:src/mcp/client/session.py",
+      "parent": "client.session_layer",
+      "name": "ClientSession module",
+      "kind": "module",
+      "summary": "ClientSession: the protocol session half of an MCP connection, running over a Dispatcher.",
+      "detail": "Defines ClientSession, its protocol-negotiation methods (initialize, discover, adopt, send_discover), all MCP request methods (call_tool, list_tools, read_resource, get_prompt, complete, etc.), server-callback dispatch (_on_request, _on_notify, dispatch_input_request), subscriptions/listen demux, tool-output validation, and the stamp factory functions that inject protocol-version headers. Also defines the protocol types SamplingFnT, ElicitationFnT, ListRootsFnT, LoggingFnT, MessageHandlerFnT, and ClientRequestContext.",
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "paths": ["src/mcp/client/session.py"],
+      "facts": [
+        "DISCOVER_TIMEOUT_SECONDS = 10.0",
+        "_NOTIFICATION_QUEUE_SIZE = 256",
+        "DEFAULT_CLIENT_INFO = Implementation(name='mcp', version='0.1.0')",
+        "jsonschema is imported lazily inside validate_tool_result"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession",
+      "parent": "f:src/mcp/client/session.py",
+      "name": "ClientSession",
+      "kind": "class",
+      "summary": "Client half of an MCP connection: typed protocol layer over a Dispatcher with server-callback routing.",
+      "detail": "Constructed with either (read_stream, write_stream) or a pre-built dispatcher=. __aenter__ starts the dispatcher's run loop, allocates binding queues, and spawns delivery tasks for each NotificationBinding. __aexit__ cancels all tasks. Protocol version is established by initialize() (legacy handshake), discover() (modern probe), or adopt() (direct install). The _stamp callable is replaced at each adopt; before connect it is _preconnect_stamp, after handshake it is _make_handshake_stamp, after discover it is _make_modern_stamp.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:388-1507"],
+      "signature": "class ClientSession",
+      "code": "async def __aenter__(self) -> Self:\n    self._task_group = anyio.create_task_group()\n    await self._task_group.__aenter__()\n    try:\n        for binding in self._notification_bindings.values():\n            send, receive = anyio.create_memory_object_stream[BaseModel](_NOTIFICATION_QUEUE_SIZE)\n            self._binding_queues[binding.method] = (send, receive)\n        await self._task_group.start(\n            self._dispatcher.run, self._on_request, self._on_notify, self._intercept_notification\n        )\n        for binding in self._notification_bindings.values():\n            _, receive = self._binding_queues[binding.method]\n            self._task_group.start_soon(self._deliver_bound_notifications, binding, receive)\n    except BaseException:\n        ..."
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.initialize",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.initialize()",
+      "kind": "function",
+      "summary": "Sends the legacy initialize handshake and stores the result.",
+      "detail": "Idempotent (returns cached result on re-call). Sends InitializeRequest at LATEST_HANDSHAKE_VERSION, validates the returned protocol_version against HANDSHAKE_PROTOCOL_VERSIONS, calls adopt(result), and sends InitializedNotification. After this call _stamp is set to _make_handshake_stamp(version) and _negotiated_version is populated.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:651-673"],
+      "signature": "async def initialize(self) -> types.InitializeResult"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.adopt",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.adopt()",
+      "kind": "function",
+      "summary": "Installs negotiated state from an already-held InitializeResult or DiscoverResult.",
+      "detail": "For DiscoverResult: picks the highest mutually supported modern version, installs _make_modern_stamp (stamping every request with protocol version, client info, capabilities, Mcp-Method header, and optional log level), and activates extension result claims. For InitializeResult: installs _make_handshake_stamp. Clears the opposite slot so at most one of _initialize_result / _discover_result is non-None. Warns when a NotificationBinding method is defined by the core protocol at the negotiated version.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:675-721"],
+      "signature": "def adopt(self, result: types.InitializeResult | types.DiscoverResult) -> None",
+      "code": "def adopt(self, result):\n    if isinstance(result, types.DiscoverResult):\n        mutual = [v for v in MODERN_PROTOCOL_VERSIONS if v in result.supported_versions]\n        if not mutual:\n            raise RuntimeError(...)\n        version = mutual[-1]\n        self._stamp = _make_modern_stamp(version, client_info, capabilities, ...)\n        self._discover_result = result\n        self._initialize_result = None\n    else:\n        version = result.protocol_version\n        self._stamp = _make_handshake_stamp(version)\n        self._initialize_result = result\n        self._discover_result = None\n    self._negotiated_version = version"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.send_request()",
+      "kind": "function",
+      "summary": "Serializes a request, stamps it, sends it through the Dispatcher, and validates the typed response.",
+      "detail": "Serializes the request via model_dump, runs _stamp (injecting version headers and meta), sets timeout, progress_callback, and resumption opts, then calls _dispatcher.send_raw_request. Clamps negative inbound ttlMs to 0. Strips fields from later protocol revisions that are outside the negotiated contract. Validates the raw result dict against _methods.validate_server_result, then parses via TypeAdapter or model_validate.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:540-601"],
+      "signature": "async def send_request(self, request, result_type, ...) -> ReceiveResultT"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.call_tool",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.call_tool()",
+      "kind": "function",
+      "summary": "Sends a tools/call request and validates the structured output against the tool's declared schema.",
+      "detail": "Uses _call_tool_adapter (a discriminated TypeAdapter rebuilt at each adopt()) to parse the response. If the result is a non-error CallToolResult, calls validate_tool_result to check structured_content against the tool's output schema (compiled once per schema value). Raises RuntimeError for unexpected InputRequiredResult when allow_input_required=False, and UnexpectedClaimedResult for claimed shapes when allow_claimed=False.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1052-1109"],
+      "signature": "async def call_tool(self, name: str, arguments, ...) -> CallToolResult | InputRequiredResult | Result"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession._absorb_tool_listing",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession._absorb_tool_listing()",
+      "kind": "function",
+      "summary": "Rebuilds per-tool state (x-mcp-header maps, output schemas, compiled validators) from a tools/list page.",
+      "detail": "On modern connections, drops tools with invalid x-mcp-header annotations (spec MUST) and builds the arg-to-header map for each kept tool. Caches output schemas; evicts compiled validators when the schema changes. When complete=True (single page, no cursor), prunes all per-tool state down to the returned tool set. Idempotent: a response-cache-served copy can be re-absorbed without side effects.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1291-1330"],
+      "signature": "def _absorb_tool_listing(self, result: types.ListToolsResult, *, complete: bool) -> types.ListToolsResult",
+      "code": "def _absorb_tool_listing(self, result, *, complete):\n    if self._negotiated_version in MODERN_PROTOCOL_VERSIONS:\n        kept = []\n        for tool in result.tools:\n            if (reason := find_invalid_x_mcp_header(tool.input_schema)) is not None:\n                logger.warning(\"dropping tool %r: invalid x-mcp-header\", tool.name)\n                self._x_mcp_header_maps.pop(tool.name, None)\n                continue\n            self._x_mcp_header_maps[tool.name] = x_mcp_header_map(tool.input_schema)\n            kept.append(tool)\n        result.tools = kept\n    for tool in result.tools:\n        if tool.name in self._tool_output_validators:\n            del self._tool_output_validators[tool.name]\n        self._tool_output_schemas[tool.name] = tool.output_schema"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession._on_request",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession._on_request()",
+      "kind": "function",
+      "summary": "Answers a server-initiated request by routing it through the sampling/elicitation/roots callbacks.",
+      "detail": "Called by the Dispatcher for every inbound server request. Parses the request against the negotiated version's SERVER_REQUEST table (METHOD_NOT_FOUND for unknown methods). PingRequest is answered with EmptyResult without a callback. All others delegate to dispatch_input_request, which routes to the appropriate callback. Validates the callback's response against validate_client_result; a non-conformant result is logged and raises INTERNAL_ERROR.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1337-1369"],
+      "signature": "async def _on_request(self, dctx: DispatchContext[TransportContext], method: str, params) -> dict[str, Any]"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession._on_notify",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession._on_notify()",
+      "kind": "function",
+      "summary": "Routes server notifications to typed callbacks, extension bindings, or the message handler.",
+      "detail": "Called by the Dispatcher for every inbound notification. Parses known methods against the core table; unknown methods go to NotificationBinding queues. CancelledNotification is silently dropped (applied by the dispatcher). LoggingMessageNotification is forwarded to _logging_callback before the message handler tee. Each binding's queue uses send_nowait with LRU eviction on overflow: a full queue drops the oldest event and logs a warning.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1446-1491"]
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession._intercept_notification",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession._intercept_notification()",
+      "kind": "function",
+      "summary": "Synchronous listen demux: consumes subscriptions/acknowledged frames and routes events in receive order.",
+      "detail": "Called synchronously by the Dispatcher before the spawned _on_notify path. Returns True to consume the frame entirely (the ack is driver state, not a user notification). Routes ResourceUpdated / list-changed events to their ListenRoute by subscription_id from _meta. Server-sent notifications/cancelled naming a listen request_id settle that route as lost.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1407-1444"]
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.dispatch_input_request",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.dispatch_input_request()",
+      "kind": "function",
+      "summary": "Routes an InputRequest to the appropriate client callback.",
+      "detail": "Shared by the legacy server-to-client RPC path (_on_request) and the 2026-07-28 multi-round-trip driver in _input_required.py. Dispatches CreateMessageRequest to _sampling_callback, ElicitRequest to _elicitation_callback, and ListRootsRequest to _list_roots_callback.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1371-1388"],
+      "signature": "async def dispatch_input_request(self, ctx: ClientRequestContext, request: types.InputRequest) -> types.InputResponse | types.ErrorData"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.discover",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.discover()",
+      "kind": "function",
+      "summary": "Probes server/discover and adopts the result, with one retry on UNSUPPORTED_PROTOCOL_VERSION.",
+      "detail": "Idempotent (returns cached result). Sends at LATEST_MODERN_VERSION. On -32022 (UNSUPPORTED_PROTOCOL_VERSION) with a parseable UnsupportedProtocolVersionErrorData, intersects supported with MODERN_PROTOCOL_VERSIONS and retries once at the highest mutual version. Any other MCPError propagates; METHOD_NOT_FOUND signals a legacy server and is the caller's cue to fall back to initialize().",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:757-793"],
+      "signature": "async def discover(self) -> types.DiscoverResult"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#SamplingFnT",
+      "parent": "f:src/mcp/client/session.py",
+      "name": "SamplingFnT",
+      "kind": "class",
+      "summary": "Protocol for the sampling callback: answers CreateMessageRequest from the server.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:206-212"],
+      "signature": "class SamplingFnT(Protocol): async def __call__(self, context: ClientRequestContext, params: types.CreateMessageRequestParams) -> types.CreateMessageResult | types.CreateMessageResultWithTools | types.ErrorData"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ElicitationFnT",
+      "parent": "f:src/mcp/client/session.py",
+      "name": "ElicitationFnT",
+      "kind": "class",
+      "summary": "Protocol for the elicitation callback: answers ElicitRequest from the server.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:214-219"],
+      "signature": "class ElicitationFnT(Protocol): async def __call__(self, context: ClientRequestContext, params: types.ElicitRequestParams) -> types.ElicitResult | types.ErrorData"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientRequestContext",
+      "parent": "f:src/mcp/client/session.py",
+      "name": "ClientRequestContext",
+      "kind": "class",
+      "summary": "Context passed to sampling/elicitation/roots callbacks: holds session, request_id, and meta.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:197-203"],
+      "signature": "@dataclass(kw_only=True)\nclass ClientRequestContext"
+    },
+
+    {
+      "id": "f:src/mcp/client/stdio.py",
+      "parent": "client.transports",
+      "name": "stdio transport",
+      "kind": "module",
+      "summary": "Launches an MCP server as a subprocess and exchanges newline-delimited JSON over its stdin/stdout.",
+      "detail": "stdio_client opens the subprocess via _create_platform_compatible_process (new session on POSIX, Job Object on Windows), starts two pipe bridge tasks (stdout_reader / stdin_writer), and yields (read_stream, write_stream). Shutdown follows the MCP lifecycle: close stdin, wait PROCESS_TERMINATION_TIMEOUT seconds, then kill the process tree (POSIX: SIGTERM + SIGKILL after FORCE_KILL_TIMEOUT; Windows: Job Object termination). The whole shutdown block runs inside a CancelScope(shield=True) to avoid process leaks under caller cancellation.",
+      "status": "live",
+      "tech": ["Python", "anyio"],
+      "paths": ["src/mcp/client/stdio.py"],
+      "facts": [
+        "PROCESS_TERMINATION_TIMEOUT = 2.0 seconds",
+        "FORCE_KILL_TIMEOUT = 2.0 seconds (POSIX only)",
+        "_WRITER_FLUSH_TIMEOUT = 0.5 seconds",
+        "DEFAULT_INHERITED_ENV_VARS: PATH, HOME, etc. (platform-specific)"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/stdio.py#StdioServerParameters",
+      "parent": "f:src/mcp/client/stdio.py",
+      "name": "StdioServerParameters",
+      "kind": "class",
+      "summary": "Pydantic model describing a stdio subprocess server: command, args, env, cwd, encoding.",
+      "detail": "command is the executable; args are command-line arguments; env is merged over get_default_environment(); encoding defaults to utf-8; encoding_error_handler defaults to strict.",
+      "status": "live",
+      "paths": ["src/mcp/client/stdio.py:94-112"],
+      "signature": "class StdioServerParameters(BaseModel)"
+    },
+    {
+      "id": "f:src/mcp/client/stdio.py#stdio_client",
+      "parent": "f:src/mcp/client/stdio.py",
+      "name": "stdio_client()",
+      "kind": "function",
+      "summary": "Async context manager that spawns the subprocess and yields (read_stream, write_stream).",
+      "detail": "Spawns the process, creates two in-memory object streams, starts stdout_reader and stdin_writer tasks in a task group, yields the streams to the caller, then runs shutdown inside a cancel shield. stdout_reader reads newline-delimited JSON lines from the process stdout. stdin_writer serializes SessionMessages and writes them to stdin. _drain_stdout keeps the process from blocking on a full pipe during shutdown.",
+      "status": "live",
+      "paths": ["src/mcp/client/stdio.py:114-216"],
+      "signature": "@asynccontextmanager\nasync def stdio_client(server: StdioServerParameters, errlog: TextIO = sys.stderr) -> AsyncGenerator[TransportStreams, None]",
+      "code": "async with anyio.create_task_group() as tg:\n    tg.start_soon(stdout_reader)\n    tg.start_soon(stdin_writer)\n    try:\n        yield read_stream, write_stream\n    finally:\n        shutting_down = True\n        with anyio.CancelScope(shield=True):\n            await shutdown()\n        tg.cancel_scope.cancel()"
+    },
+
+    {
+      "id": "f:src/mcp/client/sse.py",
+      "parent": "client.transports",
+      "name": "SSE transport",
+      "kind": "module",
+      "summary": "Client transport for Server-Sent Events (SSE): opens a persistent GET stream and POSTs messages.",
+      "detail": "sse_client opens an SSE connection to the given URL using httpx2. It waits for an 'endpoint' event carrying the POST URL, then starts a post_writer task. The sse_reader task delivers 'message' events as SessionMessages into the read stream. POST requests run in the sender's task context. The SSE transport is deprecated for new deployments; Streamable HTTP supersedes it.",
+      "status": "live",
+      "tech": ["Python", "httpx2"],
+      "paths": ["src/mcp/client/sse.py"]
+    },
+    {
+      "id": "f:src/mcp/client/sse.py#sse_client",
+      "parent": "f:src/mcp/client/sse.py",
+      "name": "sse_client()",
+      "kind": "function",
+      "summary": "Async context manager that opens the SSE connection and yields (read_stream, write_stream).",
+      "detail": "Creates an httpx2 client, opens the SSE event stream, waits for the 'endpoint' event (which carries the POST URL), and starts sse_reader and post_writer tasks. The post_writer sends outbound messages as HTTP POSTs to the endpoint URL; the sse_reader delivers inbound 'message' events. Origin-matching is enforced: an endpoint URL on a different origin raises ValueError.",
+      "status": "live",
+      "paths": ["src/mcp/client/sse.py:36-171"],
+      "signature": "@asynccontextmanager\nasync def sse_client(url: str, headers, timeout, sse_read_timeout, ...) -> AsyncGenerator"
+    },
+
+    {
+      "id": "f:src/mcp/client/streamable_http.py",
+      "parent": "client.transports",
+      "name": "Streamable HTTP transport",
+      "kind": "module",
+      "summary": "Client transport for Streamable HTTP: one POST per request with SSE or JSON responses, plus an optional GET stream.",
+      "detail": "streamable_http_client creates StreamableHTTPTransport, starts post_writer and optionally handle_get_stream. Each request is a POST that returns either application/json (synchronous) or text/event-stream (streaming). After the initialized notification the GET stream is opened for server-initiated messages. The transport tracks per-request cancel scopes to implement 2026 HTTP cancellation (aborting the POST). Session termination sends DELETE on close if terminate_on_close=True.",
+      "status": "live",
+      "tech": ["Python", "httpx2"],
+      "paths": ["src/mcp/client/streamable_http.py"],
+      "facts": [
+        "DEFAULT_RECONNECTION_DELAY_MS = 1000",
+        "MAX_RECONNECTION_ATTEMPTS = 2",
+        "DEFAULT_MAX_SSE_EVENT_SIZE = 1 MiB",
+        "MCP_SESSION_ID header: 'mcp-session-id'",
+        "LAST_EVENT_ID header: 'last-event-id'"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/streamable_http.py#StreamableHTTPTransport",
+      "parent": "f:src/mcp/client/streamable_http.py",
+      "name": "StreamableHTTPTransport",
+      "kind": "class",
+      "summary": "Stateful transport class managing session ID, in-flight POSTs, and SSE reconnection.",
+      "detail": "Tracks session_id (from Mcp-Session-Id header), _protocol_version_header (cached for non-stamped requests), and _in_flight_posts (request_id to _InFlightPost for 2026 cancel-by-abort). post_writer dequeues outbound messages; _consume_modern_cancellation translates 2026 cancel notifications into POST aborts. _handle_post_request posts one message and processes JSON or SSE responses. _handle_sse_response reconnects up to MAX_RECONNECTION_ATTEMPTS using Last-Event-Id.",
+      "status": "live",
+      "paths": ["src/mcp/client/streamable_http.py:111-710"],
+      "signature": "class StreamableHTTPTransport",
+      "code": "async def _consume_modern_cancellation(self, session_message):\n    message = session_message.message\n    if not (isinstance(message, JSONRPCNotification) and message.method == \"notifications/cancelled\"):\n        return False\n    request_id = cancelled_request_id_from_params(message.params)\n    post = self._in_flight_posts.get(request_id) if request_id is not None else None\n    if post is not None:\n        if not post.modern:\n            return False\n        logger.debug(\"aborting in-flight POST for cancelled request %r\", request_id)\n        post.scope.cancel()\n        return True\n    return self._protocol_version_header in MODERN_PROTOCOL_VERSIONS"
+    },
+    {
+      "id": "f:src/mcp/client/streamable_http.py#streamable_http_client",
+      "parent": "f:src/mcp/client/streamable_http.py",
+      "name": "streamable_http_client()",
+      "kind": "function",
+      "summary": "Async context manager that creates the StreamableHTTPTransport and yields (read_stream, write_stream).",
+      "detail": "Optionally creates and manages an httpx2.AsyncClient lifecycle. Builds context streams, starts the post_writer task (which starts the GET stream after the initialized notification), yields streams, and sends DELETE to terminate the session on close when terminate_on_close=True.",
+      "status": "live",
+      "paths": ["src/mcp/client/streamable_http.py:712-793"],
+      "signature": "@asynccontextmanager\nasync def streamable_http_client(url: str, *, http_client, terminate_on_close, max_sse_event_size) -> AsyncGenerator[TransportStreams, None]"
+    },
+
+    {
+      "id": "f:src/mcp/client/session_group.py",
+      "parent": "client.session_layer",
+      "name": "ClientSessionGroup module",
+      "kind": "module",
+      "summary": "Aggregates tools, resources, and prompts from multiple MCP server connections with optional name prefixing.",
+      "detail": "ClientSessionGroup manages a dict of ClientSession to component-name sets, plus reverse indexes (_tool_to_session, _prompts, _resources, _tools). connect_to_server establishes transport and session via _establish_session, runs initialize(), then aggregates components. A component_name_hook callable transforms names to avoid collisions across servers. disconnect_from_server removes a session's components and closes its exit stack. call_tool routes to the owning session via _tool_to_session.",
+      "status": "live",
+      "tech": ["Python"],
+      "paths": ["src/mcp/client/session_group.py"]
+    },
+    {
+      "id": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "parent": "f:src/mcp/client/session_group.py",
+      "name": "ClientSessionGroup",
+      "kind": "class",
+      "summary": "Multi-server client: aggregates tools, resources, and prompts from all connected sessions.",
+      "detail": "connect_to_server accepts StdioServerParameters, SseServerParameters, or StreamableHttpParameters. _aggregate_components queries each server for its tools, resources, and prompts, applies the name hook, and merges into the shared dicts. connect_with_session skips transport setup for a pre-built session. Session exit stacks are managed per-session and closed concurrently on group exit.",
+      "status": "live",
+      "paths": ["src/mcp/client/session_group.py:87-453"],
+      "signature": "class ClientSessionGroup"
+    },
+    {
+      "id": "f:src/mcp/client/session_group.py#SseServerParameters",
+      "parent": "f:src/mcp/client/session_group.py",
+      "name": "SseServerParameters",
+      "kind": "class",
+      "summary": "Pydantic model for sse_client parameters used by ClientSessionGroup.",
+      "status": "live",
+      "paths": ["src/mcp/client/session_group.py:31-45"]
+    },
+    {
+      "id": "f:src/mcp/client/session_group.py#StreamableHttpParameters",
+      "parent": "f:src/mcp/client/session_group.py",
+      "name": "StreamableHttpParameters",
+      "kind": "class",
+      "summary": "Pydantic model for streamable_http_client parameters used by ClientSessionGroup.",
+      "status": "live",
+      "paths": ["src/mcp/client/session_group.py:47-66"]
+    },
+
+    {
+      "id": "f:src/mcp/client/_transport.py",
+      "parent": "client.plumbing",
+      "name": "Transport protocol",
+      "kind": "module",
+      "summary": "Defines the Transport Protocol and TransportStreams type alias for client transports.",
+      "detail": "Transport is a Protocol subtype of AbstractAsyncContextManager that yields TransportStreams (a tuple of read and write streams). Re-exports ReadStream and WriteStream from shared._stream_protocols.",
+      "status": "live",
+      "paths": ["src/mcp/client/_transport.py"]
+    },
+    {
+      "id": "f:src/mcp/client/_transport.py#Transport",
+      "parent": "f:src/mcp/client/_transport.py",
+      "name": "Transport",
+      "kind": "class",
+      "summary": "Protocol for MCP client transports: an async context manager yielding (read_stream, write_stream).",
+      "status": "live",
+      "paths": ["src/mcp/client/_transport.py:16-21"],
+      "signature": "class Transport(AbstractAsyncContextManager[TransportStreams], Protocol)"
+    },
+
+    {
+      "id": "f:src/mcp/client/_memory.py",
+      "parent": "client.plumbing",
+      "name": "In-memory transport",
+      "kind": "module",
+      "summary": "In-memory transport for testing MCP servers without network overhead.",
+      "detail": "InMemoryTransport wraps a Server or MCPServer and runs it as a background task via create_client_server_memory_streams. The server task is started with EOF-signalled shutdown: client_write and server_write are closed instead of cancelling outright (avoiding asyncio 3.11 coverage desyncs). A SERVER_SHUTDOWN_GRACE timeout backstops user teardown code.",
+      "status": "live",
+      "paths": ["src/mcp/client/_memory.py"],
+      "facts": [
+        "SERVER_SHUTDOWN_GRACE = 2.0 seconds"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/_memory.py#InMemoryTransport",
+      "parent": "f:src/mcp/client/_memory.py",
+      "name": "InMemoryTransport",
+      "kind": "class",
+      "summary": "In-memory Transport for in-process Server/MCPServer; starts the server as a background task.",
+      "status": "live",
+      "paths": ["src/mcp/client/_memory.py:21-109"],
+      "signature": "class InMemoryTransport"
+    },
+
+    {
+      "id": "f:src/mcp/client/_probe.py",
+      "parent": "client.plumbing",
+      "name": "Era probe",
+      "kind": "module",
+      "summary": "Connect-time era negotiation for mode='auto': probes server/discover and falls back to initialize.",
+      "detail": "negotiate_auto implements the auto-mode policy: probe at LATEST_MODERN_VERSION; on UNSUPPORTED_PROTOCOL_VERSION retry at the highest mutual modern version; on any other MCPError fall back to initialize(); on a successful discover that advertises no modern version fall back as well (a discover-answering legacy server). The fallback's -32022 triggers one corrective re-probe. Non-MCPError exceptions (network, cancellation) propagate without a fallback.",
+      "status": "live",
+      "paths": ["src/mcp/client/_probe.py"]
+    },
+    {
+      "id": "f:src/mcp/client/_probe.py#negotiate_auto",
+      "parent": "f:src/mcp/client/_probe.py",
+      "name": "negotiate_auto()",
+      "kind": "function",
+      "summary": "Drives mode='auto' negotiation: discover probe with fallback to initialize handshake.",
+      "detail": "Called by Client.__aenter__ when mode='auto'. Loops at most twice. First attempt probes at LATEST_MODERN_VERSION. If UNSUPPORTED_PROTOCOL_VERSION and the server names a mutual modern version, retries at that version. If the probe fails for any other MCPError the function tries session.initialize(). If initialize() raises -32022, it has modern-era evidence so it re-probes once more. Any successful DiscoverResult is passed to session.adopt().",
+      "status": "live",
+      "paths": ["src/mcp/client/_probe.py:52-114"],
+      "signature": "async def negotiate_auto(session: ClientSession) -> None",
+      "code": "async def negotiate_auto(session: ClientSession) -> None:\n    version = LATEST_MODERN_VERSION\n    for attempt in range(2):\n        try:\n            raw = await session.send_discover(version)\n        except MCPError as e:\n            if e.code == UNSUPPORTED_PROTOCOL_VERSION:\n                mutual = [v for v in MODERN_PROTOCOL_VERSIONS if v in ...]\n                if mutual and attempt == 0:\n                    version = mutual[-1]\n                    continue\n                if supported is not None and not any(...):\n                    raise  # modern-only and disjoint\n            await session.initialize()  # any other error -> legacy\n            return"
+    },
+
+    {
+      "id": "f:src/mcp/client/_input_required.py",
+      "parent": "client.plumbing",
+      "name": "InputRequired driver",
+      "kind": "module",
+      "summary": "SEP-2322 multi-round-trip driver: retries a request until InputRequiredResult resolves.",
+      "detail": "run_input_required_driver loops until retry() returns a non-InputRequiredResult. Each round dispatches all input_requests concurrently via the dispatch closure (using an anyio task group that cancels on the first ErrorData). State-only rounds (no input_requests) sleep with exponential backoff: 50ms doubling to a 250ms cap, reset by any round carrying actual requests. Exceeds max_rounds raises InputRequiredRoundsExceededError.",
+      "status": "live",
+      "paths": ["src/mcp/client/_input_required.py"],
+      "facts": [
+        "DEFAULT_INPUT_REQUIRED_MAX_ROUNDS = 10",
+        "_STATE_ONLY_BACKOFF_INITIAL_SECONDS = 0.05",
+        "_STATE_ONLY_BACKOFF_CAP_SECONDS = 0.25"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/_input_required.py#run_input_required_driver",
+      "parent": "f:src/mcp/client/_input_required.py",
+      "name": "run_input_required_driver()",
+      "kind": "function",
+      "summary": "Resolves an InputRequiredResult to its terminal result via iterative dispatch and retry.",
+      "status": "live",
+      "paths": ["src/mcp/client/_input_required.py:52-96"],
+      "signature": "async def run_input_required_driver(first: InputRequiredResult, *, dispatch, retry, max_rounds: int = 10) -> ResultT"
+    },
+    {
+      "id": "f:src/mcp/client/_input_required.py#InputRequiredRoundsExceededError",
+      "parent": "f:src/mcp/client/_input_required.py",
+      "name": "InputRequiredRoundsExceededError",
+      "kind": "class",
+      "summary": "Raised when the InputRequired retry loop exhausts max_rounds without a terminal result.",
+      "status": "live",
+      "paths": ["src/mcp/client/_input_required.py:40-49"],
+      "signature": "class InputRequiredRoundsExceededError(RuntimeError)"
+    },
+
+    {
+      "id": "f:src/mcp/client/caching.py",
+      "parent": "client.plumbing",
+      "name": "Response cache",
+      "kind": "module",
+      "summary": "Client-side response caching for SEP-2549 cacheable methods (tools/list, resources/list, etc.).",
+      "detail": "CacheConfig holds store, partition, target_id, default_ttl_ms, clock, and share_public. InMemoryResponseCacheStore is the default LRU-evicting in-process store. ClientResponseCache coordinates store operations: arms keys by scope and era (JSON-encoded fields to prevent collision), guards against write-back races with generation counters, and maps server notifications to evictions. Writes are shielded for cleanup deletes (5-second bound).",
+      "status": "live",
+      "tech": ["Python"],
+      "paths": ["src/mcp/client/caching.py"],
+      "facts": [
+        "MAX_TTL_MS = 24 * 60 * 60 * 1000 (24 hours)",
+        "_GENERATION_MAP_CAP = 4096",
+        "_STORE_CLEANUP_TIMEOUT = 5 seconds",
+        "InMemoryResponseCacheStore default max_entries = 1024"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/caching.py#ClientResponseCache",
+      "parent": "f:src/mcp/client/caching.py",
+      "name": "ClientResponseCache",
+      "kind": "class",
+      "summary": "Coordinates cache reads, writes, and evictions with era-scoped arms and generation-based race guards.",
+      "detail": "read() tries the private arm, then the public arm. write() builds the arm key from scope/era/partition, bumps generations for eviction safety, and stores a deep copy. evict_for_notification() maps ToolListChangedNotification to tools/list, PromptListChanged to prompts/list, ResourceListChanged to both resources/list and resources/templates/list, and ResourceUpdatedNotification to resources/read with the specific URI. All store operations are wrapped in exception boundaries (miss on get failure, no-op on set/delete failure).",
+      "status": "live",
+      "paths": ["src/mcp/client/caching.py:181-388"],
+      "signature": "class ClientResponseCache"
+    },
+    {
+      "id": "f:src/mcp/client/caching.py#CacheConfig",
+      "parent": "f:src/mcp/client/caching.py",
+      "name": "CacheConfig",
+      "kind": "class",
+      "summary": "Configuration for a Client's response cache: store, partition, target_id, TTL, clock, sharing.",
+      "status": "live",
+      "paths": ["src/mcp/client/caching.py:92-132"],
+      "signature": "@dataclass(frozen=True, slots=True)\nclass CacheConfig"
+    },
+    {
+      "id": "f:src/mcp/client/caching.py#InMemoryResponseCacheStore",
+      "parent": "f:src/mcp/client/caching.py",
+      "name": "InMemoryResponseCacheStore",
+      "kind": "class",
+      "summary": "Default in-process LRU cache store; synchronous methods avoid torn writes between concurrent tasks.",
+      "status": "live",
+      "paths": ["src/mcp/client/caching.py:135-170"],
+      "signature": "class InMemoryResponseCacheStore"
+    },
+
+    {
+      "id": "f:src/mcp/client/subscriptions.py",
+      "parent": "client.plumbing",
+      "name": "Subscriptions module",
+      "kind": "module",
+      "summary": "subscriptions/listen driver: ListenRoute state machine, Subscription async iterator, and listen() context manager.",
+      "detail": "listen() sends a SubscriptionsListenRequest with a string request_id (listen-N to avoid dispatcher int collisions), registers a ListenRoute before the send, then awaits acked.wait(). ListenRoute.set_acked records the honored filter; deliver() enqueues typed events (up to _MAX_PENDING_EVENTS) with deduplication; settle() marks the stream end. Subscription.__anext__ awaits the next event, optionally runs an on_event barrier, then consumes it. SubscriptionLost is raised on abrupt drops.",
+      "status": "live",
+      "paths": ["src/mcp/client/subscriptions.py"],
+      "facts": [
+        "_MAX_PENDING_EVENTS = 1024",
+        "listen request_ids are strings 'listen-N' to avoid int collisions"
+      ]
+    },
+    {
+      "id": "f:src/mcp/client/subscriptions.py#listen",
+      "parent": "f:src/mcp/client/subscriptions.py",
+      "name": "listen()",
+      "kind": "function",
+      "summary": "Opens one subscriptions/listen stream on a session and yields a Subscription iterator.",
+      "detail": "Requires a modern protocol version; raises ListenNotSupportedError otherwise. Registers the ListenRoute before sending the request. Wraps the driver coroutine in a task (no timeout, the response arrives when the stream ends). Awaits acked with the session's read timeout. On context exit, settles the route as local and cancels the driver scope.",
+      "status": "live",
+      "paths": ["src/mcp/client/subscriptions.py:200-282"],
+      "signature": "@asynccontextmanager\nasync def listen(session: ClientSession, *, tools_list_changed, prompts_list_changed, resources_list_changed, resource_subscriptions, on_event) -> AsyncIterator[Subscription]"
+    },
+    {
+      "id": "f:src/mcp/client/subscriptions.py#ListenRoute",
+      "parent": "f:src/mcp/client/subscriptions.py",
+      "name": "ListenRoute",
+      "kind": "class",
+      "summary": "Package-internal demux state for one listen stream: acknowledged filter, event queue, and end signal.",
+      "detail": "Fed synchronously by _intercept_notification in receive order. set_acked stores the honored filter and sets the acked Event. deliver() admits events that match the honored filter (with deduplication), settling as lost on backlog overflow. settle() records the end reason (graceful, lost, or local). next_event() awaits the next pending event or end signal.",
+      "status": "live",
+      "paths": ["src/mcp/client/subscriptions.py:75-149"],
+      "signature": "class ListenRoute"
+    },
+
+    {
+      "id": "f:src/mcp/client/extension.py",
+      "parent": "client.plumbing",
+      "name": "Extension API",
+      "kind": "module",
+      "summary": "Opt-in client extension interface: ClientExtension base class, ResultClaim, NotificationBinding, advertise().",
+      "detail": "ClientExtension is the base class for behavioral extensions; subclass, set identifier, and override settings/claims/notifications. ResultClaim attaches an extra result shape to tools/call, keyed by wire resultType. NotificationBinding observes vendor notifications via a bounded FIFO. advertise() builds an ad-only extension. All constraints (identifier format, model subclass, wire alias collisions, Literal result_type field) are enforced at construction via __post_init__.",
+      "status": "live",
+      "paths": ["src/mcp/client/extension.py"]
+    },
+    {
+      "id": "f:src/mcp/client/extension.py#ClientExtension",
+      "parent": "f:src/mcp/client/extension.py",
+      "name": "ClientExtension",
+      "kind": "class",
+      "summary": "Base class for opt-in client extensions: override settings(), claims(), and notifications().",
+      "status": "live",
+      "paths": ["src/mcp/client/extension.py:156-188"],
+      "signature": "class ClientExtension"
+    },
+    {
+      "id": "f:src/mcp/client/extension.py#ResultClaim",
+      "parent": "f:src/mcp/client/extension.py",
+      "name": "ResultClaim",
+      "kind": "class",
+      "summary": "One extra tools/call result shape, keyed by wire resultType, with a resolver callable.",
+      "detail": "Active only at modern protocol versions when the declaring extension is registered. resolve is an async callable that finishes the claimed result and returns CallToolResult. Construction validates that the model subclasses Result but not CallToolResult/InputRequiredResult, that result_type is not in CORE_RESULT_TYPES, and that no field aliases collide with the core result surface.",
+      "status": "live",
+      "paths": ["src/mcp/client/extension.py:80-121"],
+      "signature": "@dataclass(frozen=True, kw_only=True)\nclass ResultClaim(Generic[ClaimedT])"
+    },
+    {
+      "id": "f:src/mcp/client/extension.py#NotificationBinding",
+      "parent": "f:src/mcp/client/extension.py",
+      "name": "NotificationBinding",
+      "kind": "class",
+      "summary": "Binds a vendor notification method to a handler, delivered through a bounded FIFO queue.",
+      "status": "live",
+      "paths": ["src/mcp/client/extension.py:140-153"],
+      "signature": "@dataclass(frozen=True, kw_only=True)\nclass NotificationBinding(Generic[NotifyParamsT])"
+    },
+    {
+      "id": "f:src/mcp/client/extension.py#advertise",
+      "parent": "f:src/mcp/client/extension.py",
+      "name": "advertise()",
+      "kind": "function",
+      "summary": "Returns a ClientExtension that only advertises an identifier (and optional settings) with no behavior.",
+      "status": "live",
+      "paths": ["src/mcp/client/extension.py:200-207"],
+      "signature": "def advertise(identifier: str, settings: dict[str, Any] | None = None) -> ClientExtension"
+    },
+
+    {
+      "id": "f:src/mcp/client/extensions/skills.py",
+      "parent": "client.plumbing",
+      "name": "Skills extension",
+      "kind": "module",
+      "summary": "SEP-2640 Skills extension: register with Client, then call list_skills, get_skill, and read_directory.",
+      "detail": "Skills is a ClientExtension subtype with identifier 'io.modelcontextprotocol/skills'. Its bind() returns a SkillsClient bound to the connected session. SkillsClient.list_skills follows next_cursor to completion and deduplicates skills across pages. get_skill checks the returned URI matches the requested one. read_directory validates that all returned children are sub-URIs of the requested URI.",
+      "status": "live",
+      "paths": ["src/mcp/client/extensions/skills.py"]
+    },
+    {
+      "id": "f:src/mcp/client/extensions/skills.py#Skills",
+      "parent": "f:src/mcp/client/extensions/skills.py",
+      "name": "Skills",
+      "kind": "class",
+      "summary": "Client-side Skills extension (SEP-2640): advertises the extension and binds SkillsClient.",
+      "status": "live",
+      "paths": ["src/mcp/client/extensions/skills.py:42-54"],
+      "signature": "class Skills(ClientExtension)"
+    },
+    {
+      "id": "f:src/mcp/client/extensions/skills.py#SkillsClient",
+      "parent": "f:src/mcp/client/extensions/skills.py",
+      "name": "SkillsClient",
+      "kind": "class",
+      "summary": "SEP-2640 verbs bound to one connected session: list_skills, get_skill, read_directory.",
+      "status": "live",
+      "paths": ["src/mcp/client/extensions/skills.py:57-170"],
+      "signature": "class SkillsClient"
+    },
+
+    {
+      "id": "f:src/mcp/client/context.py",
+      "parent": "client.plumbing",
+      "name": "Client context re-export",
+      "kind": "module",
+      "summary": "Re-exports ClientRequestContext from session.py for backward-compatible imports.",
+      "detail": "A thin re-export shim: imports ClientRequestContext from mcp.client.session and re-exports it via __all__. Code that imports from mcp.client.context rather than mcp.client.session continues to work without modification. No logic lives here.",
+      "status": "live",
+      "paths": ["src/mcp/client/context.py"]
+    },
+
+    {
+      "id": "f:src/mcp/client/__init__.py",
+      "parent": "client",
+      "name": "Client public API",
+      "kind": "module",
+      "summary": "Defines the client package's public surface via __all__: Client, ClientSession, caching types, extension types.",
+      "detail": "Exports Client, ClientSession, ClientRequestContext, IncomingMessage, Transport, advertise, ClientExtension, ResultClaim, NotificationBinding, ClaimContext, UnexpectedClaimedResult, InputRequiredRoundsExceededError, CacheConfig, CacheEntry, CacheKey, CacheMode, InMemoryResponseCacheStore, ResponseCacheStore.",
+      "status": "live",
+      "paths": ["src/mcp/client/__init__.py"]
+    },
+    {
+      "id": "f:src/mcp/client/__main__.py",
+      "parent": "client",
+      "name": "Client CLI entry point",
+      "kind": "module",
+      "summary": "Command-line MCP client: connects to a command (stdio) or HTTP(S) URL (SSE), runs initialize, and exits.",
+      "detail": "cli() parses command_or_url, args, and -e env pairs. For HTTP/HTTPS URLs it uses sse_client; for all other values it uses stdio_client. The session is initialized and then exits. Uses Trio as the anyio backend.",
+      "status": "live",
+      "paths": ["src/mcp/client/__main__.py"]
+    },
+
+    {
+      "id": "f:tests/client/test_client.py",
+      "parent": "client",
+      "name": "test_client",
+      "kind": "test",
+      "summary": "Integration tests for the Client class: in-process, stdio, HTTP, caching, and extension scenarios.",
+      "paths": ["tests/client/test_client.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_session.py",
+      "parent": "client",
+      "name": "test_session",
+      "kind": "test",
+      "summary": "Unit tests for ClientSession: handshake, request methods, server callbacks, and notification handling.",
+      "paths": ["tests/client/test_session.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_stdio.py",
+      "parent": "client",
+      "name": "test_stdio",
+      "kind": "test",
+      "summary": "Tests for stdio_client: subprocess spawning, pipe shutdown, encoding, and Windows compatibility.",
+      "paths": ["tests/client/test_stdio.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_streamable_http.py",
+      "parent": "client",
+      "name": "test_streamable_http",
+      "kind": "test",
+      "summary": "Tests for StreamableHTTPTransport: POST handling, SSE, reconnection, 2026 cancellation.",
+      "paths": ["tests/client/test_streamable_http.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_caching.py",
+      "parent": "client",
+      "name": "test_caching",
+      "kind": "test",
+      "summary": "Unit tests for ClientResponseCache: TTL, eviction, and generation races.",
+      "paths": ["tests/client/test_caching.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_client_caching.py",
+      "parent": "client",
+      "name": "test_client_caching",
+      "kind": "test",
+      "summary": "Integration tests for Client caching: list verbs, read_resource, and eviction.",
+      "paths": ["tests/client/test_client_caching.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_subscriptions.py",
+      "parent": "client",
+      "name": "test_subscriptions",
+      "kind": "test",
+      "summary": "Tests for subscriptions/listen: ack, event delivery, and SubscriptionLost.",
+      "paths": ["tests/client/test_subscriptions.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_session_group.py",
+      "parent": "client",
+      "name": "test_session_group",
+      "kind": "test",
+      "summary": "Tests for ClientSessionGroup: multi-server aggregation and disconnect.",
+      "paths": ["tests/client/test_session_group.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_probe.py",
+      "parent": "client",
+      "name": "test_probe",
+      "kind": "test",
+      "summary": "Tests for negotiate_auto: discover, legacy fallback, and re-probe paths.",
+      "paths": ["tests/client/test_probe.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_input_required.py",
+      "parent": "client",
+      "name": "test_input_required",
+      "kind": "test",
+      "summary": "Tests for run_input_required_driver: dispatch, retry, and round-limit errors.",
+      "paths": ["tests/client/test_input_required.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_client_extensions.py",
+      "parent": "client",
+      "name": "test_client_extensions",
+      "kind": "test",
+      "summary": "Tests for ClientExtension, ResultClaim, and extension folding in Client.",
+      "paths": ["tests/client/test_client_extensions.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_extension.py",
+      "parent": "client",
+      "name": "test_extension",
+      "kind": "test",
+      "summary": "Unit tests for extension.py: ResultClaim construction guards and advertise().",
+      "paths": ["tests/client/test_extension.py"],
+      "status": "live"
+    },
+    {
+      "id": "f:tests/client/test_session_claims.py",
+      "parent": "client",
+      "name": "test_session_claims",
+      "kind": "test",
+      "summary": "Tests for session-level claim parsing and UnexpectedClaimedResult.",
+      "paths": ["tests/client/test_session_claims.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.send_ping",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.send_ping()",
+      "kind": "function",
+      "summary": "Sends a ping request and returns EmptyResult.",
+      "detail": "Wraps PingRequest in send_request with an optional _meta parameter. Used by callers to test connectivity or measure round-trip latency without side effects.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:847-849"],
+      "signature": "async def send_ping(self, *, meta: RequestParamsMeta | None = None) -> types.EmptyResult",
+      "code": "async def send_ping(self, *, meta: RequestParamsMeta | None = None) -> types.EmptyResult:\n    \"\"\"Send a ping request.\"\"\"\n    return await self.send_request(\n        types.PingRequest(params=types.RequestParams(_meta=meta)), types.EmptyResult\n    )"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.set_logging_level",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.set_logging_level()",
+      "kind": "function",
+      "summary": "Sends a logging/setLevel request (deprecated as of 2026-07-28, SEP-2577).",
+      "detail": "Wraps SetLevelRequest via send_request. Marked deprecated; the logging capability was removed in the 2026-07-28 spec revision. Callers on modern servers should stop using it.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:878-888"],
+      "signature": "async def set_logging_level(self, level: types.LoggingLevel, *, meta: RequestParamsMeta | None = None) -> types.EmptyResult"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.read_resource",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.read_resource()",
+      "kind": "function",
+      "summary": "Sends a resources/read request, optionally carrying input responses for multi-round trips.",
+      "detail": "Serializes ReadResourceRequest via send_request. When allow_input_required=False (default) and the server returns InputRequiredResult, raises RuntimeError. When True, returns the InputRequiredResult so the caller can resolve the embedded input_requests and retry. Accepts input_responses and request_state to continue a previous round.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:933-968"],
+      "signature": "async def read_resource(self, uri: str, *, input_responses, request_state, meta, allow_input_required: bool = False) -> types.ReadResourceResult | types.InputRequiredResult",
+      "code": "async def read_resource(self, uri, *, input_responses=None, request_state=None, meta=None, allow_input_required=False):\n    result = await self.send_request(\n        types.ReadResourceRequest(\n            params=types.ReadResourceRequestParams(\n                uri=uri,\n                input_responses=input_responses,\n                request_state=request_state,\n                _meta=meta,\n            ),\n        ),\n        _ReadResourceResultAdapter,\n    )\n    if isinstance(result, types.InputRequiredResult) and not allow_input_required:\n        raise _input_required_unexpected(\"read_resource\")\n    return result"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.get_prompt",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.get_prompt()",
+      "kind": "function",
+      "summary": "Sends a prompts/get request, returning GetPromptResult or InputRequiredResult.",
+      "detail": "Wraps GetPromptRequest via send_request with optional name, arguments, input_responses, request_state, and meta. When allow_input_required=False and the server returns InputRequiredResult, raises RuntimeError; set it True to handle multi-round trip resolution manually.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1217-1254"],
+      "signature": "async def get_prompt(self, name: str, arguments: dict[str, str] | None = None, *, input_responses, request_state, meta, allow_input_required: bool = False) -> types.GetPromptResult | types.InputRequiredResult"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.complete",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.complete()",
+      "kind": "function",
+      "summary": "Sends a completion/complete request for argument auto-completion.",
+      "detail": "Builds CompleteRequest from a ResourceTemplateReference or PromptReference, a CompletionArgument, and optional context_arguments. Delegates to send_request returning CompleteResult.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1256-1276"],
+      "signature": "async def complete(self, ref: types.ResourceTemplateReference | types.PromptReference, argument: dict[str, str], context_arguments: dict[str, str] | None = None) -> types.CompleteResult",
+      "code": "async def complete(self, ref, argument, context_arguments=None):\n    context = None\n    if context_arguments is not None:\n        context = types.CompletionContext(arguments=context_arguments)\n    return await self.send_request(\n        types.CompleteRequest(\n            params=types.CompleteRequestParams(\n                ref=ref,\n                argument=types.CompletionArgument(**argument),\n                context=context,\n            ),\n        ),\n        types.CompleteResult,\n    )"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.subscribe_resource",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.subscribe_resource()",
+      "kind": "function",
+      "summary": "Sends a resources/subscribe request (deprecated; replaced by Client.listen() on 2026-07-28 servers).",
+      "detail": "Wraps SubscribeRequest via send_request. Marked deprecated because resources/subscribe was removed in the 2026-07-28 spec. Only valid against 2025-era servers.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:974-978"],
+      "signature": "async def subscribe_resource(self, uri: str, *, meta: RequestParamsMeta | None = None) -> types.EmptyResult"
+    },
+    {
+      "id": "f:src/mcp/client/session.py#ClientSession.list_tools",
+      "parent": "f:src/mcp/client/session.py#ClientSession",
+      "name": "ClientSession.list_tools()",
+      "kind": "function",
+      "summary": "Sends a tools/list request and passes the result through _absorb_tool_listing.",
+      "detail": "Builds ListToolsRequest from an optional PaginatedRequestParams cursor. After receiving ListToolsResult, calls _absorb_tool_listing with complete=True when both no cursor was sent and the result carries no next_cursor, triggering full per-tool state prune.",
+      "status": "live",
+      "paths": ["src/mcp/client/session.py:1278-1289"],
+      "signature": "async def list_tools(self, *, params: types.PaginatedRequestParams | None = None) -> types.ListToolsResult",
+      "code": "async def list_tools(self, *, params: types.PaginatedRequestParams | None = None) -> types.ListToolsResult:\n    result = await self.send_request(\n        types.ListToolsRequest(params=params),\n        types.ListToolsResult,\n    )\n    complete = (params is None or params.cursor is None) and result.next_cursor is None\n    return self._absorb_tool_listing(result, complete=complete)"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client.list_tools",
+      "parent": "f:src/mcp/client/client.py#Client",
+      "name": "Client.list_tools()",
+      "kind": "function",
+      "summary": "Lists available tools, serving the response from the cache when possible.",
+      "detail": "Delegates to _cached_fetch with method 'tools/list'. On a cache hit, re-absorbs the served listing through session._absorb_tool_listing to rebuild per-tool derived state without a network round trip. On a cache miss, calls session.list_tools and writes the result.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:967-987"],
+      "signature": "async def list_tools(self, *, cursor: str | None = None, meta: RequestParamsMeta | None = None, cache_mode: CacheMode = 'use') -> ListToolsResult"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client.read_resource",
+      "parent": "f:src/mcp/client/client.py#Client",
+      "name": "Client.read_resource()",
+      "kind": "function",
+      "summary": "Reads a resource, driving InputRequiredResult rounds automatically via callbacks.",
+      "detail": "Wraps session.read_resource with caching and input-required retry logic. Seeded calls (input_responses or request_state set) bypass the cache (spec MUST). On a cache miss the first call result is stored unless it is InputRequiredResult (multi-round responses must not be cached). The input-required driver rounds use allow_input_required=True and are never cached.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:645-707"],
+      "signature": "async def read_resource(self, uri: str, *, input_responses, request_state, meta, cache_mode: CacheMode = 'use') -> ReadResourceResult",
+      "code": "async def retry(r, s):\n    return await self.session.read_resource(\n        uri, input_responses=r, request_state=s, meta=meta, allow_input_required=True\n    )\nseeded = input_responses is not None or request_state is not None\ncache = None if seeded else self._response_cache\nif cache is None or cache_mode == \"bypass\":\n    return await self._drive_input_required(await retry(input_responses, request_state), retry)\n_ = self.session\nif meta is not None and cache_mode == \"use\":\n    cache_mode = \"refresh\"\nif cache_mode == \"use\" and (hit := await cache.read(\"resources/read\", uri)) is not None:\n    return cast(ReadResourceResult, hit)\ngen = cache.capture(\"resources/read\", uri)\nfirst = await retry(None, None)"
+    },
+    {
+      "id": "f:src/mcp/client/client.py#Client.get_prompt",
+      "parent": "f:src/mcp/client/client.py#Client",
+      "name": "Client.get_prompt()",
+      "kind": "function",
+      "summary": "Gets a prompt from the server, driving InputRequiredResult rounds automatically.",
+      "detail": "Wraps session.get_prompt with the input-required driver. No response caching is applied to prompts/get. Seeded calls resume a specific exchange. The driver dispatches each round's input_requests concurrently through the client's sampling/elicitation/roots callbacks.",
+      "status": "live",
+      "paths": ["src/mcp/client/client.py:885-924"],
+      "signature": "async def get_prompt(self, name: str, arguments: dict[str, str] | None = None, *, input_responses, request_state, meta) -> GetPromptResult"
+    },
+    {
+      "id": "f:src/mcp/client/session_group.py#ClientSessionGroup.connect_to_server",
+      "parent": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "name": "ClientSessionGroup.connect_to_server()",
+      "kind": "function",
+      "summary": "Establishes transport and session, then aggregates components from the new server.",
+      "detail": "Calls _establish_session to open transport and create ClientSession (which runs initialize). Then delegates to connect_with_session to run _aggregate_components (querying tools, resources, and prompts, applying the name hook, and merging into shared indexes). The session exit stack is stored keyed by session for later disconnect.",
+      "status": "live",
+      "paths": ["src/mcp/client/session_group.py:296-303"],
+      "signature": "async def connect_to_server(self, server_params: ServerParameters, session_params: ClientSessionParameters | None = None) -> mcp.ClientSession",
+      "code": "async def connect_to_server(self, server_params, session_params=None):\n    server_info, session = await self._establish_session(\n        server_params, session_params or ClientSessionParameters()\n    )\n    return await self.connect_with_session(server_info, session)"
+    }
+  ],
+
+  "edges": [
+    {
+      "from": "f:src/mcp/client/client.py#Client.__post_init__",
+      "to": "f:src/mcp/client/streamable_http.py#streamable_http_client",
+      "kind": "calls",
+      "label": "URL string -> streamable_http_client",
+      "evidence": "src/mcp/client/client.py:402"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.__post_init__",
+      "to": "f:src/mcp/client/stdio.py#stdio_client",
+      "kind": "calls",
+      "label": "StdioServerParameters -> stdio_client",
+      "evidence": "src/mcp/client/client.py:403-404"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client",
+      "to": "f:src/mcp/client/session.py#ClientSession",
+      "kind": "calls",
+      "label": "creates and enters ClientSession in __aenter__",
+      "evidence": "src/mcp/client/client.py:462-463"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client",
+      "to": "f:src/mcp/client/_probe.py#negotiate_auto",
+      "kind": "calls",
+      "label": "mode='auto' -> negotiate_auto",
+      "evidence": "src/mcp/client/client.py:468"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client",
+      "to": "f:src/mcp/client/_memory.py#InMemoryTransport",
+      "kind": "calls",
+      "label": "legacy in-process mode uses InMemoryTransport",
+      "evidence": "src/mcp/client/client.py:116-118"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.call_tool",
+      "to": "f:src/mcp/client/_input_required.py#run_input_required_driver",
+      "kind": "calls",
+      "label": "drives InputRequiredResult retry loop",
+      "evidence": "src/mcp/client/client.py:855"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client",
+      "to": "f:src/mcp/client/subscriptions.py#listen",
+      "kind": "calls",
+      "label": "Client.listen() delegates to subscriptions.listen()",
+      "evidence": "src/mcp/client/client.py:733"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client._cached_fetch",
+      "to": "f:src/mcp/client/caching.py#ClientResponseCache",
+      "kind": "calls",
+      "label": "reads and writes response cache",
+      "evidence": "src/mcp/client/client.py:588-610"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.initialize",
+      "to": "f:src/mcp/client/session.py#ClientSession.adopt",
+      "kind": "calls",
+      "label": "installs InitializeResult state",
+      "evidence": "src/mcp/client/session.py:669"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.discover",
+      "to": "f:src/mcp/client/session.py#ClientSession.adopt",
+      "kind": "calls",
+      "label": "installs DiscoverResult state",
+      "evidence": "src/mcp/client/session.py:791"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "to": "f:src/mcp/shared/dispatcher.py#Dispatcher",
+      "kind": "calls",
+      "label": "delegates raw request to Dispatcher",
+      "evidence": "src/mcp/client/session.py:586"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession._on_request",
+      "to": "f:src/mcp/client/session.py#ClientSession.dispatch_input_request",
+      "kind": "calls",
+      "label": "routes non-ping server requests",
+      "evidence": "src/mcp/client/session.py:1359"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.call_tool",
+      "to": "f:src/mcp/client/session.py#ClientSession._absorb_tool_listing",
+      "kind": "calls",
+      "label": "refreshes tool state via list_tools on schema miss",
+      "evidence": "src/mcp/client/session.py:1127"
+    },
+    {
+      "from": "f:src/mcp/client/_probe.py#negotiate_auto",
+      "to": "f:src/mcp/client/session.py#ClientSession",
+      "kind": "calls",
+      "label": "calls send_discover, initialize, adopt",
+      "evidence": "src/mcp/client/_probe.py:69-112"
+    },
+    {
+      "from": "f:src/mcp/client/subscriptions.py#listen",
+      "to": "f:src/mcp/client/session.py#ClientSession",
+      "kind": "calls",
+      "label": "registers/unregisters ListenRoute and sends the request",
+      "evidence": "src/mcp/client/subscriptions.py:237-282"
+    },
+    {
+      "from": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "to": "f:src/mcp/client/session.py#ClientSession",
+      "kind": "calls",
+      "label": "creates and manages multiple ClientSession connections",
+      "evidence": "src/mcp/client/session_group.py:344-358"
+    },
+    {
+      "from": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "to": "f:src/mcp/client/stdio.py#stdio_client",
+      "kind": "calls",
+      "label": "StdioServerParameters path",
+      "evidence": "src/mcp/client/session_group.py:316-317"
+    },
+    {
+      "from": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "to": "f:src/mcp/client/sse.py#sse_client",
+      "kind": "calls",
+      "label": "SseServerParameters path",
+      "evidence": "src/mcp/client/session_group.py:319-325"
+    },
+    {
+      "from": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "to": "f:src/mcp/client/streamable_http.py#streamable_http_client",
+      "kind": "calls",
+      "label": "StreamableHttpParameters path",
+      "evidence": "src/mcp/client/session_group.py:336-342"
+    },
+    {
+      "from": "f:src/mcp/client/_memory.py#InMemoryTransport",
+      "to": "f:src/mcp/shared/memory.py#create_client_server_memory_streams",
+      "kind": "calls",
+      "label": "creates in-memory stream pairs",
+      "evidence": "src/mcp/client/_memory.py:50"
+    },
+    {
+      "from": "f:src/mcp/client/stdio.py#stdio_client",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "spawns subprocess and manages tasks",
+      "evidence": "src/mcp/client/stdio.py:201-212"
+    },
+    {
+      "from": "f:src/mcp/client/sse.py#sse_client",
+      "to": "x:httpx",
+      "kind": "calls",
+      "label": "opens SSE connection and POSTs messages",
+      "evidence": "src/mcp/client/sse.py:67-170"
+    },
+    {
+      "from": "f:src/mcp/client/streamable_http.py#streamable_http_client",
+      "to": "x:httpx",
+      "kind": "calls",
+      "label": "POSTs requests and streams SSE responses",
+      "evidence": "src/mcp/client/streamable_http.py:752-792"
+    },
+    {
+      "from": "f:src/mcp/client/extensions/skills.py#Skills",
+      "to": "f:src/mcp/client/extension.py#ClientExtension",
+      "kind": "calls",
+      "label": "subclasses ClientExtension",
+      "evidence": "src/mcp/client/extensions/skills.py:42"
+    },
+    {
+      "from": "f:src/mcp/client/extensions/skills.py#SkillsClient",
+      "to": "f:src/mcp/client/session.py#ClientSession",
+      "kind": "calls",
+      "label": "sends skills/list, skills/get, directory/read",
+      "evidence": "src/mcp/client/extensions/skills.py:99-131"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client",
+      "to": "x:mcp-server-peer",
+      "kind": "http",
+      "label": "sends MCP protocol messages over Streamable HTTP or SSE",
+      "evidence": "src/mcp/client/client.py:402-406"
+    },
+    {
+      "from": "f:src/mcp/client/stdio.py#stdio_client",
+      "to": "x:mcp-server-peer",
+      "kind": "calls",
+      "label": "communicates via subprocess stdin/stdout",
+      "evidence": "src/mcp/client/stdio.py:124-132"
+    },
+    {
+      "from": "f:tests/client/test_client.py",
+      "to": "f:src/mcp/client/client.py#Client",
+      "kind": "tests",
+      "label": "tests Client lifecycle, negotiation, and verbs",
+      "evidence": "tests/client/test_client.py:1"
+    },
+    {
+      "from": "f:tests/client/test_session.py",
+      "to": "f:src/mcp/client/session.py#ClientSession",
+      "kind": "tests",
+      "label": "tests ClientSession request methods and callbacks",
+      "evidence": "tests/client/test_session.py:1"
+    },
+    {
+      "from": "f:tests/client/test_stdio.py",
+      "to": "f:src/mcp/client/stdio.py#stdio_client",
+      "kind": "tests",
+      "label": "tests stdio subprocess lifecycle and shutdown",
+      "evidence": "tests/client/test_stdio.py:1"
+    },
+    {
+      "from": "f:tests/client/test_streamable_http.py",
+      "to": "f:src/mcp/client/streamable_http.py#StreamableHTTPTransport",
+      "kind": "tests",
+      "label": "tests POST, SSE, reconnection, and cancellation",
+      "evidence": "tests/client/test_streamable_http.py:1"
+    },
+    {
+      "from": "f:tests/client/test_caching.py",
+      "to": "f:src/mcp/client/caching.py#ClientResponseCache",
+      "kind": "tests",
+      "label": "tests cache TTL, eviction, and generation races",
+      "evidence": "tests/client/test_caching.py:1"
+    },
+    {
+      "from": "f:tests/client/test_client_caching.py",
+      "to": "f:src/mcp/client/client.py#Client._cached_fetch",
+      "kind": "tests",
+      "label": "tests list-verb caching and notification eviction",
+      "evidence": "tests/client/test_client_caching.py:1"
+    },
+    {
+      "from": "f:tests/client/test_subscriptions.py",
+      "to": "f:src/mcp/client/subscriptions.py#listen",
+      "kind": "tests",
+      "label": "tests listen ack, event delivery, and SubscriptionLost",
+      "evidence": "tests/client/test_subscriptions.py:1"
+    },
+    {
+      "from": "f:tests/client/test_session_group.py",
+      "to": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "kind": "tests",
+      "label": "tests multi-server aggregation and disconnect",
+      "evidence": "tests/client/test_session_group.py:1"
+    },
+    {
+      "from": "f:tests/client/test_probe.py",
+      "to": "f:src/mcp/client/_probe.py#negotiate_auto",
+      "kind": "tests",
+      "label": "tests auto-mode probe, fallback, and re-probe",
+      "evidence": "tests/client/test_probe.py:1"
+    },
+    {
+      "from": "f:tests/client/test_input_required.py",
+      "to": "f:src/mcp/client/_input_required.py#run_input_required_driver",
+      "kind": "tests",
+      "label": "tests dispatch, retry, backoff, and round limits",
+      "evidence": "tests/client/test_input_required.py:1"
+    },
+    {
+      "from": "f:tests/client/test_client_extensions.py",
+      "to": "f:src/mcp/client/client.py#Client",
+      "kind": "tests",
+      "label": "tests extension folding and claim resolution",
+      "evidence": "tests/client/test_client_extensions.py:1"
+    },
+    {
+      "from": "f:tests/client/test_extension.py",
+      "to": "f:src/mcp/client/extension.py#ResultClaim",
+      "kind": "tests",
+      "label": "tests ResultClaim construction guards",
+      "evidence": "tests/client/test_extension.py:1"
+    },
+    {
+      "from": "f:tests/client/test_session_claims.py",
+      "to": "f:src/mcp/client/session.py#ClientSession.call_tool",
+      "kind": "tests",
+      "label": "tests session-level claim parsing",
+      "evidence": "tests/client/test_session_claims.py:1"
+    },
+
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.send_ping",
+      "to": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "kind": "calls",
+      "label": "sends PingRequest via send_request",
+      "evidence": "src/mcp/client/session.py:848-849"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.set_logging_level",
+      "to": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "kind": "calls",
+      "label": "sends SetLevelRequest via send_request",
+      "evidence": "src/mcp/client/session.py:885-887"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.read_resource",
+      "to": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "kind": "calls",
+      "label": "sends ReadResourceRequest via send_request",
+      "evidence": "src/mcp/client/session.py:955"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.get_prompt",
+      "to": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "kind": "calls",
+      "label": "sends GetPromptRequest via send_request",
+      "evidence": "src/mcp/client/session.py:1241"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.complete",
+      "to": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "kind": "calls",
+      "label": "sends CompleteRequest via send_request",
+      "evidence": "src/mcp/client/session.py:1267"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.subscribe_resource",
+      "to": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "kind": "calls",
+      "label": "sends SubscribeRequest via send_request",
+      "evidence": "src/mcp/client/session.py:976"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.list_tools",
+      "to": "f:src/mcp/client/session.py#ClientSession.send_request",
+      "kind": "calls",
+      "label": "sends ListToolsRequest via send_request",
+      "evidence": "src/mcp/client/session.py:1284"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.list_tools",
+      "to": "f:src/mcp/client/session.py#ClientSession._absorb_tool_listing",
+      "kind": "calls",
+      "label": "rebuilds per-tool state from listing result",
+      "evidence": "src/mcp/client/session.py:1289"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.list_tools",
+      "to": "f:src/mcp/client/client.py#Client._cached_fetch",
+      "kind": "calls",
+      "label": "serves list via cache layer",
+      "evidence": "src/mcp/client/client.py:975"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.list_tools",
+      "to": "f:src/mcp/client/session.py#ClientSession.list_tools",
+      "kind": "calls",
+      "label": "sends uncached tools/list via session",
+      "evidence": "src/mcp/client/client.py:980"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.read_resource",
+      "to": "f:src/mcp/client/session.py#ClientSession.read_resource",
+      "kind": "calls",
+      "label": "delegates read with allow_input_required=True",
+      "evidence": "src/mcp/client/client.py:681"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.read_resource",
+      "to": "f:src/mcp/client/caching.py#ClientResponseCache",
+      "kind": "calls",
+      "label": "reads and writes resources/read cache entries",
+      "evidence": "src/mcp/client/client.py:695-701"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.get_prompt",
+      "to": "f:src/mcp/client/session.py#ClientSession.get_prompt",
+      "kind": "calls",
+      "label": "delegates get with allow_input_required=True",
+      "evidence": "src/mcp/client/client.py:920"
+    },
+    {
+      "from": "f:src/mcp/client/session_group.py#ClientSessionGroup.connect_to_server",
+      "to": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "kind": "calls",
+      "label": "calls connect_with_session after _establish_session",
+      "evidence": "src/mcp/client/session_group.py:303"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#_connect_transport",
+      "to": "f:src/mcp/client/_transport.py#Transport",
+      "kind": "calls",
+      "label": "enters the Transport context manager to get streams",
+      "evidence": "src/mcp/client/client.py:103"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#_connect_inproc",
+      "to": "f:src/mcp/client/_memory.py#InMemoryTransport",
+      "kind": "calls",
+      "label": "legacy in-process mode wraps server in InMemoryTransport",
+      "evidence": "src/mcp/client/client.py:116"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.listen",
+      "to": "f:src/mcp/client/subscriptions.py#listen",
+      "kind": "calls",
+      "label": "delegates to subscriptions.listen with eviction barrier",
+      "evidence": "src/mcp/client/client.py:733"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.listen",
+      "to": "f:src/mcp/client/subscriptions.py#ListenRoute",
+      "kind": "calls",
+      "label": "listen() registers a ListenRoute before sending the request",
+      "evidence": "src/mcp/client/subscriptions.py:237"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession._on_notify",
+      "to": "f:src/mcp/client/extension.py#NotificationBinding",
+      "kind": "calls",
+      "label": "delivers unknown method notifications to binding queues",
+      "evidence": "src/mcp/client/session.py:1456-1461"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession._intercept_notification",
+      "to": "f:src/mcp/client/subscriptions.py#ListenRoute",
+      "kind": "calls",
+      "label": "routes events to registered ListenRoute in receive order",
+      "evidence": "src/mcp/client/session.py:1443"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.dispatch_input_request",
+      "to": "f:src/mcp/client/session.py#SamplingFnT",
+      "kind": "calls",
+      "label": "routes CreateMessageRequest to sampling callback",
+      "evidence": "src/mcp/client/session.py:1383-1384"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession.dispatch_input_request",
+      "to": "f:src/mcp/client/session.py#ElicitationFnT",
+      "kind": "calls",
+      "label": "routes ElicitRequest to elicitation callback",
+      "evidence": "src/mcp/client/session.py:1385-1386"
+    },
+    {
+      "from": "f:src/mcp/client/session.py#ClientSession._on_request",
+      "to": "f:src/mcp/client/session.py#ClientRequestContext",
+      "kind": "calls",
+      "label": "builds ClientRequestContext for server-initiated requests",
+      "evidence": "src/mcp/client/session.py:1356"
+    },
+    {
+      "from": "f:src/mcp/client/stdio.py#stdio_client",
+      "to": "f:src/mcp/client/stdio.py#StdioServerParameters",
+      "kind": "reads",
+      "label": "reads command, args, env, cwd, encoding to spawn subprocess",
+      "evidence": "src/mcp/client/stdio.py:122-132"
+    },
+    {
+      "from": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "to": "f:src/mcp/client/session_group.py#SseServerParameters",
+      "kind": "reads",
+      "label": "reads SseServerParameters fields to call sse_client",
+      "evidence": "src/mcp/client/session_group.py:319-325"
+    },
+    {
+      "from": "f:src/mcp/client/session_group.py#ClientSessionGroup",
+      "to": "f:src/mcp/client/session_group.py#StreamableHttpParameters",
+      "kind": "reads",
+      "label": "reads fields to call streamable_http_client",
+      "evidence": "src/mcp/client/session_group.py:336-342"
+    },
+    {
+      "from": "f:src/mcp/client/client.py#Client.__post_init__",
+      "to": "f:src/mcp/client/_transport.py#Transport",
+      "kind": "reads",
+      "label": "accepts user-supplied Transport for _connect_transport",
+      "evidence": "src/mcp/client/client.py:406-407"
+    },
+    {
+      "from": "f:src/mcp/client/_input_required.py#InputRequiredRoundsExceededError",
+      "to": "f:src/mcp/client/_input_required.py#run_input_required_driver",
+      "kind": "calls",
+      "label": "raised by driver when max_rounds is exhausted",
+      "evidence": "src/mcp/client/_input_required.py:40-93"
+    },
+    {
+      "from": "f:src/mcp/client/caching.py#ClientResponseCache",
+      "to": "f:src/mcp/client/caching.py#CacheConfig",
+      "kind": "reads",
+      "label": "reads TTL, partition, store, and clock from CacheConfig",
+      "evidence": "src/mcp/client/caching.py:181-200"
+    },
+    {
+      "from": "f:src/mcp/client/caching.py#ClientResponseCache",
+      "to": "f:src/mcp/client/caching.py#InMemoryResponseCacheStore",
+      "kind": "calls",
+      "label": "instantiates InMemoryResponseCacheStore when store is None",
+      "evidence": "src/mcp/client/caching.py:195"
+    },
+    {
+      "from": "f:src/mcp/client/subscriptions.py#listen",
+      "to": "f:src/mcp/client/subscriptions.py#ListenRoute",
+      "kind": "calls",
+      "label": "creates and registers ListenRoute before sending",
+      "evidence": "src/mcp/client/subscriptions.py:237"
+    },
+    {
+      "from": "f:src/mcp/client/extension.py#advertise",
+      "to": "f:src/mcp/client/extension.py#ClientExtension",
+      "kind": "calls",
+      "label": "returns a minimal _AdvertiseOnly subclass of ClientExtension",
+      "evidence": "src/mcp/client/extension.py:206-207"
+    },
+    {
+      "from": "f:src/mcp/client/extension.py#NotificationBinding",
+      "to": "f:src/mcp/client/extension.py#ClientExtension",
+      "kind": "configures",
+      "label": "declared via ClientExtension.notifications() for delivery",
+      "evidence": "src/mcp/client/extension.py:140-153"
+    }
+  ],
+
+  "flows": [
+    {
+      "id": "flow.client.http-open-call-close",
+      "name": "Open an HTTP client, call a tool, close",
+      "summary": "How a URL string becomes a connected Client, runs initialize/discover, calls a tool, and cleans up.",
+      "steps": [
+        {
+          "node": "f:src/mcp/client/client.py#Client.__post_init__",
+          "text": "Client('http://localhost:8000/mcp') enters __post_init__. The URL string dispatches to _connect_transport(streamable_http_client(url)), storing the resolver as _connect."
+        },
+        {
+          "node": "f:src/mcp/client/client.py#Client",
+          "text": "__aenter__ enters the AsyncExitStack, calls _build_session to enter the StreamableHTTPTransport context manager (which starts the post_writer task), wraps the streams in a JSONRPCDispatcher, and constructs ClientSession."
+        },
+        {
+          "node": "f:src/mcp/client/_probe.py#negotiate_auto",
+          "text": "With mode='auto', negotiate_auto probes server/discover at the latest modern protocol version. A modern server returns DiscoverResult; session.adopt() installs the modern stamp and negotiated_version."
+        },
+        {
+          "node": "f:src/mcp/client/session.py#ClientSession.send_request",
+          "text": "Client.call_tool serializes CallToolRequest via model_dump, the modern stamp injects Mcp-Protocol-Version / Mcp-Method / _meta headers, and send_request calls dispatcher.send_raw_request."
+        },
+        {
+          "node": "f:src/mcp/client/streamable_http.py#StreamableHTTPTransport",
+          "text": "post_writer dequeues the message, _handle_post_request POSTs to the server URL, reads the application/json or text/event-stream response, and delivers the parsed JSONRPCResponse into the read stream."
+        },
+        {
+          "node": "f:src/mcp/client/session.py#ClientSession.call_tool",
+          "text": "send_request parses the raw dict into CallToolResult via _call_tool_adapter, then validate_tool_result checks structured_content against the tool's output schema. The result is returned to the caller."
+        },
+        {
+          "node": "f:src/mcp/client/client.py#Client",
+          "text": "__aexit__ unwinds the AsyncExitStack: the session's task group is cancelled, StreamableHTTPTransport sends DELETE (terminate_on_close=True), and the httpx2 client is closed."
+        }
+      ]
+    },
+    {
+      "id": "flow.client.stdio-launch-list",
+      "name": "Launch a local server via stdio and list its tools",
+      "summary": "How StdioServerParameters spawns a subprocess, runs the legacy handshake, and lists tools.",
+      "steps": [
+        {
+          "node": "f:src/mcp/client/stdio.py#StdioServerParameters",
+          "text": "StdioServerParameters(command='python', args=['-m', 'my_server']) holds the subprocess spec."
+        },
+        {
+          "node": "f:src/mcp/client/client.py#Client.__post_init__",
+          "text": "Client(params) detects StdioServerParameters, stores _connect_transport(stdio_client(params)). No network connection yet."
+        },
+        {
+          "node": "f:src/mcp/client/stdio.py#stdio_client",
+          "text": "__aenter__ calls stdio_client, which spawns the process via _create_platform_compatible_process (new session on POSIX, Job Object on Windows), starts stdout_reader and stdin_writer tasks, and yields (read_stream, write_stream)."
+        },
+        {
+          "node": "f:src/mcp/client/session.py#ClientSession.initialize",
+          "text": "With mode='legacy' (or auto falling back to initialize), ClientSession.initialize() sends InitializeRequest, checks protocol_version in HANDSHAKE_PROTOCOL_VERSIONS, calls adopt(), and sends InitializedNotification."
+        },
+        {
+          "node": "f:src/mcp/client/session.py#ClientSession._absorb_tool_listing",
+          "text": "Client.list_tools calls session.list_tools, which sends ListToolsRequest. The response is processed by _absorb_tool_listing: output schemas and x-mcp-header maps are populated; on a legacy version no header filtering is applied."
+        },
+        {
+          "node": "f:src/mcp/client/stdio.py#stdio_client",
+          "text": "On context exit, shutdown() closes the write stream, waits PROCESS_TERMINATION_TIMEOUT seconds for the process to exit, then kills the process tree if it has not exited. All streams are closed inside a cancel-shielded scope."
+        }
+      ]
+    }
+  ]
+}

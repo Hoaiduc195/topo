@@ -1,0 +1,1298 @@
+{
+  "area": "openapi",
+  "nodes": [
+    {
+      "id": "openapi.utils",
+      "parent": "fastapi.openapi",
+      "name": "OpenAPI schema generator",
+      "kind": "module",
+      "summary": "Builds the full OpenAPI document from all registered routes and their dependency trees.",
+      "detail": "fastapi/openapi/utils.py is the core schema-generation engine. get_openapi() is the public entry point: it calls get_fields_from_routes() to collect every ModelField from body, response and parameter declarations, runs the Pydantic _compat helpers to build a flat model list and a name-to-schema map, then iterates every RouteContext through get_openapi_path() to produce per-method operation objects. get_openapi_path() calls _get_openapi_dependency_data() to walk the full dependency tree, delegates to _get_openapi_security_definitions() to build components.securitySchemes, and calls _get_openapi_operation_parameters() and get_openapi_operation_request_body(). JSONL and SSE stream responses use dedicated content types. Validation-error schemas are injected when a route has params or a body. The assembled dict is validated against the OpenAPI Pydantic model and encoded with jsonable_encoder.",
+      "paths": ["fastapi/openapi/utils.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "openapi.models",
+      "parent": "fastapi.openapi",
+      "name": "OpenAPI Pydantic models",
+      "kind": "module",
+      "summary": "Pydantic models mirroring the OpenAPI Specification 3.1 and JSON Schema 2020-12 that validate the generated document.",
+      "detail": "fastapi/openapi/models.py defines the full set of Pydantic models that mirror the OpenAPI Specification (OAS) 3.1. BaseModelWithConfig adds extra='allow' so vendor extensions (x-*) pass through. OpenAPI is the root model (openapi version, info, paths, webhooks, components, security, tags, externalDocs). Info, Contact, License and Server describe API metadata. PathItem holds one Operation per HTTP method. Operation bundles parameters, requestBody, responses, callbacks, security and servers for a single operation. Schema implements JSON Schema 2020-12 (core vocabulary, applicator vocabulary, validation vocabulary, and meta-data annotations) plus the OAS 3.1 schema-object extensions (discriminator, xml, externalDocs, example). The security hierarchy runs SecurityBase -> APIKey / HTTPBase / HTTPBearer / OAuth2 / OpenIdConnect; OAuthFlows holds the four OAuth 2.0 grant types. Schema and Operation call model_rebuild() at module bottom to resolve the forward reference SchemaOrBool = Schema | bool.",
+      "paths": ["fastapi/openapi/models.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "openapi.docs",
+      "parent": "fastapi.openapi",
+      "name": "Docs UI HTML generators",
+      "kind": "module",
+      "summary": "Returns static HTML pages that load Swagger UI and ReDoc from a CDN and point them at the OpenAPI JSON endpoint.",
+      "detail": "fastapi/openapi/docs.py has three public functions. get_swagger_ui_html() builds an HTML page that loads swagger-ui-bundle.js and swagger-ui.css from jsDelivr by default; it merges swagger_ui_default_parameters with any caller overrides, serializes each key/value via _html_safe_json() (which escapes <, > and & to prevent script-injection), and optionally wires up the oauth2RedirectUrl and initOAuth. get_redoc_html() builds a simpler page that uses a <redoc> custom element and optionally loads the Montserrat and Roboto fonts from Google Fonts. get_swagger_ui_oauth2_redirect_html() returns the OAuth2 authorization-code redirect page copied verbatim from the Swagger UI distribution. All three return Starlette HTMLResponse objects. The module imports jsonable_encoder to serialize Swagger UI parameter values to JSON.",
+      "paths": ["fastapi/openapi/docs.py"],
+      "status": "live",
+      "tech": ["Python", "HTML"]
+    },
+    {
+      "id": "openapi.constants",
+      "parent": "fastapi.openapi",
+      "name": "OpenAPI constants",
+      "kind": "config",
+      "summary": "Shared constants: the JSON Schema reference prefix and the set of HTTP methods that may carry a request body.",
+      "detail": "fastapi/openapi/constants.py defines three constants used throughout openapi/utils.py: METHODS_WITH_BODY is the set of HTTP method strings for which a requestBody is legal (GET, HEAD, POST, PUT, DELETE, PATCH); REF_PREFIX is the string '#/components/schemas/' used to build $ref values; REF_TEMPLATE is the f-string template '#/components/schemas/{model}' passed to Pydantic's schema generation so that model references resolve inside the components section.",
+      "paths": ["fastapi/openapi/constants.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "openapi.init",
+      "parent": "fastapi.openapi",
+      "name": "openapi package init",
+      "kind": "module",
+      "summary": "Empty package marker; exports nothing.",
+      "detail": "fastapi/openapi/__init__.py is an empty file that marks the openapi directory as a Python package. It declares no symbols and exports nothing.",
+      "paths": ["fastapi/openapi/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:fastapi/openapi/utils.py#get_openapi",
+      "parent": "openapi.utils",
+      "name": "get_openapi()",
+      "kind": "function",
+      "summary": "Public entry point that assembles and returns the complete OpenAPI document dict for a FastAPI app.",
+      "detail": "Takes title, version, openapi_version, routes, webhooks and several optional metadata fields. Calls get_fields_from_routes() on routes plus webhooks to harvest all ModelFields, then get_flat_models_from_fields / get_model_name_map / get_definitions from fastapi._compat to build the shared field_mapping and definitions dicts. Iterates routes via routing.iter_route_contexts, calls get_openapi_path() per APIRoute and accumulates paths, security schemes and schema definitions. Repeats for webhooks. Sorts definitions keys before assigning to components.schemas. Returns jsonable_encoder(OpenAPI(**output), by_alias=True, exclude_none=True) so the final dict is a plain JSON-safe structure.",
+      "paths": ["fastapi/openapi/utils.py:577"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_openapi(*, title, version, openapi_version, summary, description, routes, webhooks, tags, servers, terms_of_service, contact, license_info, separate_input_output_schemas, external_docs) -> dict[str, Any]",
+      "code": "all_fields = get_fields_from_routes(list(routes) + list(webhooks or []))\nflat_models = get_flat_models_from_fields(all_fields, known_models=set())\nmodel_name_map = get_model_name_map(flat_models)\nfield_mapping, definitions = get_definitions(\n    fields=all_fields,\n    model_name_map=model_name_map,\n    separate_input_output_schemas=separate_input_output_schemas,\n)\nfor route_context in routing.iter_route_contexts(routes):\n    api_route = _get_api_route_for_openapi(route_context)\n    if api_route is not None:\n        result = get_openapi_path(\n            route=api_route, operation_ids=operation_ids,\n            model_name_map=model_name_map, field_mapping=field_mapping,\n        )"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "parent": "openapi.utils",
+      "name": "get_openapi_path()",
+      "kind": "function",
+      "summary": "Builds the path-item dict for one APIRoute, returning path operations, security schemes and schema definitions.",
+      "detail": "Called per route, per method. Calls _get_openapi_dependency_data() to walk the dependency tree and extract parameters and security dependencies. For each HTTP method it builds the operation dict: metadata via get_openapi_operation_metadata(), parameters via _get_openapi_operation_parameters(), optional requestBody via get_openapi_operation_request_body(). Handles JSONL streams (application/jsonl), SSE streams (text/event-stream), JSON responses and plain responses differently. Injects callbacks by recursively calling itself. Adds HTTP 422 validation-error response schema when the route has parameters or a body. Merges openapi_extra last. Returns a 3-tuple (path_dict, security_schemes_dict, definitions_dict).",
+      "paths": ["fastapi/openapi/utils.py:303"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_openapi_path(*, route, operation_ids, model_name_map, field_mapping, separate_input_output_schemas) -> tuple[dict, dict, dict]",
+      "code": "dependency_data = _get_openapi_dependency_data(route.dependant)\nfor method in route.methods:\n    operation = get_openapi_operation_metadata(\n        route=route, method=method, operation_ids=operation_ids\n    )\n    security_definitions, operation_security = (\n        _get_openapi_security_definitions(\n            security_dependencies=dependency_data.security_dependencies\n        )\n    )\n    if operation_security:\n        operation.setdefault(\"security\", []).extend(operation_security)\n    if security_definitions:\n        security_schemes.update(security_definitions)"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#get_fields_from_routes",
+      "parent": "openapi.utils",
+      "name": "get_fields_from_routes()",
+      "kind": "function",
+      "summary": "Collects all ModelFields from body, response and parameter declarations across every route.",
+      "detail": "Iterates routing.iter_route_contexts over the supplied sequence, filters to APIRoute instances via _get_api_route_for_openapi, then harvests body_field, response_field, all response_fields values, stream_item_field and flat params via get_flat_params from fastapi.dependencies.utils. Recursively processes callback routes. Returns the combined list of ModelFields used by get_openapi() to drive Pydantic schema generation.",
+      "paths": ["fastapi/openapi/utils.py:543"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_fields_from_routes(routes: Sequence[BaseRoute | routing.RouteContext]) -> list[ModelField]",
+      "code": "for route_context in routing.iter_route_contexts(routes):\n    api_route = _get_api_route_for_openapi(route_context)\n    if api_route is None:\n        continue\n    if api_route.include_in_schema:\n        if api_route.body_field:\n            body_fields_from_routes.append(api_route.body_field)\n        if api_route.response_field:\n            responses_from_routes.append(api_route.response_field)\n        if api_route.stream_item_field:\n            responses_from_routes.append(api_route.stream_item_field)\n        params = get_flat_params(api_route.dependant)\n        request_fields_from_routes.extend(params)"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#_get_openapi_dependency_data",
+      "parent": "openapi.utils",
+      "name": "_get_openapi_dependency_data()",
+      "kind": "function",
+      "summary": "Walks a route's Dependant tree and collects parameter fields and security dependencies into one flat structure.",
+      "detail": "Uses an explicit stack (list of (Dependant, parent_oauth_scopes, is_root) triples) to visit every node in the dependency graph without recursion. Deduplicates via a visited list keyed by _get_cache_key. At each node it extends path_params, query_params, header_params and cookie_params from the Dependant, accumulates OAuth 2.0 scopes from _get_oauth_scopes, and records non-root security-scheme Dependants in security_dependencies together with their accumulated scopes. Returns an _OpenAPIDependencyData dataclass.",
+      "paths": ["fastapi/openapi/utils.py:99"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _get_openapi_dependency_data(dependant: Dependant) -> _OpenAPIDependencyData",
+      "code": "dependants: list[tuple[Dependant, list[str], bool]] = [(dependant, [], True)]\nwhile dependants:\n    current_dependant, parent_oauth_scopes, is_root = dependants.pop()\n    cache_key = _get_cache_key(\n        dependant=current_dependant, uses_scopes_cache=uses_scopes_cache,\n    )\n    if cache_key in visited:\n        continue\n    visited.append(cache_key)\n    dependency_data.path_params.extend(current_dependant.path_params)\n    dependency_data.query_params.extend(current_dependant.query_params)"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#_get_openapi_security_definitions",
+      "parent": "openapi.utils",
+      "name": "_get_openapi_security_definitions()",
+      "kind": "function",
+      "summary": "Converts a list of security-scheme Dependants into the securitySchemes dict and the per-operation security list.",
+      "detail": "For each (Dependant, oauth_scopes) pair it calls _get_security_scheme() from fastapi.dependencies.models to get the SecurityScheme object, serializes its model dict via jsonable_encoder with by_alias=True exclude_none=True, and stores it under the scheme's name. Merges OAuth 2.0 scopes for the same scheme. Returns a 2-tuple: the dict for components.securitySchemes and the list of single-entry scope dicts for the operation's security array.",
+      "paths": ["fastapi/openapi/utils.py:132"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _get_openapi_security_definitions(security_dependencies) -> tuple[dict, list[dict]]"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#_get_openapi_operation_parameters",
+      "parent": "openapi.utils",
+      "name": "_get_openapi_operation_parameters()",
+      "kind": "function",
+      "summary": "Converts the flat parameter fields from the dependency tree into OpenAPI parameter objects.",
+      "detail": "Iterates four parameter groups (path, query, header, cookie), skips fields where include_in_schema is False, calls _get_flat_fields_from_params to expand nested models, resolves alias and name via _get_param_aliases, and builds schema dicts via get_schema_from_model_field. Adds optional description, openapi_examples / example, and deprecated flag. Required parameters override non-required definitions for the same (in, name) pair to handle optional-wrapper models correctly.",
+      "paths": ["fastapi/openapi/utils.py:159"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _get_openapi_operation_parameters(*, dependency_data, model_name_map, field_mapping, separate_input_output_schemas) -> list[dict]"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#get_openapi_operation_request_body",
+      "parent": "openapi.utils",
+      "name": "get_openapi_operation_request_body()",
+      "kind": "function",
+      "summary": "Builds the OpenAPI requestBody object for a route that declares a body field.",
+      "detail": "Returns None when body_field is None. Otherwise calls get_schema_from_model_field to get the JSON Schema dict, reads media_type from the Body field_info (defaults to application/json), and assembles the requestBody object with content and optional required, examples or example. Handles openapi_examples (the OAS 3.1 examples map) separately from the deprecated example field.",
+      "paths": ["fastapi/openapi/utils.py:223"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_openapi_operation_request_body(*, body_field, model_name_map, field_mapping, separate_input_output_schemas) -> dict | None"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#get_openapi_operation_metadata",
+      "parent": "openapi.utils",
+      "name": "get_openapi_operation_metadata()",
+      "kind": "function",
+      "summary": "Extracts tags, summary, description, operationId and deprecated flag from a route object.",
+      "detail": "Builds the base operation dict: copies route.tags, generates the human-readable summary from generate_operation_summary (which replaces underscores and title-cases the endpoint name), copies route.description, sets operationId from route.operation_id or route.unique_id, warns on duplicates into the shared operation_ids set, and sets deprecated if route.deprecated is True.",
+      "paths": ["fastapi/openapi/utils.py:279"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_openapi_operation_metadata(*, route, method, operation_ids) -> dict[str, Any]"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#generate_operation_summary",
+      "parent": "openapi.utils",
+      "name": "generate_operation_summary()",
+      "kind": "function",
+      "summary": "Returns the route summary string, defaulting to the endpoint function name title-cased with underscores replaced.",
+      "paths": ["fastapi/openapi/utils.py:273"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def generate_operation_summary(*, route, method) -> str"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#generate_operation_id",
+      "parent": "openapi.utils",
+      "name": "generate_operation_id() (deprecated)",
+      "kind": "function",
+      "summary": "Deprecated wrapper that emits FastAPIDeprecationWarning; no longer used internally.",
+      "detail": "Issues a FastAPIDeprecationWarning and delegates to generate_operation_id_for_path from fastapi.utils. The function is kept for backward compatibility only; the pragma: nocover comment confirms it is excluded from code-coverage measurement, which means no test exercises this path.",
+      "paths": ["fastapi/openapi/utils.py:258"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": ["pragma: nocover; excluded from test coverage", "Emits FastAPIDeprecationWarning at stacklevel 2"],
+      "code": "def generate_operation_id(\n    *, route: routing._APIRouteLike, method: str\n) -> str:  # pragma: nocover\n    warnings.warn(\n        message=\"fastapi.openapi.utils.generate_operation_id() was deprecated, \"\n        \"it is not used internally, and will be removed soon\",\n        category=FastAPIDeprecationWarning,\n        stacklevel=2,\n    )\n    if route.operation_id:\n        return route.operation_id\n    path: str = route.path_format\n    return generate_operation_id_for_path(name=route.name, path=path, method=method)"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#_get_api_route_for_openapi",
+      "parent": "openapi.utils",
+      "name": "_get_api_route_for_openapi()",
+      "kind": "function",
+      "summary": "Returns the RouteContext cast as _APIRouteLike when the underlying route is an APIRoute, or None otherwise.",
+      "paths": ["fastapi/openapi/utils.py:535"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _get_api_route_for_openapi(route_context: routing.RouteContext) -> routing._APIRouteLike | None",
+      "code": "def _get_api_route_for_openapi(\n    route_context: routing.RouteContext,\n) -> routing._APIRouteLike | None:\n    if isinstance(route_context.original_route, routing.APIRoute):\n        return cast(routing._APIRouteLike, route_context)\n    return None"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#_OpenAPIDependencyData",
+      "parent": "openapi.utils",
+      "name": "_OpenAPIDependencyData",
+      "kind": "class",
+      "summary": "Dataclass accumulator for one route's flattened parameter fields and security dependency pairs.",
+      "paths": ["fastapi/openapi/utils.py:88"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass class _OpenAPIDependencyData: path_params, query_params, header_params, cookie_params, security_dependencies",
+      "code": "@dataclass\nclass _OpenAPIDependencyData:\n    path_params: list[ModelField] = field(default_factory=list)\n    query_params: list[ModelField] = field(default_factory=list)\n    header_params: list[ModelField] = field(default_factory=list)\n    cookie_params: list[ModelField] = field(default_factory=list)\n    security_dependencies: list[tuple[Dependant, list[str]]] = field(\n        default_factory=list\n    )"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#validation_error_definition",
+      "parent": "openapi.utils",
+      "name": "validation_error_definition",
+      "kind": "data",
+      "summary": "Module-level dict holding the JSON Schema for the ValidationError component injected into routes with params.",
+      "paths": ["fastapi/openapi/utils.py:49"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#validation_error_response_definition",
+      "parent": "openapi.utils",
+      "name": "validation_error_response_definition",
+      "kind": "data",
+      "summary": "Module-level dict for the HTTPValidationError component that wraps the ValidationError list.",
+      "paths": ["fastapi/openapi/utils.py:66"],
+      "status": "live",
+      "tech": ["Python"],
+      "code": "validation_error_response_definition = {\n    \"title\": \"HTTPValidationError\",\n    \"type\": \"object\",\n    \"properties\": {\n        \"detail\": {\n            \"title\": \"Detail\",\n            \"type\": \"array\",\n            \"items\": {\"$ref\": REF_PREFIX + \"ValidationError\"},\n        }\n    },\n}"
+    },
+    {
+      "id": "f:fastapi/openapi/utils.py#status_code_ranges",
+      "parent": "openapi.utils",
+      "name": "status_code_ranges",
+      "kind": "data",
+      "summary": "Dict mapping HTTP status-code range strings (1XX through DEFAULT) to their human-readable description labels.",
+      "paths": ["fastapi/openapi/utils.py:78"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:fastapi/openapi/models.py#OpenAPI",
+      "parent": "openapi.models",
+      "name": "OpenAPI",
+      "kind": "class",
+      "summary": "Root Pydantic model for the OpenAPI 3.1 document: openapi, info, paths, webhooks, components, security, tags.",
+      "paths": ["fastapi/openapi/models.py:419"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class OpenAPI(BaseModelWithConfig): openapi, info, jsonSchemaDialect, servers, paths, webhooks, components, security, tags, externalDocs"
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#PathItem",
+      "parent": "openapi.models",
+      "name": "PathItem",
+      "kind": "class",
+      "summary": "OpenAPI PathItem object: holds one Operation per HTTP method plus shared parameters and servers.",
+      "paths": ["fastapi/openapi/models.py:305"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class PathItem(BaseModelWithConfig): ref, summary, description, get, put, post, delete, options, head, patch, trace, servers, parameters"
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Operation",
+      "parent": "openapi.models",
+      "name": "Operation",
+      "kind": "class",
+      "summary": "OpenAPI Operation object: tags, summary, description, operationId, parameters, requestBody, responses, callbacks, security.",
+      "paths": ["fastapi/openapi/models.py:289"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Operation(BaseModelWithConfig): tags, summary, description, externalDocs, operationId, parameters, requestBody, responses, callbacks, deprecated, security, servers"
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Schema",
+      "parent": "openapi.models",
+      "name": "Schema",
+      "kind": "class",
+      "summary": "Pydantic model covering the full JSON Schema 2020-12 vocabulary plus the OpenAPI 3.1 schema-object extensions.",
+      "detail": "Implements the JSON Schema 2020-12 core vocabulary ($schema, $id, $ref, $defs, allOf, anyOf, oneOf, etc.), applicator keywords (items, properties, additionalProperties), validation keywords (type, enum, minimum/maximum, minLength/maxLength, required), content keywords (contentMediaType, contentSchema), meta-data annotations (title, description, default, deprecated, readOnly, writeOnly, examples) and the OAS 3.1 additions (discriminator, xml, externalDocs, example). Uses model_config extra='allow' so vendor extensions pass through. The example field carries a typing_deprecated marker since OAS 3.1 prefers examples. Calls model_rebuild() after the module to resolve the forward reference SchemaOrBool.",
+      "paths": ["fastapi/openapi/models.py:123"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": ["model_config extra='allow' lets x-* vendor extensions pass through", "example field marked deprecated in OAS 3.1; use examples instead"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Components",
+      "parent": "openapi.models",
+      "name": "Components",
+      "kind": "class",
+      "summary": "OpenAPI Components object: schemas, responses, parameters, requestBodies, securitySchemes, links, callbacks, pathItems.",
+      "paths": ["fastapi/openapi/models.py:399"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Components(BaseModelWithConfig): schemas, responses, parameters, examples, requestBodies, headers, securitySchemes, links, callbacks, pathItems"
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Info",
+      "parent": "openapi.models",
+      "name": "Info",
+      "kind": "class",
+      "summary": "OpenAPI Info object: title, version, summary, description, termsOfService, contact, license.",
+      "paths": ["fastapi/openapi/models.py:73"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#SecurityBase",
+      "parent": "openapi.models",
+      "name": "SecurityBase",
+      "kind": "class",
+      "summary": "Abstract base for all security scheme models: carries the type_ discriminator and optional description.",
+      "paths": ["fastapi/openapi/models.py:328"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class SecurityBase(BaseModelWithConfig): type_: SecuritySchemeType = Field(alias='type'), description"
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#APIKey",
+      "parent": "openapi.models",
+      "name": "APIKey",
+      "kind": "class",
+      "summary": "Security scheme model for API-key authentication: location (query/header/cookie) and key name.",
+      "paths": ["fastapi/openapi/models.py:339"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#HTTPBearer",
+      "parent": "openapi.models",
+      "name": "HTTPBearer",
+      "kind": "class",
+      "summary": "Security scheme model for HTTP Bearer token authentication, with optional bearerFormat hint.",
+      "paths": ["fastapi/openapi/models.py:350"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#OAuth2",
+      "parent": "openapi.models",
+      "name": "OAuth2",
+      "kind": "class",
+      "summary": "Security scheme model for OAuth 2.0 flows: wraps an OAuthFlows object with implicit, password, clientCredentials and authorizationCode variants.",
+      "paths": ["fastapi/openapi/models.py:384"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#OAuthFlows",
+      "parent": "openapi.models",
+      "name": "OAuthFlows",
+      "kind": "class",
+      "summary": "Container for all four OAuth 2.0 grant-type flow objects.",
+      "paths": ["fastapi/openapi/models.py:377"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#OpenIdConnect",
+      "parent": "openapi.models",
+      "name": "OpenIdConnect",
+      "kind": "class",
+      "summary": "Security scheme model for OpenID Connect: holds the discovery URL.",
+      "paths": ["fastapi/openapi/models.py:389"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Parameter",
+      "parent": "openapi.models",
+      "name": "Parameter",
+      "kind": "class",
+      "summary": "OpenAPI Parameter model: name, in_ (path/query/header/cookie), plus the shared ParameterBase fields.",
+      "paths": ["fastapi/openapi/models.py:258"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#RequestBody",
+      "parent": "openapi.models",
+      "name": "RequestBody",
+      "kind": "class",
+      "summary": "OpenAPI RequestBody model: content map keyed by media type, plus optional description and required flag.",
+      "paths": ["fastapi/openapi/models.py:267"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Response",
+      "parent": "openapi.models",
+      "name": "Response",
+      "kind": "class",
+      "summary": "OpenAPI Response model: required description, optional headers, content and links maps.",
+      "paths": ["fastapi/openapi/models.py:282"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#MediaType",
+      "parent": "openapi.models",
+      "name": "MediaType",
+      "kind": "class",
+      "summary": "OpenAPI MediaType model: schema, example, examples and encoding fields for a single content type entry.",
+      "paths": ["fastapi/openapi/models.py:236"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#BaseModelWithConfig",
+      "parent": "openapi.models",
+      "name": "BaseModelWithConfig",
+      "kind": "class",
+      "summary": "Shared base Pydantic model that enables extra='allow' so OpenAPI vendor extensions pass through without error.",
+      "paths": ["fastapi/openapi/models.py:57"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class BaseModelWithConfig(BaseModel): model_config = {'extra': 'allow'}"
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Reference",
+      "parent": "openapi.models",
+      "name": "Reference",
+      "kind": "class",
+      "summary": "OpenAPI Reference object: a Pydantic model with a single $ref field alias.",
+      "paths": ["fastapi/openapi/models.py:95"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Server",
+      "parent": "openapi.models",
+      "name": "Server",
+      "kind": "class",
+      "summary": "OpenAPI Server object: url (AnyUrl or plain str), description, and optional variables map.",
+      "paths": ["fastapi/openapi/models.py:89"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Contact",
+      "parent": "openapi.models",
+      "name": "Contact",
+      "kind": "class",
+      "summary": "OpenAPI Contact object with name, url and email fields.",
+      "paths": ["fastapi/openapi/models.py:61"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#License",
+      "parent": "openapi.models",
+      "name": "License",
+      "kind": "class",
+      "summary": "OpenAPI License object with name, identifier and url fields.",
+      "paths": ["fastapi/openapi/models.py:67"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#ExternalDocumentation",
+      "parent": "openapi.models",
+      "name": "ExternalDocumentation",
+      "kind": "class",
+      "summary": "OpenAPI ExternalDocumentation object with optional description and required url.",
+      "paths": ["fastapi/openapi/models.py:112"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#SecuritySchemeType",
+      "parent": "openapi.models",
+      "name": "SecuritySchemeType",
+      "kind": "class",
+      "summary": "Enum of the four OAS security scheme type strings: apiKey, http, oauth2, openIdConnect.",
+      "paths": ["fastapi/openapi/models.py:321"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#ParameterInType",
+      "parent": "openapi.models",
+      "name": "ParameterInType",
+      "kind": "class",
+      "summary": "Enum for the four OpenAPI parameter locations: query, header, path, cookie.",
+      "paths": ["fastapi/openapi/models.py:221"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#Tag",
+      "parent": "openapi.models",
+      "name": "Tag",
+      "kind": "class",
+      "summary": "OpenAPI Tag object: name, optional description and optional externalDocs.",
+      "paths": ["fastapi/openapi/models.py:413"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#EmailStr",
+      "parent": "openapi.models",
+      "name": "EmailStr (fallback)",
+      "kind": "class",
+      "summary": "Fallback EmailStr that logs a warning and treats email as plain string when email-validator is not installed.",
+      "paths": ["fastapi/openapi/models.py:22"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": ["Only active when email-validator package is absent", "Logs warning on every validation; does not raise"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#OAuthFlowImplicit",
+      "parent": "openapi.models",
+      "name": "OAuthFlowImplicit",
+      "kind": "class",
+      "summary": "OAuth 2.0 implicit flow model: authorizationUrl plus optional refreshUrl and scopes.",
+      "paths": ["fastapi/openapi/models.py:360"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#OAuthFlowPassword",
+      "parent": "openapi.models",
+      "name": "OAuthFlowPassword",
+      "kind": "class",
+      "summary": "OAuth 2.0 resource-owner password flow model: tokenUrl plus optional refreshUrl and scopes.",
+      "paths": ["fastapi/openapi/models.py:364"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "f:fastapi/openapi/models.py#OAuthFlowAuthorizationCode",
+      "parent": "openapi.models",
+      "name": "OAuthFlowAuthorizationCode",
+      "kind": "class",
+      "summary": "OAuth 2.0 authorization-code flow model: authorizationUrl and tokenUrl.",
+      "paths": ["fastapi/openapi/models.py:372"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "f:fastapi/openapi/docs.py#get_swagger_ui_html",
+      "parent": "openapi.docs",
+      "name": "get_swagger_ui_html()",
+      "kind": "function",
+      "summary": "Returns an HTMLResponse that loads Swagger UI from a CDN and points it at the OpenAPI JSON URL.",
+      "detail": "Merges swagger_ui_default_parameters with optional caller overrides, then builds an HTML string with a <link> for the CSS, a <link> for the favicon, a <script> for the JavaScript bundle, and an inline <script> that calls SwaggerUIBundle() with all parameters serialized through _html_safe_json(). The oauth2RedirectUrl and initOAuth settings are appended conditionally. Default CDN assets come from jsDelivr npm/swagger-ui-dist@5. The favicon URL defaults to fastapi.tiangolo.com/img/favicon.png.",
+      "paths": ["fastapi/openapi/docs.py:40"],
+      "status": "live",
+      "tech": ["Python", "HTML"],
+      "signature": "def get_swagger_ui_html(*, openapi_url, title, swagger_js_url, swagger_css_url, swagger_favicon_url, oauth2_redirect_url, init_oauth, swagger_ui_parameters) -> HTMLResponse",
+      "code": "current_swagger_ui_parameters = swagger_ui_default_parameters.copy()\nif swagger_ui_parameters:\n    current_swagger_ui_parameters.update(swagger_ui_parameters)\nhtml = f\"\"\"\n<!DOCTYPE html><html><head>\n<link type=\"text/css\" rel=\"stylesheet\" href=\"{swagger_css_url}\">\n<title>{title}</title>\n</head><body><div id=\"swagger-ui\"></div>\n<script src=\"{swagger_js_url}\"></script>\n<script>\nconst ui = SwaggerUIBundle({{\n    url: '{openapi_url}',\"\"\"\nfor key, value in current_swagger_ui_parameters.items():\n    html += f\"{_html_safe_json(key)}: {_html_safe_json(jsonable_encoder(value))},\\n\""
+    },
+    {
+      "id": "f:fastapi/openapi/docs.py#get_redoc_html",
+      "parent": "openapi.docs",
+      "name": "get_redoc_html()",
+      "kind": "function",
+      "summary": "Returns an HTMLResponse that loads ReDoc from a CDN and renders the OpenAPI spec as an alternative docs page.",
+      "detail": "Builds a minimal HTML page that uses a <redoc spec-url> custom element. Optionally adds a <link> for Google Fonts (Montserrat and Roboto) if with_google_fonts is True (the default). The ReDoc JavaScript bundle is loaded from jsDelivr npm/redoc@2 by default. The favicon defaults to fastapi.tiangolo.com/img/favicon.png.",
+      "paths": ["fastapi/openapi/docs.py:197"],
+      "status": "live",
+      "tech": ["Python", "HTML"],
+      "signature": "def get_redoc_html(*, openapi_url, title, redoc_js_url, redoc_favicon_url, with_google_fonts) -> HTMLResponse",
+      "code": "html = f\"\"\"\n<!DOCTYPE html><html><head><title>{title}</title>\n<meta charset=\"utf-8\"/>\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\"\"\"\nif with_google_fonts:\n    html += \"\"\"\n<link href=\"https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700\" rel=\"stylesheet\">\"\"\"\nhtml += f\"\"\"\n<link rel=\"shortcut icon\" href=\"{redoc_favicon_url}\">\n</head><body>\n<redoc spec-url=\"{openapi_url}\"></redoc>\n<script src=\"{redoc_js_url}\"> </script>\n</body></html>\"\"\"\nreturn HTMLResponse(html)"
+    },
+    {
+      "id": "f:fastapi/openapi/docs.py#get_swagger_ui_oauth2_redirect_html",
+      "parent": "openapi.docs",
+      "name": "get_swagger_ui_oauth2_redirect_html()",
+      "kind": "function",
+      "summary": "Returns the OAuth2 authorization-code redirect page copied from the Swagger UI distribution.",
+      "detail": "Returns a static HTMLResponse with the OAuth2 redirect JavaScript verbatim from the Swagger UI 4.14.0 distribution. The script reads the authorization code or token from the URL hash/query string, validates the state parameter, and calls back into the opener window (SwaggerUIRedirectOauth2). No external assets are loaded; the entire page is self-contained.",
+      "paths": ["fastapi/openapi/docs.py:301"],
+      "status": "live",
+      "tech": ["Python", "HTML"],
+      "signature": "def get_swagger_ui_oauth2_redirect_html() -> HTMLResponse"
+    },
+    {
+      "id": "f:fastapi/openapi/docs.py#_html_safe_json",
+      "parent": "openapi.docs",
+      "name": "_html_safe_json()",
+      "kind": "function",
+      "summary": "Serializes a value to JSON with HTML special characters escaped to prevent script injection.",
+      "paths": ["fastapi/openapi/docs.py:9"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _html_safe_json(value: Any) -> str",
+      "code": "return (\n    json.dumps(value)\n    .replace(\"<\", \"\\\\u003c\")\n    .replace(\">\", \"\\\\u003e\")\n    .replace(\"&\", \"\\\\u0026\")\n)"
+    },
+    {
+      "id": "f:fastapi/openapi/docs.py#swagger_ui_default_parameters",
+      "parent": "openapi.docs",
+      "name": "swagger_ui_default_parameters",
+      "kind": "data",
+      "summary": "Module-level dict of default Swagger UI configuration options used as the base for every docs page.",
+      "paths": ["fastapi/openapi/docs.py:22"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": ["dom_id: '#swagger-ui'", "layout: 'BaseLayout'", "deepLinking: true", "showExtensions: true", "showCommonExtensions: true"]
+    },
+    {
+      "id": "f:fastapi/openapi/constants.py#METHODS_WITH_BODY",
+      "parent": "openapi.constants",
+      "name": "METHODS_WITH_BODY",
+      "kind": "data",
+      "summary": "Set of HTTP method strings for which a requestBody is legal: GET, HEAD, POST, PUT, DELETE, PATCH.",
+      "paths": ["fastapi/openapi/constants.py:1"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/openapi/constants.py#REF_PREFIX",
+      "parent": "openapi.constants",
+      "name": "REF_PREFIX",
+      "kind": "data",
+      "summary": "The JSON Pointer prefix string '#/components/schemas/' used when building $ref values in the schema.",
+      "paths": ["fastapi/openapi/constants.py:2"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/openapi/constants.py#REF_TEMPLATE",
+      "parent": "openapi.constants",
+      "name": "REF_TEMPLATE",
+      "kind": "data",
+      "summary": "Template string '#/components/schemas/{model}' passed to Pydantic schema generation to anchor model references.",
+      "paths": ["fastapi/openapi/constants.py:3"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "openapi.tests",
+      "parent": "fastapi.openapi",
+      "name": "OpenAPI tests",
+      "kind": "group",
+      "summary": "Test files that exercise schema generation, docs HTML output, security schemes, and schema model behavior.",
+      "detail": "The tests folder contains about 17 test files directly targeting the openapi area: test_openapi_examples.py verifies openapi_examples and example fields on Body, Query, etc.; test_openapi_separate_input_output_schemas.py checks that separate_input_output_schemas=True produces distinct input and output model names; test_openapi_servers.py tests the servers array; test_openapi_schema_type.py tests SchemaType validation; test_openapi_route_extensions.py tests openapi_extra merging; test_openapi_cache_root_path.py tests that the cached schema respects root_path; test_local_docs.py verifies the HTML returned by get_swagger_ui_html and get_redoc_html; test_swagger_ui_escape.py verifies _html_safe_json escaping. tests/benchmarks/test_openapi.py benchmarks get_openapi() against an app with many routes (skipped unless --codspeed is passed).",
+      "paths": ["tests/"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_openapi_examples.py",
+      "parent": "openapi.tests",
+      "name": "test_openapi_examples",
+      "kind": "test",
+      "summary": "Verifies that openapi_examples and the deprecated example field are serialized correctly into the generated schema.",
+      "paths": ["tests/test_openapi_examples.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_openapi_separate_input_output_schemas.py",
+      "parent": "openapi.tests",
+      "name": "test_openapi_separate_input_output_schemas",
+      "kind": "test",
+      "summary": "Verifies that the separate_input_output_schemas flag produces correctly split Pydantic model names in the schema.",
+      "paths": ["tests/test_openapi_separate_input_output_schemas.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_openapi_servers.py",
+      "parent": "openapi.tests",
+      "name": "test_openapi_servers",
+      "kind": "test",
+      "summary": "Verifies that the servers list is included in the generated OpenAPI document when provided.",
+      "paths": ["tests/test_openapi_servers.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_openapi_schema_type.py",
+      "parent": "openapi.tests",
+      "name": "test_openapi_schema_type",
+      "kind": "test",
+      "summary": "Verifies the SchemaType literal and Schema model validation behavior for the type field.",
+      "paths": ["tests/test_openapi_schema_type.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_openapi_route_extensions.py",
+      "parent": "openapi.tests",
+      "name": "test_openapi_route_extensions",
+      "kind": "test",
+      "summary": "Verifies that openapi_extra dict is deep-merged into the generated operation object.",
+      "paths": ["tests/test_openapi_route_extensions.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_openapi_cache_root_path.py",
+      "parent": "openapi.tests",
+      "name": "test_openapi_cache_root_path",
+      "kind": "test",
+      "summary": "Verifies that the cached OpenAPI schema is regenerated when root_path changes between requests.",
+      "paths": ["tests/test_openapi_cache_root_path.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_local_docs.py",
+      "parent": "openapi.tests",
+      "name": "test_local_docs",
+      "kind": "test",
+      "summary": "Verifies the HTML output of get_swagger_ui_html and get_redoc_html for the /docs and /redoc endpoints.",
+      "paths": ["tests/test_local_docs.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_swagger_ui_escape.py",
+      "parent": "openapi.tests",
+      "name": "test_swagger_ui_escape",
+      "kind": "test",
+      "summary": "Verifies that _html_safe_json escapes less-than, greater-than and ampersand characters in Swagger UI output.",
+      "paths": ["tests/test_swagger_ui_escape.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/benchmarks/test_openapi.py",
+      "parent": "openapi.tests",
+      "name": "test_openapi benchmark",
+      "kind": "test",
+      "summary": "Benchmarks get_openapi() against an app with many routes; skipped unless --codspeed flag is passed.",
+      "paths": ["tests/benchmarks/test_openapi.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"],
+      "facts": ["Skipped by default; requires --codspeed CLI flag", "Timeout set to 60 seconds per benchmark"]
+    }
+  ],
+
+  "edges": [
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi",
+      "to": "f:fastapi/openapi/utils.py#get_fields_from_routes",
+      "kind": "calls",
+      "label": "collects all ModelFields from routes",
+      "evidence": "fastapi/openapi/utils.py:612"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi",
+      "to": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "kind": "calls",
+      "label": "builds path operations per route",
+      "evidence": "fastapi/openapi/utils.py:623"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi",
+      "to": "f:fastapi/openapi/models.py#OpenAPI",
+      "kind": "calls",
+      "label": "validates assembled dict against OpenAPI model",
+      "evidence": "fastapi/openapi/utils.py:671"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/utils.py#_get_openapi_dependency_data",
+      "kind": "calls",
+      "label": "walks dependency tree for params and security",
+      "evidence": "fastapi/openapi/utils.py:324"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/utils.py#_get_openapi_security_definitions",
+      "kind": "calls",
+      "label": "converts security deps to securitySchemes",
+      "evidence": "fastapi/openapi/utils.py:340"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/utils.py#_get_openapi_operation_parameters",
+      "kind": "calls",
+      "label": "builds parameter objects from dependency data",
+      "evidence": "fastapi/openapi/utils.py:349"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/utils.py#get_openapi_operation_request_body",
+      "kind": "calls",
+      "label": "builds requestBody from body field",
+      "evidence": "fastapi/openapi/utils.py:370"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/utils.py#get_openapi_operation_metadata",
+      "kind": "calls",
+      "label": "builds operationId, summary, tags",
+      "evidence": "fastapi/openapi/utils.py:336"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/utils.py#validation_error_definition",
+      "kind": "reads",
+      "label": "injects ValidationError schema into definitions",
+      "evidence": "fastapi/openapi/utils.py:522"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_operation_metadata",
+      "to": "f:fastapi/openapi/utils.py#generate_operation_summary",
+      "kind": "calls",
+      "label": "generates human-readable summary string",
+      "evidence": "fastapi/openapi/utils.py:285"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/constants.py#METHODS_WITH_BODY",
+      "kind": "reads",
+      "label": "gates requestBody on allowed HTTP methods",
+      "evidence": "fastapi/openapi/utils.py:369"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "to": "f:fastapi/openapi/constants.py#REF_PREFIX",
+      "kind": "reads",
+      "label": "builds $ref for validation error schema",
+      "evidence": "fastapi/openapi/utils.py:519"
+    },
+    {
+      "from": "openapi.utils",
+      "to": "fastapi.di",
+      "kind": "calls",
+      "label": "get_flat_params and param alias helpers",
+      "evidence": "fastapi/openapi/utils.py:27"
+    },
+    {
+      "from": "openapi.utils",
+      "to": "fastapi.internals",
+      "kind": "calls",
+      "label": "schema helpers via _compat (get_definitions, model maps)",
+      "evidence": "fastapi/openapi/utils.py:11"
+    },
+    {
+      "from": "openapi.utils",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "iter_route_contexts, RouteContext, APIRoute, _APIRouteLike",
+      "evidence": "fastapi/openapi/utils.py:9"
+    },
+    {
+      "from": "openapi.utils",
+      "to": "fastapi.io",
+      "kind": "calls",
+      "label": "jsonable_encoder for security scheme and parameter values",
+      "evidence": "fastapi/openapi/utils.py:33"
+    },
+    {
+      "from": "openapi.docs",
+      "to": "fastapi.io",
+      "kind": "calls",
+      "label": "jsonable_encoder to serialize Swagger UI parameter values",
+      "evidence": "fastapi/openapi/docs.py:5"
+    },
+    {
+      "from": "openapi.docs",
+      "to": "x:docs-cdn",
+      "kind": "http",
+      "label": "loads Swagger UI and ReDoc bundles from jsDelivr CDN",
+      "evidence": "fastapi/openapi/docs.py:79"
+    },
+    {
+      "from": "f:fastapi/openapi/docs.py#get_swagger_ui_html",
+      "to": "f:fastapi/openapi/docs.py#_html_safe_json",
+      "kind": "calls",
+      "label": "escapes each UI parameter key and value",
+      "evidence": "fastapi/openapi/docs.py:172"
+    },
+    {
+      "from": "f:fastapi/openapi/docs.py#get_swagger_ui_html",
+      "to": "f:fastapi/openapi/docs.py#swagger_ui_default_parameters",
+      "kind": "reads",
+      "label": "copies defaults then merges caller overrides",
+      "evidence": "fastapi/openapi/docs.py:148"
+    },
+    {
+      "from": "openapi.models",
+      "to": "fastapi.internals",
+      "kind": "calls",
+      "label": "with_info_plain_validator_function for EmailStr fallback",
+      "evidence": "fastapi/openapi/models.py:5"
+    },
+    {
+      "from": "openapi.models",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "BaseModel, Field, AnyUrl for all OAS Pydantic models",
+      "evidence": "fastapi/openapi/models.py:7"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#EmailStr",
+      "to": "x:email-validator",
+      "kind": "calls",
+      "label": "optional import; falls back to str subclass when absent",
+      "evidence": "fastapi/openapi/models.py:16"
+    },
+    {
+      "from": "f:tests/test_openapi_examples.py",
+      "to": "openapi.utils",
+      "kind": "tests",
+      "label": "tests openapi_examples and example fields in schema",
+      "evidence": "tests/test_openapi_examples.py:1"
+    },
+    {
+      "from": "f:tests/test_openapi_separate_input_output_schemas.py",
+      "to": "f:fastapi/openapi/utils.py#get_openapi",
+      "kind": "tests",
+      "label": "tests separate_input_output_schemas flag behavior",
+      "evidence": "tests/test_openapi_separate_input_output_schemas.py:1"
+    },
+    {
+      "from": "f:tests/test_local_docs.py",
+      "to": "openapi.docs",
+      "kind": "tests",
+      "label": "tests get_swagger_ui_html and get_redoc_html HTML output",
+      "evidence": "tests/test_local_docs.py:1"
+    },
+    {
+      "from": "f:tests/test_swagger_ui_escape.py",
+      "to": "f:fastapi/openapi/docs.py#_html_safe_json",
+      "kind": "tests",
+      "label": "verifies HTML special-character escaping",
+      "evidence": "tests/test_swagger_ui_escape.py:1"
+    },
+    {
+      "from": "f:tests/test_openapi_cache_root_path.py",
+      "to": "f:fastapi/openapi/utils.py#get_openapi",
+      "kind": "tests",
+      "label": "tests schema caching and root_path handling",
+      "evidence": "tests/test_openapi_cache_root_path.py:1"
+    },
+    {
+      "from": "f:tests/benchmarks/test_openapi.py",
+      "to": "f:fastapi/openapi/utils.py#get_openapi",
+      "kind": "tests",
+      "label": "benchmarks schema generation across many routes",
+      "evidence": "tests/benchmarks/test_openapi.py:20"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#generate_operation_id",
+      "to": "fastapi.internals",
+      "kind": "calls",
+      "label": "delegates to generate_operation_id_for_path in fastapi.utils",
+      "evidence": "fastapi/openapi/utils.py:270"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#_get_api_route_for_openapi",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "checks isinstance routing.APIRoute, casts to _APIRouteLike",
+      "evidence": "fastapi/openapi/utils.py:538"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#_OpenAPIDependencyData",
+      "to": "f:fastapi/openapi/utils.py#_get_openapi_dependency_data",
+      "kind": "reads",
+      "label": "instantiated and populated by _get_openapi_dependency_data",
+      "evidence": "fastapi/openapi/utils.py:100"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#validation_error_response_definition",
+      "to": "f:fastapi/openapi/constants.py#REF_PREFIX",
+      "kind": "reads",
+      "label": "builds $ref using REF_PREFIX + 'ValidationError'",
+      "evidence": "fastapi/openapi/utils.py:73"
+    },
+    {
+      "from": "f:fastapi/openapi/utils.py#status_code_ranges",
+      "to": "f:fastapi/openapi/utils.py#get_openapi_path",
+      "kind": "reads",
+      "label": "read for additional response description lookup",
+      "evidence": "fastapi/openapi/utils.py:498"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#PathItem",
+      "to": "f:fastapi/openapi/models.py#Operation",
+      "kind": "reads",
+      "label": "holds one Operation per HTTP method field",
+      "evidence": "fastapi/openapi/models.py:309"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Operation",
+      "to": "f:fastapi/openapi/models.py#Parameter",
+      "kind": "reads",
+      "label": "parameters field holds list of Parameter or Reference",
+      "evidence": "fastapi/openapi/models.py:295"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Operation",
+      "to": "f:fastapi/openapi/models.py#RequestBody",
+      "kind": "reads",
+      "label": "requestBody field holds RequestBody or Reference",
+      "evidence": "fastapi/openapi/models.py:296"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Operation",
+      "to": "f:fastapi/openapi/models.py#Response",
+      "kind": "reads",
+      "label": "responses dict maps status codes to Response objects",
+      "evidence": "fastapi/openapi/models.py:298"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Schema",
+      "to": "f:fastapi/openapi/models.py#BaseModelWithConfig",
+      "kind": "calls",
+      "label": "extends BaseModelWithConfig to inherit extra='allow' config",
+      "evidence": "fastapi/openapi/models.py:123"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Components",
+      "to": "f:fastapi/openapi/models.py#Schema",
+      "kind": "reads",
+      "label": "schemas field maps names to Schema or Reference objects",
+      "evidence": "fastapi/openapi/models.py:400"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Components",
+      "to": "f:fastapi/openapi/models.py#PathItem",
+      "kind": "reads",
+      "label": "pathItems field maps names to reusable PathItem objects",
+      "evidence": "fastapi/openapi/models.py:410"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Info",
+      "to": "f:fastapi/openapi/models.py#Contact",
+      "kind": "reads",
+      "label": "contact field holds a Contact object",
+      "evidence": "fastapi/openapi/models.py:78"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Info",
+      "to": "f:fastapi/openapi/models.py#License",
+      "kind": "reads",
+      "label": "license field holds a License object",
+      "evidence": "fastapi/openapi/models.py:79"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#SecurityBase",
+      "to": "f:fastapi/openapi/models.py#SecuritySchemeType",
+      "kind": "reads",
+      "label": "type_ field uses SecuritySchemeType enum discriminator",
+      "evidence": "fastapi/openapi/models.py:329"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#APIKey",
+      "to": "f:fastapi/openapi/models.py#SecurityBase",
+      "kind": "calls",
+      "label": "extends SecurityBase with apiKey type discriminator",
+      "evidence": "fastapi/openapi/models.py:339"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#HTTPBearer",
+      "to": "f:fastapi/openapi/models.py#SecurityBase",
+      "kind": "calls",
+      "label": "extends HTTPBase which extends SecurityBase",
+      "evidence": "fastapi/openapi/models.py:350"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OAuth2",
+      "to": "f:fastapi/openapi/models.py#OAuthFlows",
+      "kind": "reads",
+      "label": "flows field holds the OAuthFlows container",
+      "evidence": "fastapi/openapi/models.py:386"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OAuthFlows",
+      "to": "f:fastapi/openapi/models.py#OAuthFlowImplicit",
+      "kind": "reads",
+      "label": "implicit field holds the OAuthFlowImplicit variant",
+      "evidence": "fastapi/openapi/models.py:378"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OAuthFlows",
+      "to": "f:fastapi/openapi/models.py#OAuthFlowPassword",
+      "kind": "reads",
+      "label": "password field holds the OAuthFlowPassword variant",
+      "evidence": "fastapi/openapi/models.py:379"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OAuthFlows",
+      "to": "f:fastapi/openapi/models.py#OAuthFlowAuthorizationCode",
+      "kind": "reads",
+      "label": "authorizationCode field holds this flow variant",
+      "evidence": "fastapi/openapi/models.py:381"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OpenIdConnect",
+      "to": "f:fastapi/openapi/models.py#SecurityBase",
+      "kind": "calls",
+      "label": "extends SecurityBase with openIdConnect type discriminator",
+      "evidence": "fastapi/openapi/models.py:389"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Parameter",
+      "to": "f:fastapi/openapi/models.py#ParameterInType",
+      "kind": "reads",
+      "label": "in_ field uses ParameterInType enum for location",
+      "evidence": "fastapi/openapi/models.py:260"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#RequestBody",
+      "to": "f:fastapi/openapi/models.py#MediaType",
+      "kind": "reads",
+      "label": "content dict maps media type strings to MediaType objects",
+      "evidence": "fastapi/openapi/models.py:269"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Response",
+      "to": "f:fastapi/openapi/models.py#MediaType",
+      "kind": "reads",
+      "label": "content dict maps media type strings to MediaType objects",
+      "evidence": "fastapi/openapi/models.py:285"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#MediaType",
+      "to": "f:fastapi/openapi/models.py#Schema",
+      "kind": "reads",
+      "label": "schema_ field holds the Schema or Reference",
+      "evidence": "fastapi/openapi/models.py:237"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#BaseModelWithConfig",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "subclasses pydantic BaseModel with extra='allow' config",
+      "evidence": "fastapi/openapi/models.py:57"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Reference",
+      "to": "f:fastapi/openapi/models.py#Schema",
+      "kind": "reads",
+      "label": "used as Schema | Reference union throughout the OAS models",
+      "evidence": "fastapi/openapi/models.py:400"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Server",
+      "to": "f:fastapi/openapi/models.py#BaseModelWithConfig",
+      "kind": "calls",
+      "label": "extends BaseModelWithConfig to inherit extra='allow' config",
+      "evidence": "fastapi/openapi/models.py:89"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Contact",
+      "to": "f:fastapi/openapi/models.py#BaseModelWithConfig",
+      "kind": "calls",
+      "label": "extends BaseModelWithConfig",
+      "evidence": "fastapi/openapi/models.py:61"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#License",
+      "to": "f:fastapi/openapi/models.py#BaseModelWithConfig",
+      "kind": "calls",
+      "label": "extends BaseModelWithConfig",
+      "evidence": "fastapi/openapi/models.py:67"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#ExternalDocumentation",
+      "to": "f:fastapi/openapi/models.py#BaseModelWithConfig",
+      "kind": "calls",
+      "label": "extends BaseModelWithConfig",
+      "evidence": "fastapi/openapi/models.py:112"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#Tag",
+      "to": "f:fastapi/openapi/models.py#ExternalDocumentation",
+      "kind": "reads",
+      "label": "optional externalDocs field on Tag",
+      "evidence": "fastapi/openapi/models.py:416"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OAuthFlowImplicit",
+      "to": "f:fastapi/openapi/models.py#OAuthFlows",
+      "kind": "reads",
+      "label": "nested inside OAuthFlows.implicit field",
+      "evidence": "fastapi/openapi/models.py:378"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OAuthFlowPassword",
+      "to": "f:fastapi/openapi/models.py#OAuthFlows",
+      "kind": "reads",
+      "label": "nested inside OAuthFlows.password field",
+      "evidence": "fastapi/openapi/models.py:379"
+    },
+    {
+      "from": "f:fastapi/openapi/models.py#OAuthFlowAuthorizationCode",
+      "to": "f:fastapi/openapi/models.py#OAuthFlows",
+      "kind": "reads",
+      "label": "nested inside OAuthFlows.authorizationCode field",
+      "evidence": "fastapi/openapi/models.py:381"
+    },
+    {
+      "from": "f:fastapi/openapi/docs.py#get_redoc_html",
+      "to": "x:docs-cdn",
+      "kind": "http",
+      "label": "loads ReDoc bundle from jsDelivr CDN by default",
+      "evidence": "fastapi/openapi/docs.py:233"
+    },
+    {
+      "from": "f:fastapi/openapi/docs.py#get_swagger_ui_oauth2_redirect_html",
+      "to": "f:fastapi/openapi/docs.py#get_swagger_ui_html",
+      "kind": "reads",
+      "label": "redirect URL embedded in get_swagger_ui_html output",
+      "evidence": "fastapi/openapi/docs.py:179"
+    },
+    {
+      "from": "f:fastapi/openapi/constants.py#REF_TEMPLATE",
+      "to": "fastapi.internals",
+      "kind": "reads",
+      "label": "passed to get_definitions in _compat to anchor $ref values",
+      "evidence": "fastapi/openapi/utils.py:11"
+    }
+  ],
+
+  "flows": [
+    {
+      "id": "flow.openapi.generate-schema",
+      "name": "Generating the OpenAPI schema",
+      "summary": "A docs request triggers app.openapi(), which calls get_openapi() to walk all routes and return the cached document.",
+      "steps": [
+        {
+          "node": "fastapi.core",
+          "text": "A GET /openapi.json request arrives at the FastAPI app. The route handler calls self.openapi(), which checks the cached openapi_schema attribute. On first call the cache is empty, so it calls get_openapi() with the app's title, version, routes and optional metadata."
+        },
+        {
+          "node": "f:fastapi/openapi/utils.py#get_openapi",
+          "text": "get_openapi() calls get_fields_from_routes() to harvest every ModelField from body, response and parameter declarations across all routes and webhooks. It then calls the _compat helpers to build a flat model list, a model-name map, and the shared field_mapping and definitions dicts."
+        },
+        {
+          "node": "f:fastapi/openapi/utils.py#get_fields_from_routes",
+          "text": "Iterates every RouteContext, filters to APIRoute instances, and collects body fields, response fields, stream item fields and flat parameter fields (including from callbacks)."
+        },
+        {
+          "node": "f:fastapi/openapi/utils.py#get_openapi_path",
+          "text": "Called once per APIRoute. Calls _get_openapi_dependency_data() to walk the full dependency tree and extract all parameter fields and security dependencies, then builds the method-keyed operation dict with metadata, parameters, requestBody, responses and security."
+        },
+        {
+          "node": "f:fastapi/openapi/utils.py#_get_openapi_dependency_data",
+          "text": "Walks the Dependant tree with an explicit stack, deduplicating by cache key. Collects path, query, header and cookie params, accumulates OAuth 2.0 scopes, and records non-root security-scheme Dependants."
+        },
+        {
+          "node": "f:fastapi/openapi/utils.py#_get_openapi_security_definitions",
+          "text": "Converts each security-scheme Dependant into a securitySchemes entry in components and a per-operation security list entry, merging scopes for the same scheme."
+        },
+        {
+          "node": "f:fastapi/openapi/models.py#OpenAPI",
+          "text": "The assembled dict is passed to OpenAPI(**output), which validates the structure via Pydantic. jsonable_encoder then converts it to a plain JSON-safe dict that is cached on the app and returned as the response body."
+        }
+      ]
+    },
+    {
+      "id": "flow.openapi.serve-docs-ui",
+      "name": "Serving the Swagger UI docs page",
+      "summary": "A GET /docs request returns get_swagger_ui_html, which loads Swagger UI from the CDN and fetches /openapi.json.",
+      "steps": [
+        {
+          "node": "fastapi.core",
+          "text": "A GET /docs request arrives. The FastAPI app setup() method registered this route pointing at get_swagger_ui_html() during initialization, passing the app's openapi_url (/openapi.json), title and optional CDN overrides."
+        },
+        {
+          "node": "f:fastapi/openapi/docs.py#get_swagger_ui_html",
+          "text": "Merges swagger_ui_default_parameters with any caller overrides. Builds an HTML string with links to swagger-ui-bundle.js and swagger-ui.css from jsDelivr by default. Each Swagger UI parameter key and value is serialized through _html_safe_json() to prevent script injection."
+        },
+        {
+          "node": "f:fastapi/openapi/docs.py#_html_safe_json",
+          "text": "Serializes each key/value to JSON via json.dumps, then replaces <, > and & with their Unicode escapes so the values are safe to embed inside a <script> tag."
+        },
+        {
+          "node": "x:docs-cdn",
+          "text": "The browser loads swagger-ui-bundle.js and swagger-ui.css from cdn.jsdelivr.net. SwaggerUIBundle is initialized with the openapi_url pointing at /openapi.json, which the browser then fetches to populate the interactive docs."
+        },
+        {
+          "node": "f:fastapi/openapi/utils.py#get_openapi",
+          "text": "The /openapi.json fetch triggers the schema generation flow (or returns the cached document if already generated). The result is returned to the Swagger UI client."
+        }
+      ]
+    },
+    {
+      "id": "flow.openapi.oauth2-redirect",
+      "name": "OAuth2 authorization-code redirect in Swagger UI",
+      "summary": "Swagger UI opens the provider login page then redirects to /docs/oauth2-redirect, which passes the code back to the opener window.",
+      "steps": [
+        {
+          "node": "fastapi.core",
+          "text": "The FastAPI setup() method registers GET /docs/oauth2-redirect pointing at get_swagger_ui_oauth2_redirect_html(). get_swagger_ui_html() receives oauth2_redirect_url='/docs/oauth2-redirect' and embeds it in the SwaggerUIBundle call."
+        },
+        {
+          "node": "f:fastapi/openapi/docs.py#get_swagger_ui_oauth2_redirect_html",
+          "text": "Returns a static HTML page containing the OAuth2 redirect script verbatim from Swagger UI 4.14.0. The script reads the authorization code from the URL hash or query string, validates the state parameter, and calls oauth2.callback() in the opener window."
+        },
+        {
+          "node": "f:fastapi/openapi/docs.py#get_swagger_ui_html",
+          "text": "The original Swagger UI page receives the authorization code via the callback and continues the OAuth2 flow, allowing the user to authorize requests in the interactive docs without leaving the page."
+        }
+      ]
+    }
+  ]
+}

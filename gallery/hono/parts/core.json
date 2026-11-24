@@ -1,0 +1,1485 @@
+{
+  "area": "core",
+  "nodes": [
+
+    {
+      "id": "core.entry",
+      "parent": "hono.core",
+      "name": "Public entry point",
+      "kind": "group",
+      "summary": "The package root: re-exports Hono, Context, HonoRequest and the public type surface.",
+      "detail": "src/index.ts is the single entry point consumers import from the hono package. It re-exports the Hono class from src/hono.ts, the Context class and its companion types (ContextVariableMap, ContextRenderer, ExecutionContext) from src/context.ts, the HonoRequest type from src/request.ts, the RPC inference helpers (InferRequestType, InferResponseType, ClientRequestOptions) from src/client, and the framework-wide handler and env types (Env, Handler, MiddlewareHandler, Next, ErrorHandler, etc.) from src/types.ts. The file itself contains no logic.",
+      "paths": ["src/index.ts", "src/hono.ts", "src/types.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/index.ts",
+      "parent": "core.entry",
+      "name": "Package entry",
+      "kind": "module",
+      "summary": "Barrel re-export of Hono, Context, HonoRequest, RPC types and all public framework types.",
+      "detail": "Contains only re-export statements; no logic. Imports Hono from ./hono and re-exports it alongside Context, the type-only exports from src/request.ts (HonoRequest), src/client (InferRequestType, InferResponseType, ClientRequestOptions), and all handler/env types from src/types.ts.",
+      "paths": ["src/index.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono.ts",
+      "parent": "core.entry",
+      "name": "Hono app class",
+      "kind": "module",
+      "summary": "Extends HonoBase to wire in the default SmartRouter(RegExpRouter + TrieRouter) router.",
+      "detail": "Declares the exported Hono class. The constructor calls super(options) on HonoBase and then sets this.router to options.router if supplied, otherwise to new SmartRouter({ routers: [new RegExpRouter(), new TrieRouter()] }). All routing and dispatch logic lives in HonoBase; this file only establishes the default router choice.",
+      "paths": ["src/hono.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono.ts#Hono",
+      "parent": "f:src/hono.ts",
+      "name": "Hono",
+      "kind": "class",
+      "summary": "The exported application class: extends HonoBase with the default SmartRouter.",
+      "detail": "Generic over Env (E), Schema (S) and BasePath. Its constructor forwards options to HonoBase and sets the router to SmartRouter([RegExpRouter, TrieRouter]) when no router option is provided. This is the class most consumers import from hono.",
+      "paths": ["src/hono.ts:16-34"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class Hono<E extends Env, S extends Schema, BasePath extends string> extends HonoBase<E,S,BasePath>",
+      "code": "export class Hono<\n  E extends Env = BlankEnv,\n  S extends Schema = BlankSchema,\n  BasePath extends string = '/',\n> extends HonoBase<E, S, BasePath> {\n  constructor(options: HonoOptions<E> = {}) {\n    super(options)\n    this.router =\n      options.router ??\n      new SmartRouter({\n        routers: [new RegExpRouter(), new TrieRouter()],\n      })\n  }\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/types.ts",
+      "parent": "core.entry",
+      "name": "Framework types",
+      "kind": "module",
+      "summary": "Central TypeScript type definitions: Env, Handler, MiddlewareHandler, Schema, RouterRoute and the full typed-response machinery.",
+      "detail": "Defines Env (Bindings + Variables), Handler and MiddlewareHandler function types, the H union of both, Next, ErrorHandler, NotFoundHandler, TypedResponse with its format/status parameters, the Schema and ToSchema path-keyed route map, ValidationTargets (json/form/query/param/header/cookie), RouterRoute (basePath, path, method, handler) and all the type-level route-merge helpers (MergePath, MergeSchemaPath). Used by virtually every other file in the framework.",
+      "paths": ["src/types.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "core.app",
+      "parent": "hono.core",
+      "name": "HonoBase app engine",
+      "kind": "group",
+      "summary": "The base class that implements route registration, request dispatch, error handling and the mount API.",
+      "detail": "HonoBase (exported from src/hono-base.ts) is the full implementation of a Hono application. The constructor registers method shorthands (get, post, put, delete, patch, options, query, all) and the on and use handlers by looping over METHODS and creating closures that call #addRoute. Route registration (app.get, app.use, app.on) calls #addRoute, which merges the base path, builds a RouterRoute, calls router.add, and pushes to the routes array. app.route(path, subApp) calls basePath(path) on a clone and re-registers every route from the sub-app. app.basePath(path) clones the app and sets its _basePath. The #dispatch private method extracts the path via getPath, calls router.match, creates a new Context, and either calls the single matched handler directly or runs all handlers through compose(). app.fetch is the public entry point that delegates to #dispatch.",
+      "paths": ["src/hono-base.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/hono-base.ts",
+      "parent": "core.app",
+      "name": "HonoBase module",
+      "kind": "module",
+      "summary": "Declares the HonoBase class and the HonoOptions type; the full implementation of a Hono application.",
+      "detail": "Also defines the default notFoundHandler (returning a 404 text response) and the default errorHandler (which checks whether the thrown error has a getResponse() method before falling back to a 500 text response). The module-level errorHandler is the reference against which route() checks whether a sub-app has a custom handler.",
+      "paths": ["src/hono-base.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono-base.ts#HonoBase",
+      "parent": "f:src/hono-base.ts",
+      "name": "HonoBase",
+      "kind": "class",
+      "summary": "Abstract-style base class providing all Hono application logic except the router choice.",
+      "detail": "Declares properties for the pluggable router, the getPath function, _basePath, routes[], errorHandler and #notFoundHandler. The constructor wires method shorthand closures for every HTTP method and sets getPath to getPath or getPathNoStrict depending on the strict option. The class is not truly abstract but its router property must be set by subclasses.",
+      "paths": ["src/hono-base.ts:115-564"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class Hono<E extends Env, S extends Schema, BasePath extends string, CurrentPath extends string>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono-base.ts#HonoBase.#addRoute",
+      "parent": "f:src/hono-base.ts#HonoBase",
+      "name": "HonoBase.#addRoute()",
+      "kind": "function",
+      "summary": "Merges the base path onto the route path, builds a RouterRoute record, calls router.add, and pushes to routes[].",
+      "detail": "Called by all method shorthands, on, use, route and mount. Accepts an optional baseRoutePath parameter (used by route() to record the sub-app's basePath). Calls mergePath(this._basePath, path) to prefix the full application base path, then calls this.router.add(method, path, [handler, r]).",
+      "paths": ["src/hono-base.ts:405-416"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "#addRoute(method: string, path: string, handler: H, baseRoutePath?: string): void",
+      "code": "#addRoute(method: string, path: string, handler: H, baseRoutePath?: string): void {\n  path = mergePath(this._basePath, path)\n  const r: RouterRoute = {\n    basePath:\n      baseRoutePath !== undefined ? mergePath(this._basePath, baseRoutePath) : this._basePath,\n    path,\n    method,\n    handler,\n  }\n  this.router.add(method, path, [handler, r])\n  this.routes.push(r)\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono-base.ts#HonoBase.#dispatch",
+      "parent": "f:src/hono-base.ts#HonoBase",
+      "name": "HonoBase.#dispatch()",
+      "kind": "function",
+      "summary": "Core request dispatch: extracts path, calls router.match, constructs a Context, and runs handlers directly or through compose().",
+      "detail": "HEAD requests are handled by re-dispatching as GET and wrapping the response in a null-body Response. For other methods it calls this.getPath(request, {env}) to extract the URL path, calls this.router.match(method, path), constructs a new Context with the match result, then checks the match count. If there is exactly one matched handler it calls it directly (avoiding the overhead of compose). If there are multiple handlers it calls compose(matchResult[0], errorHandler, notFoundHandler) and awaits the result, checking context.finalized.",
+      "paths": ["src/hono-base.ts:425-485"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "#dispatch(request: Request, executionCtx: ExecutionContext | FetchEventLike | undefined, env: E['Bindings'], method: string): Response | Promise<Response>",
+      "code": "#dispatch(request, executionCtx, env, method) {\n  if (method === 'HEAD') {\n    return (async () =>\n      new Response(null, await this.#dispatch(request, executionCtx, env, 'GET')))()\n  }\n  const path = this.getPath(request, { env })\n  const matchResult = this.router.match(method, path)\n  const c = new Context(request, { path, matchResult, env, executionCtx,\n    notFoundHandler: this.#notFoundHandler })\n  if (matchResult[0].length === 1) {\n    // ... call single handler directly ...\n  }\n  const composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler)\n  return (async () => { const context = await composed(c); return context.res })()\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono-base.ts#HonoBase.fetch",
+      "parent": "f:src/hono-base.ts#HonoBase",
+      "name": "HonoBase.fetch()",
+      "kind": "function",
+      "summary": "Public runtime entry point; delegates to #dispatch with the request method.",
+      "detail": "Declared as an arrow-function property so it can be passed directly as a handler to any platform adapter. Receives (request, env, executionCtx) and calls this.#dispatch(request, rest[1], rest[0], request.method). This is the method adapters call or export as the global fetch handler.",
+      "paths": ["src/hono-base.ts:498-504"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "fetch(request: Request, env?: E['Bindings'] | {}, executionCtx?: ExecutionContext): Response | Promise<Response>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono-base.ts#HonoBase.route",
+      "parent": "f:src/hono-base.ts#HonoBase",
+      "name": "HonoBase.route()",
+      "kind": "function",
+      "summary": "Mounts a sub-application's routes under a prefix path, optionally wrapping handlers in its error handler.",
+      "detail": "Calls this.basePath(path) to get a clone with the prefix applied, then iterates app.routes. If the sub-app uses a custom errorHandler, each handler is wrapped in a compose() call that runs only the error handler. The COMPOSED_HANDLER symbol is attached to the wrapper so the original handler remains inspectable. Finally calls subApp.#addRoute with the original basePath to preserve route metadata.",
+      "paths": ["src/hono-base.ts:228-252"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "route<SubPath, SubEnv, SubSchema, SubBasePath, SubCurrentPath>(path: SubPath, app: Hono<...>): Hono<...>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/hono-base.ts#HonoBase.basePath",
+      "parent": "f:src/hono-base.ts#HonoBase",
+      "name": "HonoBase.basePath()",
+      "kind": "function",
+      "summary": "Returns a cloned app instance whose _basePath is extended with the given path prefix.",
+      "detail": "Calls #clone() to copy the router, getPath function, errorHandler, notFoundHandler and routes[] by reference into a new HonoBase instance, then sets subApp._basePath = mergePath(this._basePath, path). Subsequent calls to #addRoute on the clone will prefix all paths with this merged base path.",
+      "paths": ["src/hono-base.ts:267-273"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "basePath<SubPath extends string>(path: SubPath): Hono<E, S, MergePath<BasePath, SubPath>, ...>",
+      "source": "code"
+    },
+
+    {
+      "id": "core.compose",
+      "parent": "hono.core",
+      "name": "Middleware composer",
+      "kind": "group",
+      "summary": "The koa-compose-style middleware chain that sequences matched handlers and handles errors and not-found.",
+      "detail": "src/compose.ts exports a single compose() function modelled on the koa-compose package. It accepts an array of [handler, params][] tuples (the router match result), an optional error handler and an optional not-found handler, and returns a single async function that sequences them. Each call to next() increments the index and recurses, so calling next() twice throws immediately. Errors thrown by a handler are caught by the onError callback if present; when the handler list is exhausted and the context is not finalized, onNotFound is called. Setting context.res from a handler marks it as finalized.",
+      "paths": ["src/compose.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/compose.ts",
+      "parent": "core.compose",
+      "name": "compose module",
+      "kind": "module",
+      "summary": "Exports the compose() function that sequences middleware handlers into a single async context transformer.",
+      "detail": "Single-export module. The compose() function takes the router match result, an optional error handler and an optional not-found handler. It returns a closure over a recursive dispatch() function that calls each handler in registration order, passing a next() callback that advances the index. Double-next is guarded by comparing i to the outer index variable.",
+      "paths": ["src/compose.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/compose.ts#compose",
+      "parent": "f:src/compose.ts",
+      "name": "compose()",
+      "kind": "function",
+      "summary": "Returns a function that runs matched handlers in registration order, calling onError on throws and onNotFound when all handlers exhaust.",
+      "detail": "Takes middleware (the router match result rows), onError and onNotFound. Returns a closure over a dispatch(i) function. dispatch(i) checks that i > index (double-next guard), reads handler from middleware[i][0][0], and sets context.req.routeIndex = i so the request knows its current route. It awaits handler(context, () => dispatch(i+1)). On Error, calls onError and sets isError=true. When middleware is exhausted and context is not finalized, calls onNotFound. Any truthy res sets context.res and therefore context.finalized.",
+      "paths": ["src/compose.ts:15-73"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "compose<E>(middleware, onError?, onNotFound?): (context: Context, next?: Next) => Promise<Context>",
+      "code": "async function dispatch(i: number): Promise<Context> {\n  if (i <= index) throw new Error('next() called multiple times')\n  index = i\n  const handler = middleware[i] ? (context.req.routeIndex = i, middleware[i][0][0])\n    : (i === middleware.length && next) || undefined\n  if (handler) {\n    try { res = await handler(context, () => dispatch(i + 1)) }\n    catch (err) { if (err instanceof Error && onError) res = await onError(err, context) }\n  } else if (!context.finalized && onNotFound) res = await onNotFound(context)\n  if (res && (!context.finalized || isError)) context.res = res\n  return context\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "core.context",
+      "parent": "hono.core",
+      "name": "Context",
+      "kind": "group",
+      "summary": "Per-request container: holds the request, response, env bindings, per-request variables, and all response builder methods.",
+      "detail": "src/context.ts exports the Context class and its companion types. Context is instantiated by #dispatch for each request. It wraps the raw Request lazily in a HonoRequest (created on first access of c.req). It carries env (Cloudflare Workers bindings etc.), executionCtx, a finalized flag, an optional error, and a Map-backed variable store. The response builders (json, text, html, body, newResponse, redirect) all delegate to the private #newResponse method which assembles a Response by merging any pre-set headers, a status code and body. The render/setRenderer path lets middleware install a layout renderer that handlers invoke with c.render(content).",
+      "paths": ["src/context.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/context.ts",
+      "parent": "core.context",
+      "name": "Context module",
+      "kind": "module",
+      "summary": "Declares the Context class, ExecutionContext interface, ContextVariableMap and ContextRenderer extension interfaces, and the TEXT_PLAIN constant.",
+      "detail": "Exports the Context class as the primary symbol. Also exports: ExecutionContext (waitUntil/passThroughOnException), the empty extension interfaces ContextVariableMap and ContextRenderer (augmented by user code), the Renderer and Layout types, and the TEXT_PLAIN constant ('text/plain; charset=UTF-8'). The module-level createResponseInstance factory wraps new Response so it can be replaced in tests.",
+      "paths": ["src/context.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/context.ts#Context",
+      "parent": "f:src/context.ts",
+      "name": "Context",
+      "kind": "class",
+      "summary": "Per-request execution context: wraps Request, owns the Response, exposes env, executionCtx and typed variable storage.",
+      "detail": "Private fields: #rawRequest, #req (lazy HonoRequest), #var (lazy Map for set/get), #executionCtx, #res (accumulating Response), #preparedHeaders (pre-response Headers), #status, #renderer, #layout, #notFoundHandler, #matchResult, #path. The req getter creates a HonoRequest on first access. The res setter merges headers from the previous partial response into the new one (preserving Set-Cookie while replacing Content-Type) and sets finalized=true. The set/get methods store arbitrary typed values in the #var Map; the var getter materialises them as a frozen-plain-object via Object.fromEntries.",
+      "paths": ["src/context.ts:293-798"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class Context<E extends Env, P extends string, I extends Input>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/context.ts#Context.json",
+      "parent": "f:src/context.ts#Context",
+      "name": "Context.json()",
+      "kind": "function",
+      "summary": "Returns a Response with JSON.stringify(object) body and Content-Type application/json.",
+      "detail": "Calls this.#newResponse(JSON.stringify(object), arg, setDefaultContentType('application/json', headers)). The TypedResponse return type preserves the JSON shape for RPC inference.",
+      "paths": ["src/context.ts:726-739"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "json<T, U>(object: T, status?: U, headers?: HeaderRecord): JSONRespondReturn<T,U>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/context.ts#Context.#newResponse",
+      "parent": "f:src/context.ts#Context",
+      "name": "Context.#newResponse()",
+      "kind": "function",
+      "summary": "Internal response factory: merges pre-set and per-call headers, resolves the status code, and constructs a Response.",
+      "detail": "Starts from this.#res headers (if any), applies headers from a ResponseInit argument, then applies the per-call headers object. Resolves the status as: numeric arg > arg.status > this.#status > undefined. Calls createResponseInstance(data, {status, headers}) to build the final Response. All public response builders (json, text, html, body, newResponse) delegate here.",
+      "paths": ["src/context.ts:609-657"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "#newResponse(data: Data | null, arg?: StatusCode | ResponseOrInit, headers?: HeaderRecord): Response",
+      "code": "#newResponse(data, arg, headers) {\n  let responseHeaders = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders\n  if (typeof arg === 'object' && arg.headers) {\n    responseHeaders ??= new Headers()\n    for (const [key, value] of new Headers(arg.headers)) {\n      if (key === 'set-cookie') { responseHeaders.append(key, value) }\n      else { responseHeaders.set(key, value) }\n    }\n  }\n  // ... merge per-call headers ...\n  const status = typeof arg === 'number' ? arg : (arg?.status ?? this.#status)\n  return createResponseInstance(data, { status, headers: responseHeaders ?? ... })\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/context.ts#Context.render",
+      "parent": "f:src/context.ts#Context",
+      "name": "Context.render()",
+      "kind": "function",
+      "summary": "Renders content through the installed renderer, defaulting to c.html() if none has been set.",
+      "detail": "On first call, initialises #renderer to (content) => this.html(content) if setRenderer has not been called. Passes all arguments through to #renderer. Middleware that calls c.setRenderer() replaces the default to inject a layout component.",
+      "paths": ["src/context.ts:448-451"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "render: Renderer = (...args) => { this.#renderer ??= ...; return this.#renderer(...args) }",
+      "source": "code"
+    },
+
+    {
+      "id": "core.request",
+      "parent": "hono.core",
+      "name": "HonoRequest",
+      "kind": "group",
+      "summary": "Typed wrapper around the raw Web API Request exposing param, query, header and body parsing plus the validated-data store.",
+      "detail": "src/request.ts exports HonoRequest, which wraps a raw Request, a decoded URL path string and the router match result. Path parameters are decoded lazily from the match result via #getDecodedParam. Query strings delegate to getQueryParam/getQueryParams from utils/url. parseBody delegates to the shared parseBody utility. Body reads (json, text, arrayBuffer, blob, formData) are cached in bodyCache so the stream is consumed at most once. The valid() method returns previously stored validated data keyed by target name.",
+      "paths": ["src/request.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/request.ts",
+      "parent": "core.request",
+      "name": "HonoRequest module",
+      "kind": "module",
+      "summary": "Exports the HonoRequest class and the cloneRawRequest utility.",
+      "detail": "Exports HonoRequest as the main class and cloneRawRequest as a named export. Also imports and re-uses GET_MATCH_RESULT from src/request/constants.ts as the symbol key for the internal match-result accessor. Depends on utils/body (parseBody), utils/url (getQueryParam, getQueryParams, tryDecodeURIComponent) and http-exception (HTTPException for the clone error path).",
+      "paths": ["src/request.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/request.ts#HonoRequest",
+      "parent": "f:src/request.ts",
+      "name": "HonoRequest",
+      "kind": "class",
+      "summary": "Typed request wrapper: exposes param, query, header, body-parsing methods and the per-target validated-data store.",
+      "detail": "Public fields: raw (the underlying Request), path (decoded URL path), routeIndex (mutated by compose() as each handler runs), bodyCache. Private: #validatedData (ValidationTargets-keyed map), #matchResult (router result). param() reads from #matchResult[0][routeIndex][1], URI-decodes the value. query/queries delegate to utils/url. header() reads from raw.headers. parseBody delegates to utils/body. addValidatedData/valid() maintain the #validatedData store for downstream c.req.valid('json') calls.",
+      "paths": ["src/request.ts:34-448"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class HonoRequest<P extends string, I extends Input['out']>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/request.ts#HonoRequest.param",
+      "parent": "f:src/request.ts#HonoRequest",
+      "name": "HonoRequest.param()",
+      "kind": "function",
+      "summary": "Returns one named path parameter or all parameters decoded from the router match result at the current routeIndex.",
+      "detail": "With a key argument calls #getDecodedParam which reads #matchResult[0][routeIndex][1][key] and falls back to #matchResult[1][paramKey] for the index-based stash format used by RegExpRouter. Without a key calls #getAllDecodedParams which iterates all keys at routeIndex. Both paths call tryDecodeURIComponent from utils/url.",
+      "paths": ["src/request.ts:91-121"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "param(key?: string): string | undefined | Record<string,string>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/request.ts#HonoRequest.valid",
+      "parent": "f:src/request.ts#HonoRequest",
+      "name": "HonoRequest.valid()",
+      "kind": "function",
+      "summary": "Retrieves typed validated data stored by the validator middleware for a given target (json, form, query, param, header, cookie).",
+      "detail": "Returns #validatedData[target] cast through the Input type parameter. The validator middleware calls addValidatedData(target, result) before calling next(), so handlers that run after validation can read the already-parsed, validated data without touching the raw request.",
+      "paths": ["src/request.ts:356-359"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "valid<T extends keyof I & keyof ValidationTargets>(target: T): InputToDataByTarget<I,T>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/request.ts#cloneRawRequest",
+      "parent": "f:src/request.ts",
+      "name": "cloneRawRequest()",
+      "kind": "function",
+      "summary": "Clones a HonoRequest's underlying raw Request, reconstructing it from bodyCache if the stream has already been consumed.",
+      "detail": "If req.raw.bodyUsed is false, returns req.raw.clone(). Otherwise reads the first cached body key (json, text, formData, etc.), reconstructs the body bytes and a matching init (copying cache, credentials, headers, etc.) and returns new Request(req.url, requestInit). Throws an HTTPException(500) if the body was consumed directly via req.raw rather than through HonoRequest methods.",
+      "paths": ["src/request.ts:481-520"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "async cloneRawRequest(req: HonoRequest): Promise<Request>",
+      "source": "code"
+    },
+
+    {
+      "id": "core.error",
+      "parent": "hono.core",
+      "name": "HTTPException",
+      "kind": "group",
+      "summary": "The framework's typed HTTP error class and the default error-handler that converts it to a Response.",
+      "detail": "src/http-exception.ts exports HTTPException which extends Error. It carries a status code (default 500), an optional pre-built Response and an optional cause. getResponse() returns the pre-built Response (with its status overridden to this.status) or falls back to new Response(this.message, {status}). The default errorHandler in hono-base.ts checks for the getResponse() method with an in check and delegates, so any error that implements that interface is handled uniformly.",
+      "paths": ["src/http-exception.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/http-exception.ts",
+      "parent": "core.error",
+      "name": "HTTPException module",
+      "kind": "module",
+      "summary": "Exports the HTTPException class: the framework's typed HTTP error that carries a status code and an optional pre-built Response.",
+      "detail": "Single-class module. Imports ContentfulStatusCode from utils/http-status to constrain the status field. The HTTPExceptionOptions type (res, message, cause) is kept module-private. getResponse() is the protocol method that the default errorHandler in hono-base.ts detects via an in check, allowing any class with that method to integrate with the error pipeline.",
+      "paths": ["src/http-exception.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/http-exception.ts#HTTPException",
+      "parent": "f:src/http-exception.ts",
+      "name": "HTTPException",
+      "kind": "class",
+      "summary": "Typed HTTP error: carries a ContentfulStatusCode, an optional pre-built Response and an optional cause.",
+      "detail": "Extends Error. Constructor takes status (default 500) and an options object with optional res, message and cause. getResponse() returns options.res if provided (re-wrapping it with new Response to apply this.status to its headers), or new Response(this.message, {status}) otherwise. The default errorHandler in hono-base.ts detects this via 'getResponse' in err.",
+      "paths": ["src/http-exception.ts:46-78"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class HTTPException extends Error",
+      "code": "export class HTTPException extends Error {\n  readonly res?: Response\n  readonly status: ContentfulStatusCode\n  constructor(status: ContentfulStatusCode = 500, options?: HTTPExceptionOptions) {\n    super(options?.message, { cause: options?.cause })\n    this.res = options?.res\n    this.status = status\n  }\n  getResponse(): Response {\n    if (this.res) {\n      return new Response(this.res.body, { status: this.status, headers: this.res.headers })\n    }\n    return new Response(this.message, { status: this.status })\n  }\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "core.router-interface",
+      "parent": "hono.router",
+      "name": "Router interface & constants",
+      "kind": "group",
+      "summary": "The shared Router<T> interface (add/match), Result type, UnsupportedPathError and the HTTP method constants.",
+      "detail": "src/router.ts is the contract all five router implementations satisfy. It defines: the Router<T> interface with add(method, path, handler) and match(method, path): Result<T>; the Result<T> union type that can be either an index-stash format ([[T, ParamIndexMap][], ParamStash]) used by RegExpRouter or a params-inline format ([[T, Params][]]) used by the simpler routers; UnsupportedPathError thrown by RegExpRouter and LinearRouter when a path contains both label and wildcard; and the METHODS array and METHOD_NAME_ALL / METHOD_NAME_ALL_LOWERCASE constants.",
+      "paths": ["src/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/router.ts",
+      "parent": "core.router-interface",
+      "name": "Router contract module",
+      "kind": "module",
+      "summary": "Declares the Router<T> interface, Result<T> type, UnsupportedPathError and the method-name constants.",
+      "detail": "Exports: the Router<T> interface (name, add, match); the Result<T> union type supporting both the index-stash format used by RegExpRouter and the params-inline format used by simpler routers; UnsupportedPathError thrown when a path pattern cannot be handled; METHOD_NAME_ALL ('ALL'), METHOD_NAME_ALL_LOWERCASE ('all') and the METHODS array; MESSAGE_MATCHER_IS_ALREADY_BUILT used by routers that forbid add() after first match().",
+      "paths": ["src/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "core.regexp-router",
+      "parent": "hono.router",
+      "name": "RegExpRouter",
+      "kind": "group",
+      "summary": "Fastest router: compiles all routes into a single combined regular expression so matching is O(1) in the number of routes.",
+      "detail": "During registration, routes are inserted into per-method Trie structures. On the first call to match(), #buildMatcher compiles each trie into a single RegExp via Trie.buildRegExp() and assembles a Matcher triple of [RegExp, HandlerData[], StaticMap]. Static paths are pre-extracted into StaticMap for O(1) lookup; dynamic paths share a combined capture-group-based RegExp. After the first match the match function is replaced with the compiled version via this.match = match. PreparedRegExpRouter allows the compiled matcher to be serialised and embedded at build time.",
+      "paths": ["src/router/reg-exp-router/router.ts", "src/router/reg-exp-router/matcher.ts", "src/router/reg-exp-router/trie.ts", "src/router/reg-exp-router/node.ts", "src/router/reg-exp-router/prepared-router.ts", "src/router/reg-exp-router/index.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/router.ts",
+      "parent": "core.regexp-router",
+      "name": "RegExpRouter class",
+      "kind": "module",
+      "summary": "Accumulates routes in per-method tries, then lazily compiles them into a single RegExp matcher on first match.",
+      "detail": "Exports RegExpRouter<T>. The module also contains the endsWithWildcard and covers helpers that determine, during matcher building, which wildcard branches cover a given path branch. These helpers are critical to the correctness of prefix-middleware matching: a handler registered on /api/* must appear in the match result for /api/users.",
+      "paths": ["src/router/reg-exp-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/router.ts#RegExpRouter",
+      "parent": "f:src/router/reg-exp-router/router.ts",
+      "name": "RegExpRouter",
+      "kind": "class",
+      "summary": "Router implementation that compiles all registered routes into a single combined RegExp for O(1) match.",
+      "detail": "Private state: #handlers (method -> [handler, path][] registration-order list) and #tries (method -> Trie). add() inserts into the Trie and appends to handlers; on METHOD_NAME_ALL it fans out to every known method. The match function is initially the shared match() from matcher.ts which calls #buildMatcher lazily. After compilation, #handlers and #tries are set to undefined to free memory.",
+      "paths": ["src/router/reg-exp-router/router.ts:35-141"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class RegExpRouter<T> implements Router<T>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/router.ts#RegExpRouter.#buildMatcher",
+      "parent": "f:src/router/reg-exp-router/router.ts#RegExpRouter",
+      "name": "RegExpRouter.#buildMatcher()",
+      "kind": "function",
+      "summary": "Compiles one method's trie and handler list into a Matcher triple of [RegExp, HandlerData[], StaticMap].",
+      "detail": "Calls trie.buildRegExp() to get the combined RegExp and two replacement maps. Iterates the handler list to build a path-indexed 'own' map, identifies wildcard-tailed paths, then for each trie path sorts which handlers apply (including those from covering wildcards). Static paths go into staticMap with pre-extracted captures; dynamic paths are stored in handlerData at the capture-group index.",
+      "paths": ["src/router/reg-exp-router/router.ts:99-141"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "#buildMatcher(method: string): Matcher<T>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/trie.ts",
+      "parent": "core.regexp-router",
+      "name": "Trie (reg-exp)",
+      "kind": "module",
+      "summary": "Per-method trie that tracks registered paths and builds the combined regular expression from their token sequences.",
+      "detail": "The Trie class holds a root Node and a paths record mapping each path to [handlerIndex, paramAssoc, nodeKeys]. insert() tokenises the path (labels, wildcards, literals) and delegates to Node.insert(). buildRegExp() calls root.buildRegExpStr() and post-processes the result to substitute handler-index placeholders (#N) and param-index placeholders (@N) with capture groups, returning the final RegExp and two ReplacementMap arrays.",
+      "paths": ["src/router/reg-exp-router/trie.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/trie.ts#Trie.buildRegExp",
+      "parent": "f:src/router/reg-exp-router/trie.ts",
+      "name": "Trie.buildRegExp()",
+      "kind": "function",
+      "summary": "Converts the insertion trie into a single anchored RegExp plus two index-replacement arrays.",
+      "detail": "Calls this.#root.buildRegExpStr() to get a string representation with embedded handler-index markers (#N) and param-index markers (@N). A single replace() pass converts these into capture groups and builds indexReplacementMap and paramReplacementMap arrays that map capture-group positions back to handler indices and parameter positions respectively.",
+      "paths": ["src/router/reg-exp-router/trie.ts:61-85"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "buildRegExp(): [RegExp, ReplacementMap, ReplacementMap]",
+      "code": "buildRegExp(): [RegExp, ReplacementMap, ReplacementMap] {\n  let regexp = this.#root.buildRegExpStr()\n  let captureIndex = 0\n  const indexReplacementMap: ReplacementMap = []\n  const paramReplacementMap: ReplacementMap = []\n  regexp = regexp.replace(/#(\\d+)|@(\\d+)|\\.\\*\\$/g, (_, h, p) => {\n    if (h !== undefined) { indexReplacementMap[++captureIndex] = Number(h); return '$()' }\n    if (p !== undefined) { paramReplacementMap[Number(p)] = ++captureIndex; return '' }\n    return ''\n  })\n  return [new RegExp(`^${regexp}`), indexReplacementMap, paramReplacementMap]\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/matcher.ts",
+      "parent": "core.regexp-router",
+      "name": "RegExpRouter matcher",
+      "kind": "module",
+      "summary": "The compiled match() function: checks the static map first, then runs the combined RegExp and reads handler data by capture index.",
+      "detail": "Exports the match() standalone function used as the match method on both RegExpRouter and PreparedRegExpRouter. On first call it triggers buildAllMatchers() on the router, replaces this.match with the compiled closure, then delegates. The closure picks the method-specific or ALL matcher, checks staticMap[path], and falls back to running the combined RegExp and using match.indexOf('', 1) to find the first empty capture group (which identifies the matching path branch).",
+      "paths": ["src/router/reg-exp-router/matcher.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/matcher.ts#match",
+      "parent": "f:src/router/reg-exp-router/matcher.ts",
+      "name": "match()",
+      "kind": "function",
+      "summary": "Lazily builds all matchers on first call and replaces itself with the compiled closure for subsequent requests.",
+      "detail": "Called as this.match on RegExpRouter. Calls this.buildAllMatchers() to compile all tries, creates a closure that picks the method-or-ALL matcher, checks staticMap for the path (O(1) for static routes), runs the combined RegExp and uses the first empty capture group index to select the handler row from HandlerData[].",
+      "paths": ["src/router/reg-exp-router/matcher.ts:10-33"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "function match<R extends Router<T>, T>(this: R, method: string, path: string): Result<T>",
+      "code": "export function match<R extends Router<T>, T>(this: R, method: string, path: string): Result<T> {\n  const matchers: MatcherMap<T> = (this as any).buildAllMatchers()\n  const match = ((method, path) => {\n    const matcher = (matchers[method] || matchers[METHOD_NAME_ALL]) as Matcher<T>\n    const staticMatch = matcher[2][path]\n    if (staticMatch) { return staticMatch }\n    const match = path.match(matcher[0])\n    if (!match) { return [[], emptyParam] }\n    const index = match.indexOf('', 1)\n    return [matcher[1][index], match]\n  }) as Router<T>['match']\n  this.match = match\n  return match(method, path)\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/node.ts",
+      "parent": "core.regexp-router",
+      "name": "RegExpRouter Node",
+      "kind": "module",
+      "summary": "Internal trie node for the RegExp builder: accumulates token sequences and emits a regexp fragment string.",
+      "detail": "Each Node holds a child map keyed by regexp token strings (literals, label patterns like [^/]+, wildcard patterns). The insert method walks or creates the token path. The exported buildRegExpStr() method recursively assembles the alternation of all branches with embedded handler-index (#N) and param-index (@N) placeholders consumed by Trie.buildRegExp(). Exports LABEL_REG_EXP_STR, ONLY_WILDCARD_REG_EXP_STR, TAIL_WILDCARD_REG_EXP_STR, and PATH_ERROR.",
+      "paths": ["src/router/reg-exp-router/node.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/prepared-router.ts",
+      "parent": "core.regexp-router",
+      "name": "PreparedRegExpRouter",
+      "kind": "module",
+      "summary": "Accepts a pre-compiled MatcherMap so the RegExp is never rebuilt at runtime; enables build-time serialisation.",
+      "detail": "PreparedRegExpRouter takes a frozen MatcherMap and a RelocateMap (path -> capture-group positions). add() inserts handlers into the already-built matcher rather than into a trie. buildInitParams() uses RegExpRouter to build a matcher from a fixed path list and exports a RelocateMap; serializeInitParams() converts the result to embeddable JavaScript (embedding RegExp literals). Used by adapters or tooling that want zero startup cost.",
+      "paths": ["src/router/reg-exp-router/prepared-router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "core.trie-router",
+      "parent": "hono.router",
+      "name": "TrieRouter",
+      "kind": "group",
+      "summary": "Trie-based router that supports all path patterns including combined label-and-wildcard routes.",
+      "detail": "TrieRouter holds a single root Node (src/router/trie-router/node.ts). add() calls checkOptionalParameter to expand optional path segments and delegates to node.insert(method, path, handler). match() calls node.search(method, path) which walks the trie level by level, tracking multiple candidate nodes for wildcard and parameter branches simultaneously. Handler sets are sorted by registration order. This router is slower to match than RegExpRouter but handles patterns that RegExpRouter rejects with UnsupportedPathError.",
+      "paths": ["src/router/trie-router/router.ts", "src/router/trie-router/node.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/router/trie-router/router.ts",
+      "parent": "core.trie-router",
+      "name": "TrieRouter class",
+      "kind": "module",
+      "summary": "Thin wrapper around the trie root Node: delegates add to Node.insert and match to Node.search.",
+      "detail": "Exports TrieRouter<T>. The entire implementation is 14 lines: add() expands optional parameters via checkOptionalParameter and calls this.#node.insert(); match() calls this.#node.search(). All complexity is in the Node class in node.ts. TrieRouter never throws UnsupportedPathError, making it the universal fallback.",
+      "paths": ["src/router/trie-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/trie-router/router.ts#TrieRouter",
+      "parent": "f:src/router/trie-router/router.ts",
+      "name": "TrieRouter",
+      "kind": "class",
+      "summary": "Router that delegates all logic to a Node trie; supports every URL pattern.",
+      "paths": ["src/router/trie-router/router.ts:5-18"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class TrieRouter<T> implements Router<T>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/trie-router/node.ts",
+      "parent": "core.trie-router",
+      "name": "TrieRouter Node",
+      "kind": "module",
+      "summary": "Trie node that stores handlers per method, tracks child nodes and pattern children, and implements tree-walk search.",
+      "detail": "Each Node holds #methods (array of {method: HandlerSet} maps), #children (literal segment map), #patterns (parameter/wildcard Node list) and #pattern (the Pattern or string). insert() splits the routing path with splitRoutingPath, determines whether each segment is a parameter, wildcard or literal, and creates or reuses children. search() does a breadth-first walk with curNodes accumulating all candidate nodes; pattern-matched children are added to tempNodes; regex patterns are executed against the remaining path slice. Results are sorted by score (registration order).",
+      "paths": ["src/router/trie-router/node.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/trie-router/node.ts#Node.search",
+      "parent": "f:src/router/trie-router/node.ts",
+      "name": "Node.search()",
+      "kind": "function",
+      "summary": "Walks the trie path segment by segment, collecting handlers from all matching literal, wildcard and parameter branches.",
+      "detail": "Uses a curNodes array updated per path part. For each part it checks literal children, then iterates pattern children. Wildcard patterns ('*') push handlers and keep the child in tempNodes. Regex-pattern parameters test the rest of the path with matcher.exec and push matches, deferring multi-segment regex matches via curNodesQueue. At the end results are sorted by score and mapped to [handler, params].",
+      "paths": ["src/router/trie-router/node.ts:86-220"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "search(method: string, path: string): [[T, Params][]]",
+      "source": "code"
+    },
+
+    {
+      "id": "core.smart-router",
+      "parent": "hono.router",
+      "name": "SmartRouter",
+      "kind": "group",
+      "summary": "Delegate router: on first match tries each candidate router in order, commits to the first that succeeds, and replaces itself with that router's match method.",
+      "detail": "SmartRouter holds a list of candidate routers and a pending routes buffer. It defers calling router.add() until the first match() call, at which point it replays all buffered routes into each candidate in turn. The first candidate that does not throw UnsupportedPathError is selected: this.match is replaced with router.match.bind(router) and #routes is cleared. If all candidates fail, it throws a fatal error. The default Hono app uses SmartRouter([RegExpRouter, TrieRouter]).",
+      "paths": ["src/router/smart-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/router/smart-router/router.ts",
+      "parent": "core.smart-router",
+      "name": "SmartRouter class",
+      "kind": "module",
+      "summary": "Defers router selection to the first match call; replaces itself with the winning router's match method.",
+      "detail": "Exports SmartRouter<T>. The module has no imports from the other router files directly; it depends only on the Router interface and UnsupportedPathError from src/router.ts. The self-replacement of this.match via property assignment is legal because match is declared as a regular property, not a prototype method, and the Router interface is structural.",
+      "paths": ["src/router/smart-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/smart-router/router.ts#SmartRouter",
+      "parent": "f:src/router/smart-router/router.ts",
+      "name": "SmartRouter",
+      "kind": "class",
+      "summary": "Deferred router dispatcher: buffers routes and on first match() selects the first compatible router.",
+      "detail": "Private: #routers (candidate list), #routes (buffered [method, path, handler] tuples, null after selection). add() pushes to #routes. match() replays routes into candidates in order, catching UnsupportedPathError to try the next. On success it replaces this.match with router.match.bind(router), clears #routes and sets this.name to 'SmartRouter + RouterName'. The activeRouter getter returns the selected router or throws if not yet selected.",
+      "paths": ["src/router/smart-router/router.ts:4-70"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class SmartRouter<T> implements Router<T>",
+      "code": "match(method: string, path: string): Result<T> {\n  for (let i = 0; i < this.#routers.length; i++) {\n    try {\n      for (const r of this.#routes!) this.#routers[i].add(...r)\n      res = this.#routers[i].match(method, path)\n    } catch (e) {\n      if (e instanceof UnsupportedPathError) continue\n      throw e\n    }\n    this.match = this.#routers[i].match.bind(this.#routers[i])\n    this.#routes = undefined\n    break\n  }\n  return res\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "core.linear-router",
+      "parent": "hono.router",
+      "name": "LinearRouter",
+      "kind": "group",
+      "summary": "Sequential scan router: cheapest to build, good for short-lived workers where startup cost matters more than match throughput.",
+      "detail": "LinearRouter stores routes as a flat array and scans them sequentially on every match() call. It handles static paths, star-only wildcards, label-only paths and star-only paths but throws UnsupportedPathError on combined label+wildcard paths. This makes it fast to initialise (useful when the process is recreated per request) at the cost of O(n) match time.",
+      "paths": ["src/router/linear-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/router/linear-router/router.ts",
+      "parent": "core.linear-router",
+      "name": "LinearRouter class",
+      "kind": "module",
+      "summary": "Sequential route scan: each match() iterates all registered routes and uses string matching or inline regex for params.",
+      "detail": "Exports LinearRouter<T>. Routes are stored as a plain array. match() uses a labeled outer loop (ROUTES_LOOP) with continue ROUTES_LOOP to skip non-matching routes without nested helper calls. The inline RegExp for parameter matching uses the 'd' (indices) flag to extract matched parameter values by offset; it falls through to UnsupportedPathError when both hasStar and hasLabel are true.",
+      "paths": ["src/router/linear-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/linear-router/router.ts#LinearRouter",
+      "parent": "f:src/router/linear-router/router.ts",
+      "name": "LinearRouter",
+      "kind": "class",
+      "summary": "Flat-array router that scans routes sequentially; throws UnsupportedPathError on combined label+wildcard paths.",
+      "paths": ["src/router/linear-router/router.ts:11-152"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class LinearRouter<T> implements Router<T>",
+      "source": "code"
+    },
+
+    {
+      "id": "core.pattern-router",
+      "parent": "hono.router",
+      "name": "PatternRouter",
+      "kind": "group",
+      "summary": "Minimal-footprint router: each route is compiled into an individual RegExp at registration time.",
+      "detail": "PatternRouter (src/router/pattern-router/router.ts) compiles each route path into a RegExp at add() time and stores [pattern, method, handler] tuples. match() iterates them and uses pattern.exec(path), extracting named capture groups as params. It is the smallest implementation by code size and is used by the tiny preset.",
+      "paths": ["src/router/pattern-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/router/pattern-router/router.ts",
+      "parent": "core.pattern-router",
+      "name": "PatternRouter class",
+      "kind": "module",
+      "summary": "Compiles each route into an individual RegExp on add(); match() scans and executes each pattern.",
+      "detail": "Exports PatternRouter<T>. Each call to add() compiles the path into a RegExp using named capture groups for :name parameters. The add() method handles the trailing '?', '/*' and '*' suffix cases explicitly to build the right suffix regex. match() iterates the array and uses pattern.exec(path) to get groups. No separate trie or stash: the simplest possible implementation at the cost of one RegExp object per route.",
+      "paths": ["src/router/pattern-router/router.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/pattern-router/router.ts#PatternRouter",
+      "parent": "f:src/router/pattern-router/router.ts",
+      "name": "PatternRouter",
+      "kind": "class",
+      "summary": "Per-route RegExp router: smallest code size, used by the tiny preset.",
+      "detail": "add() converts the path to a RegExp by replacing :name{pattern} labels with named capture groups (?<name>...) and suffixing with /?$ or wildcard suffixes. match() scans #routes and calls pattern.exec(path), collecting handlers with match.groups as params.",
+      "paths": ["src/router/pattern-router/router.ts:8-54"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class PatternRouter<T> implements Router<T>",
+      "source": "code"
+    },
+
+    {
+      "id": "core.validator",
+      "parent": "hono.core",
+      "name": "Validator",
+      "kind": "group",
+      "summary": "Factory function that generates typed validation middleware for a given request target (json, form, query, param, header, cookie).",
+      "detail": "src/validator/validator.ts exports the validator() factory. It returns a MiddlewareHandler that extracts the target value from the request (parsing JSON with jsonRegex, form data via bufferToFormData, query via c.req.queries(), param via c.req.param(), header via c.req.header(), cookie via getCookie). The extracted value is passed to the user-supplied validationFunc along with the Context. If the function returns a Response it short-circuits. Otherwise it calls c.req.addValidatedData(target, result) and calls next(). The TypeScript generics propagate the validator's output type into the route's Input type, making c.req.valid('json') typed downstream.",
+      "paths": ["src/validator/validator.ts", "src/validator/index.ts", "src/validator/utils.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/validator/validator.ts",
+      "parent": "core.validator",
+      "name": "validator module",
+      "kind": "module",
+      "summary": "Exports the validator() factory and the ValidationFunction and ExtractValidatorOutput types.",
+      "detail": "Exports the validator() function and the ValidationFunction, ExtractValidatorOutput and ExtractValidationResponse type utilities. The module-level jsonRegex (/^application/([\\w.-]+\\+)?json$/i) and getMediaType() helper decide whether to parse a JSON body, ensuring the validator and c.req.json() agree on the media type. For form data it imports bufferToFormData from utils/buffer to handle multipart boundaries correctly.",
+      "paths": ["src/validator/validator.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/validator/validator.ts#validator",
+      "parent": "f:src/validator/validator.ts",
+      "name": "validator()",
+      "kind": "function",
+      "summary": "Returns a MiddlewareHandler that extracts, validates, stores and types a request target (json/form/query/param/header/cookie).",
+      "detail": "Takes a target name and a user validation function. The returned middleware reads the matching request field, calls validationFunc(value, c). A Response return short-circuits the chain. Any other return is stored with c.req.addValidatedData(target, result). For the json target it throws HTTPException(400) on malformed JSON. For the form target it uses bufferToFormData from utils/buffer to handle both multipart and urlencoded forms. The complex TypeScript generics (VF, V, U) preserve the validation function's output type as the route's Input type.",
+      "paths": ["src/validator/validator.ts:46-173"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "validator<InputType,P,M,U,P2,VF,V,E>(target: U, validationFunc: VF): MiddlewareHandler<E,P,V>",
+      "code": "return async (c, next) => {\n  let value = {}\n  switch (target) {\n    case 'json':\n      try { value = await c.req.json() } catch { throw new HTTPException(400) }\n      break\n    case 'query': value = flattenQueries(c.req.queries()); break\n    case 'param': value = c.req.param(); break\n    case 'header': value = c.req.header(); break\n    case 'cookie': value = getCookie(c); break\n  }\n  const res = await validationFunc(value, c)\n  if (res instanceof Response) return res\n  c.req.addValidatedData(target, res)\n}",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/validator/utils.ts",
+      "parent": "core.validator",
+      "name": "Validator utils",
+      "kind": "module",
+      "summary": "Type utilities: InferInput maps a validator's output type back to the expected raw input shape for each target.",
+      "detail": "Exports InferInput<Output, Target, T> which reconstructs what the raw request field looks like given the validated output type. For example, a query validator that outputs {page: number} has an input type of {page: string | string[]}. Used by third-party validation libraries (@hono/zod-validator etc.) to generate correct input types.",
+      "paths": ["src/validator/utils.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "core.presets",
+      "parent": "hono.core",
+      "name": "Router presets",
+      "kind": "group",
+      "summary": "tiny and quick presets: Hono subclasses that wire in a specific router for common deployment scenarios.",
+      "detail": "src/preset/tiny.ts exports a Hono subclass that uses PatternRouter -- the smallest-footprint option, good when bundle size is critical. src/preset/quick.ts exports a Hono subclass using SmartRouter([LinearRouter, TrieRouter]) -- optimised for cold-start-sensitive environments (e.g. AWS Lambda) where LinearRouter's cheap build cost outweighs its linear match cost for small route tables.",
+      "paths": ["src/preset/tiny.ts", "src/preset/quick.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/preset/tiny.ts",
+      "parent": "core.presets",
+      "name": "tiny preset",
+      "kind": "module",
+      "summary": "Hono subclass using PatternRouter: smallest bundle size, one RegExp per route.",
+      "detail": "Exports a Hono subclass that extends HonoBase. The constructor sets this.router = new PatternRouter(). Import from hono/tiny instead of hono to use this preset.",
+      "paths": ["src/preset/tiny.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/preset/quick.ts",
+      "parent": "core.presets",
+      "name": "quick preset",
+      "kind": "module",
+      "summary": "Hono subclass using SmartRouter([LinearRouter, TrieRouter]): low startup cost for cold-start environments.",
+      "detail": "Exports a Hono subclass that extends HonoBase. The constructor sets this.router = new SmartRouter({ routers: [new LinearRouter(), new TrieRouter()] }). LinearRouter builds in O(n) time (no RegExp compilation at startup) and matches in O(n*m) but that is acceptable when n is small. Import from hono/quick to use.",
+      "paths": ["src/preset/quick.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/prepared-router.ts#PreparedRegExpRouter",
+      "parent": "f:src/router/reg-exp-router/prepared-router.ts",
+      "name": "PreparedRegExpRouter",
+      "kind": "class",
+      "summary": "Router that accepts a pre-compiled MatcherMap; enables build-time serialisation to eliminate startup compilation cost.",
+      "detail": "Takes matchers and relocateMap in the constructor. add() injects handlers directly into the existing matcher arrays using the pre-computed capture-group positions from relocateMap. buildAllMatchers() returns the already-built matchers. Used by adapter tooling that generates a serialized version of the matcher at build time via buildInitParams() and serializeInitParams().",
+      "paths": ["src/router/reg-exp-router/prepared-router.ts:9-93"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "signature": "class PreparedRegExpRouter<T> implements Router<T>",
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/request/constants.ts",
+      "parent": "core.request",
+      "name": "Request constants",
+      "kind": "module",
+      "summary": "Exports the GET_MATCH_RESULT symbol used as a private accessor key on HonoRequest.",
+      "detail": "Declares GET_MATCH_RESULT as a unique symbol. HonoRequest exposes get [GET_MATCH_RESULT]() which returns its #matchResult; this allows internal code (helpers, the route helper) to read the match result without exposing a named public property.",
+      "paths": ["src/request/constants.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/utils.ts",
+      "parent": "core.router-interface",
+      "name": "Router utils",
+      "kind": "module",
+      "summary": "Exports createNullObject(): Object.create(null), used by all router implementations for prototype-free maps.",
+      "detail": "Single-function module. createNullObject() calls Object.create(null) to produce a plain object with no prototype. This prevents accidental collisions with Object.prototype property names (such as 'constructor' or '__proto__') when using the object as a path-keyed map. Used in RegExpRouter, Trie, Node and TrieRouter Node.",
+      "paths": ["src/router/utils.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "core.router-tests",
+      "parent": "hono.router",
+      "name": "Router test suite",
+      "kind": "group",
+      "summary": "Per-router unit tests plus a shared test-case file exercised by all router implementations.",
+      "detail": "Each router has its own router.test.ts covering its add() and match() methods. common.case.test.ts holds a shared suite imported and run by multiple routers. TrieRouter additionally has node.test.ts for the Node internals. PreparedRegExpRouter has prepared-router.test.ts covering the build-and-serialise path.",
+      "paths": [
+        "src/router/reg-exp-router/router.test.ts",
+        "src/router/reg-exp-router/prepared-router.test.ts",
+        "src/router/trie-router/router.test.ts",
+        "src/router/trie-router/node.test.ts",
+        "src/router/smart-router/router.test.ts",
+        "src/router/linear-router/router.test.ts",
+        "src/router/pattern-router/router.test.ts",
+        "src/router/common.case.test.ts"
+      ],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/router.test.ts",
+      "parent": "core.router-tests",
+      "name": "RegExpRouter tests",
+      "kind": "test",
+      "summary": "Unit tests for RegExpRouter.add() and match() covering static, parameter, wildcard and optional-parameter routes.",
+      "paths": ["src/router/reg-exp-router/router.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/reg-exp-router/prepared-router.test.ts",
+      "parent": "core.router-tests",
+      "name": "PreparedRegExpRouter tests",
+      "kind": "test",
+      "summary": "Tests buildInitParams, serializeInitParams and PreparedRegExpRouter.add() / match().",
+      "paths": ["src/router/reg-exp-router/prepared-router.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/trie-router/router.test.ts",
+      "parent": "core.router-tests",
+      "name": "TrieRouter tests",
+      "kind": "test",
+      "summary": "Unit tests for TrieRouter including combined label+wildcard patterns not supported by RegExpRouter.",
+      "paths": ["src/router/trie-router/router.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/trie-router/node.test.ts",
+      "parent": "core.router-tests",
+      "name": "TrieRouter Node tests",
+      "kind": "test",
+      "summary": "Low-level tests for Node.insert() and Node.search() edge cases.",
+      "paths": ["src/router/trie-router/node.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/smart-router/router.test.ts",
+      "parent": "core.router-tests",
+      "name": "SmartRouter tests",
+      "kind": "test",
+      "summary": "Tests SmartRouter delegation to RegExpRouter and fallback to TrieRouter on UnsupportedPathError.",
+      "paths": ["src/router/smart-router/router.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/linear-router/router.test.ts",
+      "parent": "core.router-tests",
+      "name": "LinearRouter tests",
+      "kind": "test",
+      "summary": "Unit tests for LinearRouter.add() and match() including UnsupportedPathError for combined patterns.",
+      "paths": ["src/router/linear-router/router.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/pattern-router/router.test.ts",
+      "parent": "core.router-tests",
+      "name": "PatternRouter tests",
+      "kind": "test",
+      "summary": "Unit tests for PatternRouter.add() and match().",
+      "paths": ["src/router/pattern-router/router.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/router/common.case.test.ts",
+      "parent": "core.router-tests",
+      "name": "Common router test cases",
+      "kind": "test",
+      "summary": "Shared test scenarios exercised across multiple router implementations.",
+      "paths": ["src/router/common.case.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "core.validator-tests",
+      "parent": "hono.core",
+      "name": "Validator tests",
+      "kind": "group",
+      "summary": "Unit tests for the validator factory and InferInput utility type.",
+      "detail": "validator.test.ts covers all six target names (json, form, query, param, header, cookie), error short-circuit, malformed-JSON 400 path, and the TypeScript inference of c.req.valid(). utils.test.ts exercises the InferInput type helper with various output shapes.",
+      "paths": ["src/validator/validator.test.ts", "src/validator/utils.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/validator/validator.test.ts",
+      "parent": "core.validator-tests",
+      "name": "validator() tests",
+      "kind": "test",
+      "summary": "Tests all six validation targets (json, form, query, param, header, cookie) including error paths.",
+      "paths": ["src/validator/validator.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/validator/utils.test.ts",
+      "parent": "core.validator-tests",
+      "name": "Validator utils tests",
+      "kind": "test",
+      "summary": "Tests InferInput type behaviour with literal unions, optional fields and various validation targets.",
+      "paths": ["src/validator/utils.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "core.preset-tests",
+      "parent": "hono.core",
+      "name": "Preset tests",
+      "kind": "group",
+      "summary": "Integration tests for the tiny and quick preset classes.",
+      "detail": "tiny.test.ts and quick.test.ts create app instances from the respective preset and verify that basic routing, middleware and not-found handling work correctly, confirming the router wiring in each preset constructor.",
+      "paths": ["src/preset/tiny.test.ts", "src/preset/quick.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"]
+    },
+
+    {
+      "id": "f:src/preset/tiny.test.ts",
+      "parent": "core.preset-tests",
+      "name": "tiny preset tests",
+      "kind": "test",
+      "summary": "Integration tests confirming the tiny preset app routes correctly via PatternRouter.",
+      "paths": ["src/preset/tiny.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    },
+
+    {
+      "id": "f:src/preset/quick.test.ts",
+      "parent": "core.preset-tests",
+      "name": "quick preset tests",
+      "kind": "test",
+      "summary": "Integration tests confirming the quick preset app routes correctly via LinearRouter+TrieRouter.",
+      "paths": ["src/preset/quick.test.ts"],
+      "status": "live",
+      "tech": ["TypeScript"],
+      "source": "code"
+    }
+
+  ],
+
+  "edges": [
+
+    {
+      "from": "f:src/index.ts",
+      "to": "f:src/hono.ts#Hono",
+      "kind": "calls",
+      "label": "re-exports Hono as the main class",
+      "evidence": "src/index.ts:17"
+    },
+    {
+      "from": "f:src/hono.ts#Hono",
+      "to": "f:src/hono-base.ts#HonoBase",
+      "kind": "calls",
+      "label": "extends HonoBase, forwards options to super()",
+      "evidence": "src/hono.ts:20"
+    },
+    {
+      "from": "f:src/hono.ts#Hono",
+      "to": "f:src/router/smart-router/router.ts#SmartRouter",
+      "kind": "calls",
+      "label": "creates SmartRouter([RegExpRouter, TrieRouter])",
+      "evidence": "src/hono.ts:28-33"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase.#dispatch",
+      "to": "f:src/compose.ts#compose",
+      "kind": "calls",
+      "label": "composes multiple matched handlers",
+      "evidence": "src/hono-base.ts:469"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase.#dispatch",
+      "to": "f:src/context.ts#Context",
+      "kind": "calls",
+      "label": "constructs a new Context per request",
+      "evidence": "src/hono-base.ts:440"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase.#dispatch",
+      "to": "f:src/router.ts",
+      "kind": "calls",
+      "label": "calls router.match(method, path)",
+      "evidence": "src/hono-base.ts:439"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase.#addRoute",
+      "to": "f:src/router.ts",
+      "kind": "calls",
+      "label": "calls router.add(method, path, [handler, r])",
+      "evidence": "src/hono-base.ts:414"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase.fetch",
+      "to": "f:src/hono-base.ts#HonoBase.#dispatch",
+      "kind": "calls",
+      "label": "delegates all requests to #dispatch",
+      "evidence": "src/hono-base.ts:502-504"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase.route",
+      "to": "f:src/hono-base.ts#HonoBase.basePath",
+      "kind": "calls",
+      "label": "creates a prefixed clone via basePath(path)",
+      "evidence": "src/hono-base.ts:238"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase.route",
+      "to": "f:src/compose.ts#compose",
+      "kind": "calls",
+      "label": "wraps sub-app handlers in its errorHandler when custom",
+      "evidence": "src/hono-base.ts:244"
+    },
+    {
+      "from": "f:src/context.ts#Context",
+      "to": "f:src/request.ts#HonoRequest",
+      "kind": "calls",
+      "label": "creates HonoRequest lazily on first c.req access",
+      "evidence": "src/context.ts:367"
+    },
+    {
+      "from": "f:src/context.ts#Context.json",
+      "to": "f:src/context.ts#Context.#newResponse",
+      "kind": "calls",
+      "label": "delegates to #newResponse with JSON.stringify body",
+      "evidence": "src/context.ts:734"
+    },
+    {
+      "from": "f:src/context.ts#Context.render",
+      "to": "f:src/context.ts#Context",
+      "kind": "calls",
+      "label": "defaults to c.html() when no renderer set",
+      "evidence": "src/context.ts:449"
+    },
+    {
+      "from": "f:src/request.ts#HonoRequest.param",
+      "to": "f:src/request.ts#HonoRequest",
+      "kind": "reads",
+      "label": "reads decoded param from #matchResult at routeIndex",
+      "evidence": "src/request.ts:103-106"
+    },
+    {
+      "from": "f:src/request.ts#HonoRequest.valid",
+      "to": "f:src/request.ts#HonoRequest",
+      "kind": "reads",
+      "label": "reads #validatedData stored by validator middleware",
+      "evidence": "src/request.ts:357-359"
+    },
+    {
+      "from": "f:src/http-exception.ts#HTTPException",
+      "to": "f:src/hono-base.ts#HonoBase",
+      "kind": "calls",
+      "label": "default errorHandler checks getResponse() on the error",
+      "evidence": "src/hono-base.ts:37-43"
+    },
+    {
+      "from": "f:src/router/smart-router/router.ts#SmartRouter",
+      "to": "f:src/router/reg-exp-router/router.ts#RegExpRouter",
+      "kind": "calls",
+      "label": "tries RegExpRouter first; falls back on UnsupportedPathError",
+      "evidence": "src/router/smart-router/router.ts:35-48"
+    },
+    {
+      "from": "f:src/router/smart-router/router.ts#SmartRouter",
+      "to": "f:src/router/trie-router/router.ts#TrieRouter",
+      "kind": "calls",
+      "label": "falls back to TrieRouter when RegExpRouter rejects pattern",
+      "evidence": "src/router/smart-router/router.ts:35-48"
+    },
+    {
+      "from": "f:src/router/reg-exp-router/router.ts#RegExpRouter",
+      "to": "f:src/router/reg-exp-router/trie.ts",
+      "kind": "calls",
+      "label": "builds per-method tries and calls trie.buildRegExp()",
+      "evidence": "src/router/reg-exp-router/router.ts:38-39"
+    },
+    {
+      "from": "f:src/router/reg-exp-router/router.ts#RegExpRouter.#buildMatcher",
+      "to": "f:src/router/reg-exp-router/matcher.ts#match",
+      "kind": "calls",
+      "label": "match property replaces itself after first call",
+      "evidence": "src/router/reg-exp-router/router.ts:84"
+    },
+    {
+      "from": "f:src/router/reg-exp-router/trie.ts#Trie.buildRegExp",
+      "to": "f:src/router/reg-exp-router/node.ts",
+      "kind": "calls",
+      "label": "calls root.buildRegExpStr() to get the alternation string",
+      "evidence": "src/router/reg-exp-router/trie.ts:62"
+    },
+    {
+      "from": "f:src/router/trie-router/router.ts#TrieRouter",
+      "to": "f:src/router/trie-router/node.ts#Node.search",
+      "kind": "calls",
+      "label": "delegates match to Node.search(method, path)",
+      "evidence": "src/router/trie-router/router.ts:15-17"
+    },
+    {
+      "from": "f:src/validator/validator.ts#validator",
+      "to": "f:src/request.ts#HonoRequest.valid",
+      "kind": "calls",
+      "label": "stores validated data via c.req.addValidatedData",
+      "evidence": "src/validator/validator.ts:169"
+    },
+    {
+      "from": "f:src/validator/validator.ts#validator",
+      "to": "f:src/http-exception.ts#HTTPException",
+      "kind": "calls",
+      "label": "throws HTTPException(400) on malformed JSON or form data",
+      "evidence": "src/validator/validator.ts:102-104"
+    },
+    {
+      "from": "f:src/preset/tiny.ts",
+      "to": "f:src/router/pattern-router/router.ts#PatternRouter",
+      "kind": "calls",
+      "label": "wires PatternRouter as the router for this preset",
+      "evidence": "src/preset/tiny.ts:18"
+    },
+    {
+      "from": "f:src/preset/quick.ts",
+      "to": "f:src/router/smart-router/router.ts#SmartRouter",
+      "kind": "calls",
+      "label": "wires SmartRouter([LinearRouter, TrieRouter])",
+      "evidence": "src/preset/quick.ts:20-23"
+    },
+    {
+      "from": "f:src/preset/quick.ts",
+      "to": "f:src/router/linear-router/router.ts#LinearRouter",
+      "kind": "calls",
+      "label": "first candidate router in the quick-preset smart router",
+      "evidence": "src/preset/quick.ts:21"
+    },
+    {
+      "from": "f:src/router/reg-exp-router/router.test.ts",
+      "to": "f:src/router/reg-exp-router/router.ts#RegExpRouter",
+      "kind": "tests",
+      "label": "tests RegExpRouter add and match",
+      "evidence": "src/router/reg-exp-router/router.test.ts:1"
+    },
+    {
+      "from": "f:src/router/reg-exp-router/prepared-router.test.ts",
+      "to": "f:src/router/reg-exp-router/prepared-router.ts#PreparedRegExpRouter",
+      "kind": "tests",
+      "label": "tests PreparedRegExpRouter and buildInitParams",
+      "evidence": "src/router/reg-exp-router/prepared-router.test.ts:1"
+    },
+    {
+      "from": "f:src/router/trie-router/router.test.ts",
+      "to": "f:src/router/trie-router/router.ts#TrieRouter",
+      "kind": "tests",
+      "label": "tests TrieRouter add and match",
+      "evidence": "src/router/trie-router/router.test.ts:1"
+    },
+    {
+      "from": "f:src/router/trie-router/node.test.ts",
+      "to": "f:src/router/trie-router/node.ts",
+      "kind": "tests",
+      "label": "tests Node.insert and Node.search directly",
+      "evidence": "src/router/trie-router/node.test.ts:1"
+    },
+    {
+      "from": "f:src/router/smart-router/router.test.ts",
+      "to": "f:src/router/smart-router/router.ts#SmartRouter",
+      "kind": "tests",
+      "label": "tests SmartRouter delegation and fallback",
+      "evidence": "src/router/smart-router/router.test.ts:1"
+    },
+    {
+      "from": "f:src/router/linear-router/router.test.ts",
+      "to": "f:src/router/linear-router/router.ts#LinearRouter",
+      "kind": "tests",
+      "label": "tests LinearRouter add, match and UnsupportedPathError",
+      "evidence": "src/router/linear-router/router.test.ts:1"
+    },
+    {
+      "from": "f:src/router/pattern-router/router.test.ts",
+      "to": "f:src/router/pattern-router/router.ts#PatternRouter",
+      "kind": "tests",
+      "label": "tests PatternRouter add and match",
+      "evidence": "src/router/pattern-router/router.test.ts:1"
+    },
+    {
+      "from": "f:src/validator/validator.test.ts",
+      "to": "f:src/validator/validator.ts#validator",
+      "kind": "tests",
+      "label": "tests validator factory for all six targets",
+      "evidence": "src/validator/validator.test.ts:1"
+    },
+    {
+      "from": "f:src/preset/tiny.test.ts",
+      "to": "f:src/preset/tiny.ts",
+      "kind": "tests",
+      "label": "tests tiny preset routing via PatternRouter",
+      "evidence": "src/preset/tiny.test.ts:1"
+    },
+    {
+      "from": "f:src/preset/quick.test.ts",
+      "to": "f:src/preset/quick.ts",
+      "kind": "tests",
+      "label": "tests quick preset routing via LinearRouter+TrieRouter",
+      "evidence": "src/preset/quick.test.ts:1"
+    },
+    {
+      "from": "f:src/hono-base.ts#HonoBase",
+      "to": "hono.adapters",
+      "kind": "calls",
+      "label": "fetch() is called by runtime adapters as the platform entry",
+      "evidence": "src/hono-base.ts:498"
+    },
+    {
+      "from": "f:src/validator/validator.ts#validator",
+      "to": "hono.helpers",
+      "kind": "calls",
+      "label": "reads cookies via getCookie from hono/helper/cookie",
+      "evidence": "src/validator/validator.ts:159"
+    },
+    {
+      "from": "f:src/request.ts#HonoRequest",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "uses utils/body for parseBody, utils/url for queries",
+      "evidence": "src/request.ts:14-18"
+    },
+    {
+      "from": "f:src/request.ts#cloneRawRequest",
+      "to": "f:src/request.ts#HonoRequest",
+      "kind": "calls",
+      "label": "reads bodyCache and calls req.header() to rebuild request",
+      "evidence": "src/request.ts:486-495"
+    },
+    {
+      "from": "f:src/request.ts#cloneRawRequest",
+      "to": "f:src/http-exception.ts#HTTPException",
+      "kind": "calls",
+      "label": "throws HTTPException(500) on unconsumed-via-raw body",
+      "evidence": "src/request.ts:488"
+    },
+    {
+      "from": "f:src/context.ts#Context",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "calls utils/html resolveCallback for async html",
+      "evidence": "src/context.ts:749"
+    }
+  ],
+
+  "flows": [
+    {
+      "id": "flow.core.request-lifecycle",
+      "name": "Request from fetch to Response",
+      "summary": "How a single HTTP request travels from app.fetch through router.match, Context construction, middleware compose and c.json into a Response.",
+      "steps": [
+        {
+          "node": "f:src/hono-base.ts#HonoBase.fetch",
+          "text": "The runtime adapter calls app.fetch(request, env, executionCtx). fetch delegates to this.#dispatch(request, executionCtx, env, request.method)."
+        },
+        {
+          "node": "f:src/hono-base.ts#HonoBase.#dispatch",
+          "text": "HEAD is re-dispatched as GET. For other methods, getPath(request, {env}) extracts the URL path, then this.router.match(method, path) is called to get the match result (a list of [handler, params] tuples)."
+        },
+        {
+          "node": "f:src/router/smart-router/router.ts#SmartRouter",
+          "text": "On first call SmartRouter replays all buffered routes into RegExpRouter. If no UnsupportedPathError is thrown, SmartRouter commits to RegExpRouter and replaces its own match method for all future calls."
+        },
+        {
+          "node": "f:src/router/reg-exp-router/matcher.ts#match",
+          "text": "The compiled match function checks the static path map (O(1)), then runs the combined RegExp against the path and reads the handler list from the HandlerData array at the first empty capture-group index."
+        },
+        {
+          "node": "f:src/context.ts#Context",
+          "text": "A new Context is created with the raw Request, path, matchResult, env and executionCtx. The HonoRequest wrapper is created lazily on the first access of c.req."
+        },
+        {
+          "node": "f:src/compose.ts#compose",
+          "text": "If more than one handler matched, compose(matchResult[0], errorHandler, notFoundHandler) is called. Each middleware calls next() to advance the index; a handler that sets c.res or returns a Response finalises the context."
+        },
+        {
+          "node": "f:src/context.ts#Context.json",
+          "text": "The route handler calls c.json({message: 'ok'}). json() calls #newResponse(JSON.stringify(object), arg, {'Content-Type':'application/json', ...headers}) and returns a typed Response."
+        }
+      ]
+    },
+    {
+      "id": "flow.core.route-registration",
+      "name": "Route registration: app.get to router.add",
+      "summary": "How app.get(path, handler) and app.route(prefix, subApp) register routes in the underlying router.",
+      "steps": [
+        {
+          "node": "f:src/hono-base.ts#HonoBase",
+          "text": "The HonoBase constructor installs method shorthand closures. Calling app.get('/users', handler) stores the path in this.#path and calls this.#addRoute('GET', '/users', handler)."
+        },
+        {
+          "node": "f:src/hono-base.ts#HonoBase.#addRoute",
+          "text": "#addRoute prepends this._basePath via mergePath, creates a RouterRoute record {basePath, path, method, handler}, calls this.router.add(method, path, [handler, r]) and pushes the record to this.routes[]."
+        },
+        {
+          "node": "f:src/router/smart-router/router.ts#SmartRouter",
+          "text": "SmartRouter.add() just pushes [method, path, handler] to its internal #routes buffer without calling the underlying routers yet."
+        },
+        {
+          "node": "f:src/hono-base.ts#HonoBase.route",
+          "text": "app.route('/api', subApp) calls this.basePath('/api') to get a prefixed clone, then iterates subApp.routes. Each route is re-registered on the clone via subApp.#addRoute, optionally wrapped in a compose()-based error-handler shim when subApp has a custom errorHandler."
+        },
+        {
+          "node": "f:src/hono-base.ts#HonoBase.basePath",
+          "text": "basePath(path) calls #clone() to copy the current router and config, then sets _basePath = mergePath(current._basePath, path). All subsequent #addRoute calls on the clone prepend this merged base."
+        }
+      ]
+    },
+    {
+      "id": "flow.core.smart-router-fallback",
+      "name": "SmartRouter fallback: RegExpRouter to TrieRouter",
+      "summary": "How SmartRouter selects RegExpRouter for most apps and falls back to TrieRouter when a combined label+wildcard pattern is registered.",
+      "steps": [
+        {
+          "node": "f:src/router/smart-router/router.ts#SmartRouter",
+          "text": "On the first match() call SmartRouter iterates its candidate routers ([RegExpRouter, TrieRouter] by default). It replays all buffered routes into the first candidate (RegExpRouter)."
+        },
+        {
+          "node": "f:src/router/reg-exp-router/router.ts#RegExpRouter",
+          "text": "RegExpRouter.add() calls this.#tries[method].insert(path, isStatic). The Trie's Node.insert() will catch unsupported patterns (combined :label+wildcard such as '/:id/*') and throw PATH_ERROR, which RegExpRouter re-throws as UnsupportedPathError."
+        },
+        {
+          "node": "f:src/router/smart-router/router.ts#SmartRouter",
+          "text": "SmartRouter catches UnsupportedPathError, discards the failed attempt and continues to the next candidate (TrieRouter). TrieRouter does not use the Trie builder and handles all patterns, so no error is thrown."
+        },
+        {
+          "node": "f:src/router/trie-router/router.ts#TrieRouter",
+          "text": "TrieRouter.match() calls this.#node.search(method, path), which does a breadth-first trie walk that handles every pattern including combined label+wildcard."
+        },
+        {
+          "node": "f:src/router/smart-router/router.ts#SmartRouter",
+          "text": "SmartRouter replaces this.match with TrieRouter.match.bind(trierouter) and sets this.name to 'SmartRouter + TrieRouter'. All subsequent requests bypass SmartRouter overhead entirely."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+ "title": "fastapi",
+ "generated": "24 November 2026",
+ "repos": [
+  {
+   "key": "app:fastapi",
+   "name": "fastapi",
+   "url": "https://github.com/fastapi/fastapi",
+   "commit": "05e6df7e906c3decba377c37548019973f40bf15",
+   "note": "mapped from its source code (fastapi/fastapi master, last commit 2026-11-18)."
+  }
+ ],
+ "regions": [
+  {
+   "id": "app:fastapi",
+   "rect": [
+    0,
+    0,
+    2600,
+    1000
+   ],
+   "hue": 262,
+   "sat": 40
+  },
+  {
+   "id": "ext",
+   "rect": [
+    0,
+    1100,
+    2600,
+    1420
+   ],
+   "hue": 212,
+   "sat": 14
+  }
+ ],
+ "apps": {
+  "app:fastapi": {
+   "provenance": "Mapped from source · November 2026"
+  }
+ },
+ "owners": [
+  ["fastapi/dependencies/", "fastapi.di"],
+  ["fastapi/param_functions.py", "fastapi.di"],
+  ["fastapi/params.py", "fastapi.di"],
+  ["fastapi/openapi/", "fastapi.openapi"],
+  ["fastapi/security/", "fastapi.security"],
+  ["fastapi/_compat/", "fastapi.internals"],
+  ["fastapi/middleware/", "fastapi.internals"],
+  ["fastapi/telemetry/", "fastapi.internals"],
+  ["fastapi/utils.py", "fastapi.internals"],
+  ["fastapi/routing.py", "fastapi.routing"],
+  ["fastapi/background.py", "fastapi.routing"],
+  ["fastapi/websockets.py", "fastapi.routing"],
+  ["fastapi/concurrency.py", "fastapi.routing"],
+  ["fastapi/requests.py", "fastapi.io"],
+  ["fastapi/responses.py", "fastapi.io"],
+  ["fastapi/datastructures.py", "fastapi.io"],
+  ["fastapi/encoders.py", "fastapi.io"],
+  ["fastapi/exceptions.py", "fastapi.io"],
+  ["fastapi/exception_handlers.py", "fastapi.io"],
+  ["fastapi/sse.py", "fastapi.io"],
+  ["fastapi/staticfiles.py", "fastapi.io"],
+  ["fastapi/templating.py", "fastapi.io"],
+  ["fastapi/testclient.py", "fastapi.io"],
+  ["fastapi/_body_limit.py", "fastapi.io"],
+  ["fastapi/_form_limits.py", "fastapi.io"],
+  ["fastapi/applications.py", "fastapi.core"],
+  ["fastapi/cli.py", "fastapi.core"],
+  ["fastapi/", "fastapi.core"]
+ ],
+ "endpoint_fallback": {},
+ "prefix_fallback": {},
+ "area_names": {
+  "core": "Application & CLI",
+  "routing": "Routing & execution",
+  "di": "Parameters & DI",
+  "io": "Requests, responses & errors",
+  "openapi": "OpenAPI & docs",
+  "security": "Security schemes",
+  "internals": "Internals"
+ },
+ "depth": "standard"
+}

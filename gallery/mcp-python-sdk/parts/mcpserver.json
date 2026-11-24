@@ -1,0 +1,1495 @@
+{
+  "area": "mcpserver",
+  "nodes": [
+
+    {
+      "id": "mcpserver.server-pkg",
+      "parent": "mcpserver",
+      "name": "MCPServer package",
+      "kind": "group",
+      "summary": "High-level decorator API: @tool, @resource and @prompt register Python functions as MCP capabilities.",
+      "detail": "The mcpserver package is the user-facing layer of the SDK. Its entry point is the MCPServer class in server.py, which owns a ToolManager, ResourceManager, PromptManager and an underlying low-level Server. Decorators (@tool, @resource, @prompt) wrap their target functions and delegate to the managers. func_metadata in utilities/ derives Pydantic argument models and JSON Schema from Python type hints, making schema authoring implicit. resolve.py implements the resolver dependency-injection system (Resolve/Elicit/Sample/ListRoots) used by tools whose parameters need client input before the body runs. context.py provides the Context object injected into handlers. fastmcp.py is a tombstone that raises ModuleNotFoundError on import, telling v1 users to migrate.",
+      "paths": ["src/mcp/server/mcpserver/"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "anyio"]
+    },
+
+    {
+      "id": "mcpserver.tools-grp",
+      "parent": "mcpserver.server-pkg",
+      "name": "Tools",
+      "kind": "group",
+      "summary": "Tool registration, storage and invocation: Tool data class, ToolManager, and the @tool decorator path.",
+      "detail": "base.py defines the Tool Pydantic model and its from_function factory (which calls func_metadata and build_resolver_plans) and async run method. tool_manager.py defines ToolManager which keeps a dict[str, Tool] and delegates calls to Tool.run. The @tool decorator on MCPServer calls ToolManager.add_tool().",
+      "paths": ["src/mcp/server/mcpserver/tools/"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "mcpserver.resources-grp",
+      "parent": "mcpserver.server-pkg",
+      "name": "Resources",
+      "kind": "group",
+      "summary": "Static and templated resource registration, security validation and reads.",
+      "detail": "base.py defines the abstract Resource class. types.py has concrete subclasses (TextResource, BinaryResource, FunctionResource, FileResource, HttpResource, DirectoryResource). templates.py defines ResourceSecurity, ResourceTemplate and the URI matching/instantiation logic. resource_manager.py defines ResourceManager which resolves URIs to resources or templates.",
+      "paths": ["src/mcp/server/mcpserver/resources/"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "mcpserver.prompts-grp",
+      "parent": "mcpserver.server-pkg",
+      "name": "Prompts",
+      "kind": "group",
+      "summary": "Prompt registration and rendering: Prompt, PromptManager and message conversion helpers.",
+      "detail": "base.py defines Prompt (with from_function and render), PromptArgument, Message, UserMessage, AssistantMessage, and type aliases for prompt result types. manager.py defines PromptManager which keeps a dict[str, Prompt] and delegates rendering to Prompt.render.",
+      "paths": ["src/mcp/server/mcpserver/prompts/"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "mcpserver.utilities-grp",
+      "parent": "mcpserver.server-pkg",
+      "name": "Utilities",
+      "kind": "group",
+      "summary": "Schema derivation, context injection, media helpers and logging setup shared across the package.",
+      "detail": "func_metadata.py is the schema-derivation engine used by tools, resources and prompts. context_injection.py provides find_context_parameter and inject_context. types.py provides Image and Audio media helpers. logging.py provides get_logger and configure_logging called at MCPServer startup.",
+      "paths": ["src/mcp/server/mcpserver/utilities/"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "f:src/mcp/server/fastmcp.py",
+      "parent": "mcpserver",
+      "name": "fastmcp tombstone",
+      "kind": "module",
+      "summary": "Removed module that raises ModuleNotFoundError on import to guide v1 users toward MCPServer.",
+      "detail": "In mcp v2, FastMCP was renamed to MCPServer. This file contains only a string message and a bare raise statement. It exists so that code importing 'mcp.server.fastmcp' receives a helpful error pointing at the migration guide rather than a generic 'No module named' message. It has no public API and no classes or functions.",
+      "paths": ["src/mcp/server/fastmcp.py:1"],
+      "status": "archived",
+      "tech": ["Python"],
+      "facts": [
+        "Raises ModuleNotFoundError unconditionally at import time",
+        "Migration guide URL: https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserver",
+        "Canonical import in v2: from mcp.server.mcpserver import MCPServer"
+      ],
+      "code": "raise ModuleNotFoundError(_MESSAGE, name=__name__)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/__init__.py",
+      "parent": "mcpserver.server-pkg",
+      "name": "MCPServer public API",
+      "kind": "module",
+      "summary": "Package __init__ that re-exports MCPServer and all public symbols for the mcp.server.mcpserver namespace.",
+      "detail": "Imports from context, resolve, resources, server and utilities.types then lists them in __all__. Exported symbols include MCPServer, Context, Image, Audio, Message, UserMessage, AssistantMessage, Resolve, Elicit, Sample, ListRoots, ElicitationResult, the three elicitation outcome types, Extension, ToolBinding, ResourceBinding, MethodBinding, require_client_extension, ResourceSecurity, DEFAULT_RESOURCE_SECURITY, RequestStateSecurity, RequestStateCodec, RequestStateBoundary, AESGCMRequestStateCodec, InvalidRequestState, authenticated_principal, and Icon.",
+      "paths": ["src/mcp/server/mcpserver/__init__.py:1"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py",
+      "parent": "mcpserver.server-pkg",
+      "name": "MCPServer",
+      "kind": "module",
+      "summary": "The high-level MCP server: decorators, transport runners, Starlette app builders and extension wiring.",
+      "detail": "Defines MCPServer (a generic class parameterised on the lifespan context type), Settings, lifespan_wrapper, _version_gated and require_client_extension. MCPServer.__init__ creates a ToolManager, ResourceManager, PromptManager and a low-level Server; it installs a RequestStateBoundary middleware and validates auth config. The @tool, @resource and @prompt decorators call the managers. run() dispatches to run_stdio_async, run_sse_async or run_streamable_http_async depending on the chosen transport. sse_app() and streamable_http_app() return Starlette ASGI apps with optional bearer-auth middleware and OAuth routes. The SSE transport defaults to 127.0.0.1:8000, path /sse with DNS-rebinding protection auto-enabled for loopback addresses.",
+      "paths": ["src/mcp/server/mcpserver/server.py:157"],
+      "status": "live",
+      "tech": ["Python", "anyio", "Starlette", "Pydantic"],
+      "facts": [
+        "SSE default host 127.0.0.1, port 8000, path /sse",
+        "StreamableHTTP default host 127.0.0.1, port 8000, path /mcp",
+        "DNS-rebinding protection auto-enabled for 127.0.0.1, localhost, ::1",
+        "MISSING_AUDIENCE error raised when request_state_security set without a server name and no explicit audience"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#Settings",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "Settings",
+      "kind": "class",
+      "summary": "Pydantic model holding MCPServer construction parameters validated at startup.",
+      "detail": "Fields: debug (bool), log_level (Literal DEBUG/INFO/WARNING/ERROR/CRITICAL), warn_on_duplicate_resources, warn_on_duplicate_tools, warn_on_duplicate_prompts, dependencies (list[str]), lifespan (callable or None), auth (AuthSettings or None).",
+      "paths": ["src/mcp/server/mcpserver/server.py:111"],
+      "status": "live",
+      "signature": "class Settings(BaseModel, Generic[LifespanResultT])"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer",
+      "kind": "class",
+      "summary": "High-level MCP server: holds managers for tools, resources and prompts and delegates to the low-level Server.",
+      "detail": "Generic on LifespanResultT. The constructor creates a ToolManager, ResourceManager, PromptManager, an InMemorySubscriptionBus (or a custom SubscriptionBus), and a low-level Server whose callbacks point at the MCPServer's own handle methods. It appends a RequestStateBoundary middleware and optionally user-supplied middleware. Extensions are applied in order at construction; their tool/resource/method registrations are immutable after that. The @tool, @resource, @prompt and @completion decorators delegate to the managers or the low-level server. run() is synchronous and blocks for the life of the server.",
+      "paths": ["src/mcp/server/mcpserver/server.py:157"],
+      "status": "live",
+      "tech": ["Python", "anyio"],
+      "signature": "class MCPServer(Generic[LifespanResultT])",
+      "code": "self._lowlevel_server = Server(\n    name=name or \"mcp-server\",\n    ...\n    on_list_tools=self._handle_list_tools,\n    on_call_tool=self._handle_call_tool,\n    on_list_resources=self._handle_list_resources,\n    on_read_resource=self._handle_read_resource,\n    on_list_resource_templates=self._handle_list_resource_templates,\n    on_list_prompts=self._handle_list_prompts,\n    on_get_prompt=self._handle_get_prompt,\n    on_subscriptions_listen=None if subscriptions is False else ListenHandler(self._subscriptions),\n)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.tool",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.tool()",
+      "kind": "function",
+      "summary": "Decorator that registers a type-hinted Python function as a tool, deriving its JSON Schema from the signature.",
+      "detail": "Returns a decorator that calls add_tool() on the ToolManager. Guards against bare @tool (without parentheses) by raising TypeError. The decorated function is returned unchanged so it stays callable from Python code. The optional structured_output parameter controls whether the return type drives a published output_schema.",
+      "paths": ["src/mcp/server/mcpserver/server.py:669"],
+      "status": "live",
+      "signature": "def tool(self, name=None, title=None, description=None, annotations=None, icons=None, meta=None, structured_output=None) -> Callable[[_CallableT], _CallableT]"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.resource",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.resource()",
+      "kind": "function",
+      "summary": "Decorator that registers a function as a static resource or a URI-template resource depending on the URI string.",
+      "detail": "Parses the URI with UriTemplate.parse at decoration time to surface malformed-template errors early. If the URI contains variable expressions the function is registered as a ResourceTemplate (via ResourceManager.add_template); otherwise as a FunctionResource. Validates that URI template variables match function parameter names and that query variables have defaults. Context injection on static resources is rejected: the function takes no URI parameters, so there is nothing to inject into.",
+      "paths": ["src/mcp/server/mcpserver/server.py:788"],
+      "status": "live",
+      "signature": "def resource(self, uri: str, *, name=None, title=None, description=None, mime_type=None, icons=None, annotations=None, meta=None, security=None) -> Callable[[_CallableT], _CallableT]",
+      "code": "parsed = UriTemplate.parse(uri)\nuri_params = set(parsed.variable_names)\n\ndef decorator(fn: _CallableT) -> _CallableT:\n    ...\n    if uri_params:\n        self._resource_manager.add_template(fn=fn, uri_template=uri, ...)\n    else:\n        resource = FunctionResource.from_function(fn=fn, uri=uri, ...)\n        self.add_resource(resource)\n    return fn"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.prompt",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.prompt()",
+      "kind": "function",
+      "summary": "Decorator that registers a function as a prompt template, deriving its argument list from the function signature.",
+      "paths": ["src/mcp/server/mcpserver/server.py:968"],
+      "status": "live",
+      "signature": "def prompt(self, name=None, title=None, description=None, icons=None) -> Callable[[_CallableT], _CallableT]"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.run",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.run()",
+      "kind": "function",
+      "summary": "Synchronous entry point that starts the server on stdio, SSE or Streamable HTTP.",
+      "detail": "Accepts transport as 'stdio', 'sse' or 'streamable-http'; additional kwargs are forwarded to the matching async runner. For stdio it calls anyio.run(self.run_stdio_async). For HTTP transports it builds the Starlette app and serves it with uvicorn. The method blocks until the server stops.",
+      "paths": ["src/mcp/server/mcpserver/server.py:404"],
+      "status": "live",
+      "signature": "def run(self, transport: Literal['stdio', 'sse', 'streamable-http'] = 'stdio', **kwargs: Any) -> None",
+      "code": "match transport:\n    case \"stdio\":\n        anyio.run(self.run_stdio_async)\n    case \"sse\":\n        anyio.run(lambda: self.run_sse_async(**kwargs))\n    case \"streamable-http\":\n        anyio.run(lambda: self.run_streamable_http_async(**kwargs))"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.sse_app",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.sse_app()",
+      "kind": "function",
+      "summary": "Returns a Starlette app wired to the SSE transport with optional bearer-auth middleware and OAuth routes.",
+      "paths": ["src/mcp/server/mcpserver/server.py:1153"],
+      "status": "live",
+      "signature": "def sse_app(self, *, sse_path='/sse', message_path='/messages/', max_request_body_size=..., transport_security=None, host='127.0.0.1') -> Starlette"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.streamable_http_app",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.streamable_http_app()",
+      "kind": "function",
+      "summary": "Returns a Starlette app wired to the StreamableHTTP transport by delegating to the low-level Server.",
+      "paths": ["src/mcp/server/mcpserver/server.py:1288"],
+      "status": "live",
+      "signature": "def streamable_http_app(self, *, streamable_http_path='/mcp', json_response=False, stateless_http=False, ...) -> Starlette"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_call_tool",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer._handle_call_tool()",
+      "kind": "function",
+      "summary": "Internal handler: wraps call_tool with error classification, logging and CallToolResult conversion.",
+      "detail": "Builds a Context from the ServerRequestContext and calls self.call_tool(). Catches ToolError (anticipated failures, logged at INFO) versus unexpected crashes (logged via logger.exception). ValidationError causes in ToolError are logged with field names only, not values, to avoid echoing caller data.",
+      "paths": ["src/mcp/server/mcpserver/server.py:437"],
+      "status": "live",
+      "signature": "async def _handle_call_tool(self, ctx: ServerRequestContext, params: CallToolRequestParams) -> CallToolResult | InputRequiredResult",
+      "code": "context = Context(request_context=ctx, mcp_server=self, input_params=params, subscriptions=self._subscriptions)\ntry:\n    return await self.call_tool(params.name, params.arguments or {}, context)\nexcept MCPError:\n    raise\nexcept Exception as exc:\n    ...\n    return CallToolResult(content=[TextContent(type=\"text\", text=str(exc))], is_error=True)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#require_client_extension",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "require_client_extension()",
+      "kind": "function",
+      "summary": "Assert the connected client declared support for an extension identifier, raising MCPError if not.",
+      "paths": ["src/mcp/server/mcpserver/server.py:1396"],
+      "status": "live",
+      "signature": "def require_client_extension(ctx: ServerRequestContext, identifier: str) -> None"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/base.py",
+      "parent": "mcpserver.tools-grp",
+      "name": "Tool",
+      "kind": "module",
+      "summary": "Tool data class with from_function factory and async run method for validated invocation.",
+      "detail": "Tool is a Pydantic BaseModel holding the callable, its name, description, the Pydantic argument model (via FuncMetadata), the JSON Schema parameters dict, context kwarg name, resolved_params and resolver_plans for the dependency injection system, and optional annotations/icons/meta. from_function calls func_metadata to derive the argument model and schema; it also calls find_resolved_parameters and build_resolver_plans. run() validates arguments, optionally runs resolvers, calls the function (via anyio.to_thread for sync functions), and converts the result. Error wrapping distinguishes anticipated ToolError/ResourceError from crashes (UnexpectedToolError).",
+      "paths": ["src/mcp/server/mcpserver/tools/base.py:35"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "anyio"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/base.py#Tool",
+      "parent": "f:src/mcp/server/mcpserver/tools/base.py",
+      "name": "Tool",
+      "kind": "class",
+      "summary": "Internal tool registration record holding the callable, metadata, argument model and resolver plans.",
+      "paths": ["src/mcp/server/mcpserver/tools/base.py:35"],
+      "status": "live",
+      "signature": "class Tool(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+      "parent": "f:src/mcp/server/mcpserver/tools/base.py",
+      "name": "Tool.from_function()",
+      "kind": "function",
+      "summary": "Factory: inspects the callable, derives the argument model and schema via func_metadata, and validates the resolver DAG.",
+      "detail": "Calls validate_and_warn_tool_name, then func_metadata with skip_names=[context_kwarg] + resolved_params. Calls model_json_schema to produce the parameters dict, strips the generated title. Checks x-mcp-header annotations. Calls build_resolver_plans for resolver dependency analysis. Rejects combining Resolve(...) parameters with InputRequiredResult return types (a single input_required channel constraint).",
+      "paths": ["src/mcp/server/mcpserver/tools/base.py:64"],
+      "status": "live",
+      "signature": "classmethod from_function(cls, fn, name=None, title=None, description=None, context_kwarg=None, annotations=None, icons=None, meta=None, structured_output=None) -> Tool",
+      "code": "func_arg_metadata = func_metadata(\n    fn,\n    skip_names=skip_names,\n    structured_output=structured_output,\n)\nparameters = func_arg_metadata.arg_model.model_json_schema(by_alias=True, schema_generator=UntitledJsonSchema)\nparameters.pop(\"title\", None)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/base.py#Tool.run",
+      "parent": "f:src/mcp/server/mcpserver/tools/base.py",
+      "name": "Tool.run()",
+      "kind": "function",
+      "summary": "Validate arguments, run resolvers if any, call the function and optionally convert the result to CallToolResult.",
+      "detail": "Validates arguments via fn_metadata.validate_arguments (raises ToolError on ValidationError, UnexpectedToolError on other errors). Injects context_kwarg. If resolved_params are present, calls resolve_arguments; if that returns InputRequiredResult the tool body is skipped this round. Calls fn_metadata.call_fn. Wraps all non-MCPError exceptions into the appropriate ToolError/UnexpectedToolError subclass.",
+      "paths": ["src/mcp/server/mcpserver/tools/base.py:134"],
+      "status": "live",
+      "signature": "async def run(self, arguments: dict[str, Any], context: Context, convert_result: bool = False) -> Any"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/tool_manager.py",
+      "parent": "mcpserver.tools-grp",
+      "name": "ToolManager",
+      "kind": "module",
+      "summary": "In-memory registry for Tool instances: add, remove, get by name and call.",
+      "detail": "ToolManager keeps a dict[str, Tool] keyed by tool name. add_tool calls Tool.from_function and returns the existing tool if the name is already registered (with optional warning). remove_tool raises ToolError for unknown names. call_tool delegates to Tool.run.",
+      "paths": ["src/mcp/server/mcpserver/tools/tool_manager.py:19"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager",
+      "parent": "f:src/mcp/server/mcpserver/tools/tool_manager.py",
+      "name": "ToolManager",
+      "kind": "class",
+      "summary": "Registry that maps tool names to Tool instances; delegates invocation to Tool.run.",
+      "paths": ["src/mcp/server/mcpserver/tools/tool_manager.py:19"],
+      "status": "live",
+      "signature": "class ToolManager"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager.add_tool",
+      "parent": "f:src/mcp/server/mcpserver/tools/tool_manager.py",
+      "name": "ToolManager.add_tool()",
+      "kind": "function",
+      "summary": "Create a Tool from a callable via Tool.from_function and register it, returning existing entry on duplicate.",
+      "paths": ["src/mcp/server/mcpserver/tools/tool_manager.py:39"],
+      "status": "live",
+      "signature": "def add_tool(self, fn, name=None, title=None, description=None, annotations=None, icons=None, meta=None, structured_output=None) -> Tool"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager.call_tool",
+      "parent": "f:src/mcp/server/mcpserver/tools/tool_manager.py",
+      "name": "ToolManager.call_tool()",
+      "kind": "function",
+      "summary": "Look up a tool by name and invoke it; raises ToolError if the name is unknown.",
+      "paths": ["src/mcp/server/mcpserver/tools/tool_manager.py:75"],
+      "status": "live",
+      "signature": "async def call_tool(self, name: str, arguments: dict[str, Any], context: Context, convert_result: bool = False) -> Any"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/base.py",
+      "parent": "mcpserver.resources-grp",
+      "name": "Resource base",
+      "kind": "module",
+      "summary": "Abstract base class for all resource types with URI, name, MIME type and abstract read() method.",
+      "detail": "Resource is a Pydantic BaseModel with extra='forbid' and validate_default=True. Fields: uri (str, required), name (str|None, defaults to URI string), title, description, mime_type (default 'text/plain'), icons, annotations, meta. The abstract read() method must return str or bytes. A field_validator sets name from the URI when omitted.",
+      "paths": ["src/mcp/server/mcpserver/resources/base.py:16"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/base.py#Resource",
+      "parent": "f:src/mcp/server/mcpserver/resources/base.py",
+      "name": "Resource",
+      "kind": "class",
+      "summary": "Abstract Pydantic model every concrete resource extends; declares the read() contract.",
+      "paths": ["src/mcp/server/mcpserver/resources/base.py:16"],
+      "status": "live",
+      "signature": "class Resource(BaseModel, abc.ABC)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/types.py",
+      "parent": "mcpserver.resources-grp",
+      "name": "Resource types",
+      "kind": "module",
+      "summary": "Concrete Resource subclasses: TextResource, BinaryResource, FunctionResource, FileResource, HttpResource, DirectoryResource.",
+      "detail": "FunctionResource wraps a zero-argument callable and calls it on read, running sync functions via anyio.to_thread. FileResource reads a file path with configurable encoding derived from the MIME type's charset parameter or structural type (text/*, JSON, XML). HttpResource fetches a URL using httpx2. DirectoryResource lists files in a directory, optionally filtered by glob pattern. All support async reads.",
+      "paths": ["src/mcp/server/mcpserver/resources/types.py:1"],
+      "status": "live",
+      "tech": ["Python", "anyio", "httpx2", "Pydantic"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/types.py#FunctionResource",
+      "parent": "f:src/mcp/server/mcpserver/resources/types.py",
+      "name": "FunctionResource",
+      "kind": "class",
+      "summary": "Resource whose content is produced lazily by a zero-argument callable, run on a thread for sync functions.",
+      "paths": ["src/mcp/server/mcpserver/resources/types.py:65"],
+      "status": "live",
+      "signature": "class FunctionResource(Resource)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/types.py#FileResource",
+      "parent": "f:src/mcp/server/mcpserver/resources/types.py",
+      "name": "FileResource",
+      "kind": "class",
+      "summary": "Resource that reads an absolute file path; encoding defaults from MIME type, overridable.",
+      "paths": ["src/mcp/server/mcpserver/resources/types.py:139"],
+      "status": "live",
+      "signature": "class FileResource(Resource)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/templates.py",
+      "parent": "mcpserver.resources-grp",
+      "name": "ResourceTemplate",
+      "kind": "module",
+      "summary": "URI template matching and instantiation with security policy for extracted parameters.",
+      "detail": "ResourceSecurity is a frozen dataclass controlling three checks on extracted URI template parameters: path traversal (..), absolute paths, and null bytes. DEFAULT_RESOURCE_SECURITY enables all three. ResourceTemplate holds a parsed UriTemplate, the wrapped function (via validate_call), context_kwarg and security policy. matches() calls UriTemplate.match and then ResourceSecurity.validate; a failed security check raises ResourceSecurityError rather than returning None so the manager stops at the first security rejection. create_resource() runs the template function and wraps the result in a FunctionResource.",
+      "paths": ["src/mcp/server/mcpserver/resources/templates.py:1"],
+      "status": "live",
+      "tech": ["Python", "anyio", "Pydantic"],
+      "facts": [
+        "DEFAULT_RESOURCE_SECURITY rejects path traversal, absolute paths and null bytes",
+        "ResourceSecurityError stops template iteration; None match falls through to next template"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceSecurity",
+      "parent": "f:src/mcp/server/mcpserver/resources/templates.py",
+      "name": "ResourceSecurity",
+      "kind": "class",
+      "summary": "Frozen dataclass: reject_path_traversal, reject_absolute_paths, reject_null_bytes and exempt_params.",
+      "paths": ["src/mcp/server/mcpserver/resources/templates.py:28"],
+      "status": "live",
+      "signature": "class ResourceSecurity (frozen dataclass)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate",
+      "parent": "f:src/mcp/server/mcpserver/resources/templates.py",
+      "name": "ResourceTemplate",
+      "kind": "class",
+      "summary": "Pydantic model for a URI-template resource: wraps from_function, matches and create_resource.",
+      "paths": ["src/mcp/server/mcpserver/resources/templates.py:104"],
+      "status": "live",
+      "signature": "class ResourceTemplate(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate.matches",
+      "parent": "f:src/mcp/server/mcpserver/resources/templates.py",
+      "name": "ResourceTemplate.matches()",
+      "kind": "function",
+      "summary": "Return extracted parameters if the URI matches, None if it does not, or raise ResourceSecurityError on policy violation.",
+      "paths": ["src/mcp/server/mcpserver/resources/templates.py:177"],
+      "status": "live",
+      "signature": "def matches(self, uri: str) -> dict[str, str | list[str]] | None"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate.create_resource",
+      "parent": "f:src/mcp/server/mcpserver/resources/templates.py",
+      "name": "ResourceTemplate.create_resource()",
+      "kind": "function",
+      "summary": "Invoke the template function with extracted parameters and return a FunctionResource or InputRequiredResult.",
+      "paths": ["src/mcp/server/mcpserver/resources/templates.py:203"],
+      "status": "live",
+      "signature": "async def create_resource(self, uri: str, params: dict, context: Context) -> Resource | InputRequiredResult"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/resource_manager.py",
+      "parent": "mcpserver.resources-grp",
+      "name": "ResourceManager",
+      "kind": "module",
+      "summary": "Registry for static resources and resource templates; resolves URIs by checking concrete resources then templates.",
+      "detail": "ResourceManager holds two dicts: _resources keyed by URI string and _templates keyed by URI template string. add_resource warns on duplicate URIs and returns the existing resource. add_template creates a ResourceTemplate via from_function. get_resource checks _resources first, then iterates _templates calling matches(); ResourceSecurityError is converted to ResourceNotFoundError. list_resources and list_templates return plain lists.",
+      "paths": ["src/mcp/server/mcpserver/resources/resource_manager.py:28"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/resource_manager.py#ResourceManager",
+      "parent": "f:src/mcp/server/mcpserver/resources/resource_manager.py",
+      "name": "ResourceManager",
+      "kind": "class",
+      "summary": "Holds static resources and templates; get_resource checks statics then templates in registration order.",
+      "paths": ["src/mcp/server/mcpserver/resources/resource_manager.py:28"],
+      "status": "live",
+      "signature": "class ResourceManager",
+      "code": "if resource := self._resources.get(uri_str):\n    return resource\nfor template in self._templates.values():\n    try:\n        params = template.matches(uri_str)\n    except ResourceSecurityError as e:\n        raise ResourceNotFoundError(f\"Unknown resource: {uri}\") from e\n    if params is not None:\n        return await template.create_resource(uri_str, params, context=context)\nraise ResourceNotFoundError(f\"Unknown resource: {uri}\")"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/prompts/base.py",
+      "parent": "mcpserver.prompts-grp",
+      "name": "Prompt",
+      "kind": "module",
+      "summary": "Prompt data class, message types (Message, UserMessage, AssistantMessage) and render logic.",
+      "detail": "Message is a Pydantic model with role and ContentBlock; its __init__ accepts str/Image/Audio and converts them. Prompt is a Pydantic model holding the name, arguments (derived from func_metadata), fn (wrapped with validate_call) and context_kwarg. from_function inspects the signature for PromptArguments and their required flags. render() validates required arguments, runs the function (async or via anyio.to_thread), passes through InputRequiredResult unchanged, and coerces the result to list[Message] handling str, ContentBlock, Image, Audio, dicts and Message objects.",
+      "paths": ["src/mcp/server/mcpserver/prompts/base.py:1"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "anyio"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt",
+      "parent": "f:src/mcp/server/mcpserver/prompts/base.py",
+      "name": "Prompt",
+      "kind": "class",
+      "summary": "Pydantic model for a named prompt template with arguments, a render callable and optional context injection.",
+      "paths": ["src/mcp/server/mcpserver/prompts/base.py:86"],
+      "status": "live",
+      "signature": "class Prompt(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt.from_function",
+      "parent": "f:src/mcp/server/mcpserver/prompts/base.py",
+      "name": "Prompt.from_function()",
+      "kind": "function",
+      "summary": "Inspect the function's signature to build PromptArgument list and wrap the callable with validate_call.",
+      "paths": ["src/mcp/server/mcpserver/prompts/base.py:97"],
+      "status": "live",
+      "signature": "classmethod from_function(cls, fn, name=None, title=None, description=None, icons=None, context_kwarg=None) -> Prompt"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt.render",
+      "parent": "f:src/mcp/server/mcpserver/prompts/base.py",
+      "name": "Prompt.render()",
+      "kind": "function",
+      "summary": "Validate required arguments, call the function and coerce its result to list[Message] or pass through InputRequiredResult.",
+      "paths": ["src/mcp/server/mcpserver/prompts/base.py:158"],
+      "status": "live",
+      "signature": "async def render(self, arguments: dict[str, Any] | None, context: Context) -> list[Message] | InputRequiredResult"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/prompts/manager.py",
+      "parent": "mcpserver.prompts-grp",
+      "name": "PromptManager",
+      "kind": "module",
+      "summary": "In-memory registry for Prompt objects: add, remove, get by name and render.",
+      "detail": "PromptManager keeps a dict[str, Prompt] keyed by name. add_prompt warns on duplicates and returns the existing entry. remove_prompt raises ValueError for unknown names. render_prompt delegates to Prompt.render.",
+      "paths": ["src/mcp/server/mcpserver/prompts/manager.py:20"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/prompts/manager.py#PromptManager",
+      "parent": "f:src/mcp/server/mcpserver/prompts/manager.py",
+      "name": "PromptManager",
+      "kind": "class",
+      "summary": "Dict-backed registry of named prompts with CRUD and render delegation.",
+      "paths": ["src/mcp/server/mcpserver/prompts/manager.py:20"],
+      "status": "live",
+      "signature": "class PromptManager"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/func_metadata.py",
+      "parent": "mcpserver.utilities-grp",
+      "name": "func_metadata",
+      "kind": "module",
+      "summary": "Derives Pydantic argument models and JSON Schema from Python function signatures; also handles structured output schema derivation.",
+      "detail": "func_metadata() inspects the function's signature, creates a dynamic Pydantic model (ArgModelBase subclass) for its non-skipped parameters, then analyses the return annotation to derive an output_schema when structured output is enabled. For structured output it handles BaseModel, TypedDict, dataclasses with type hints, primitive types (wrapped in a 'result' field), dict[str, T], and generic types (list, Union, etc.). UntitledJsonSchema suppresses Pydantic-generated field-name titles. FuncMetadata.call_fn runs async functions directly and sync functions via anyio.to_thread. pre_parse_json handles clients (like Claude Desktop) that JSON-encode complex argument values as strings. convert_result converts a function return value to CallToolResult, with optional structured_content validation against output_model.",
+      "paths": ["src/mcp/server/mcpserver/utilities/func_metadata.py:287"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "anyio"],
+      "facts": [
+        "Pre-parses JSON-in-string arguments for clients that double-encode complex values",
+        "sync callables run on anyio worker threads via anyio.to_thread.run_sync",
+        "structured_output=None auto-detects; content block return types are unstructured by default",
+        "typing.TypedDict rebuilt as typing_extensions.TypedDict on Python < 3.12 for Pydantic compatibility"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#FuncMetadata",
+      "parent": "f:src/mcp/server/mcpserver/utilities/func_metadata.py",
+      "name": "FuncMetadata",
+      "kind": "class",
+      "summary": "Pydantic model holding arg_model, output_schema, output_model and wrap_output; built once per registered tool.",
+      "detail": "model_post_init derives output_schema from output_model using StrictJsonSchema if output_schema is omitted. The _output_adapter caches a TypeAdapter keyed by model identity, rebuilt only when output_model changes. validate_arguments returns a one-level kwargs dict. call_fn runs the function. convert_result converts raw returns to CallToolResult including structured_content population. pre_parse_json handles double-encoded JSON strings from non-conformant clients.",
+      "paths": ["src/mcp/server/mcpserver/utilities/func_metadata.py:124"],
+      "status": "live",
+      "signature": "class FuncMetadata(BaseModel)",
+      "code": "def validate_arguments(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:\n    arguments_pre_parsed = self.pre_parse_json(arguments_to_validate)\n    arguments_parsed_model = self.arg_model.model_validate(arguments_pre_parsed)\n    return arguments_parsed_model.model_dump_one_level()"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+      "parent": "f:src/mcp/server/mcpserver/utilities/func_metadata.py",
+      "name": "func_metadata()",
+      "kind": "function",
+      "summary": "Given a callable, return a FuncMetadata with the Pydantic argument model and optional output schema.",
+      "detail": "Iterates the function's parameters, skips names in skip_names, infers annotation as Any when absent, and handles alias-collision with BaseModel attribute names. Builds a dynamic model with create_model(__base__=ArgModelBase). Then inspects the return annotation: strips InputRequiredResult arms, checks for content-block types (unstructured by default), and delegates to _create_output_model. structured_output=False skips output schema derivation; structured_output=True raises InvalidSignature if the type is not serializable.",
+      "paths": ["src/mcp/server/mcpserver/utilities/func_metadata.py:287"],
+      "status": "live",
+      "signature": "def func_metadata(func: Callable, skip_names: Sequence[str] = (), structured_output: bool | None = None) -> FuncMetadata",
+      "code": "arguments_model = create_model(\n    f\"{func.__name__}Arguments\",\n    __base__=ArgModelBase,\n    **dynamic_pydantic_model_params,\n)\n\nif structured_output is False:\n    return FuncMetadata(arg_model=arguments_model)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#UntitledJsonSchema",
+      "parent": "f:src/mcp/server/mcpserver/utilities/func_metadata.py",
+      "name": "UntitledJsonSchema",
+      "kind": "class",
+      "summary": "GenerateJsonSchema subclass that suppresses field-name-derived titles in generated schemas.",
+      "paths": ["src/mcp/server/mcpserver/utilities/func_metadata.py:65"],
+      "status": "live",
+      "signature": "class UntitledJsonSchema(GenerateJsonSchema)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#ArgModelBase",
+      "parent": "f:src/mcp/server/mcpserver/utilities/func_metadata.py",
+      "name": "ArgModelBase",
+      "kind": "class",
+      "summary": "Pydantic base model for dynamically-created argument models; model_dump_one_level returns aliased field values without recursing.",
+      "paths": ["src/mcp/server/mcpserver/utilities/func_metadata.py:105"],
+      "status": "live",
+      "signature": "class ArgModelBase(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/context_injection.py",
+      "parent": "mcpserver.utilities-grp",
+      "name": "Context injection",
+      "kind": "module",
+      "summary": "find_context_parameter inspects type hints for a Context annotation; inject_context adds the Context to kwargs.",
+      "detail": "find_context_parameter iterates typing.get_type_hints() looking for parameters whose annotation is or contains a Context subclass (direct or inside a generic origin). inject_context is a simple dict merge used by all three handler types (tool, resource template, prompt).",
+      "paths": ["src/mcp/server/mcpserver/utilities/context_injection.py:1"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/context_injection.py#find_context_parameter",
+      "parent": "f:src/mcp/server/mcpserver/utilities/context_injection.py",
+      "name": "find_context_parameter()",
+      "kind": "function",
+      "summary": "Return the parameter name annotated with Context (or a Context subclass), or None if none found.",
+      "paths": ["src/mcp/server/mcpserver/utilities/context_injection.py:13"],
+      "status": "live",
+      "signature": "def find_context_parameter(fn: Callable) -> str | None"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/types.py",
+      "parent": "mcpserver.utilities-grp",
+      "name": "Media helpers",
+      "kind": "module",
+      "summary": "Image and Audio helper classes that accept a path or raw bytes and convert to MCP content blocks.",
+      "detail": "Image accepts a path or bytes plus an optional format hint; to_image_content() reads the file or encodes the bytes as base64 and wraps in an ImageContent. Audio follows the same pattern for AudioContent. MIME types are guessed from path extension or format name. Used as return types from tools and as content in prompt messages.",
+      "paths": ["src/mcp/server/mcpserver/utilities/types.py:1"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/logging.py",
+      "parent": "mcpserver.utilities-grp",
+      "name": "Logging utilities",
+      "kind": "module",
+      "summary": "get_logger() wraps the stdlib logging namespace; configure_logging() sets up a RichHandler or StreamHandler.",
+      "detail": "get_logger returns logging.getLogger(name) under the mcp namespace. configure_logging attempts to import rich for coloured tracebacks; falls back to a plain StreamHandler. Called once at MCPServer construction with the configured log_level.",
+      "paths": ["src/mcp/server/mcpserver/utilities/logging.py:1"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/context.py",
+      "parent": "mcpserver.server-pkg",
+      "name": "Context",
+      "kind": "module",
+      "summary": "Context object injected into tool, resource-template and prompt functions; wraps ServerRequestContext.",
+      "detail": "Context is a Generic Pydantic model parameterised on LifespanContextT and RequestT. It holds references to the ServerRequestContext, the MCPServer, the input params (for multi-round-trip flows), and the SubscriptionBus. It exposes: report_progress, notify_tools_changed, notify_resources_changed, notify_prompts_changed, notify_resource_updated, read_resource, elicit, elicit_url, headers, request_id, protocol_version, input_responses, request_state, client_capabilities, session, close_sse_stream. Logging methods (log, debug, info, warning, error) are deprecated as of 2026-07-28 (SEP-2577). A model_validator preserves the existing instance when pydantic re-validates a Context, since Context[T] is a distinct runtime type.",
+      "paths": ["src/mcp/server/mcpserver/context.py:32"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "log/debug/info/warning/error deprecated as of 2026-07-28 (SEP-2577)",
+        "input_responses and request_state are None on the initial call round",
+        "_nested_invocation() creates a fresh Context without input state for nested handler calls"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/context.py#Context",
+      "parent": "f:src/mcp/server/mcpserver/context.py",
+      "name": "Context",
+      "kind": "class",
+      "summary": "Capability handle injected into handlers: progress, notifications, resource reads, elicitation and session access.",
+      "paths": ["src/mcp/server/mcpserver/context.py:32"],
+      "status": "live",
+      "signature": "class Context(BaseModel, Generic[LifespanContextT, RequestT])"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/context.py#Context.elicit",
+      "parent": "f:src/mcp/server/mcpserver/context.py",
+      "name": "Context.elicit()",
+      "kind": "function",
+      "summary": "Interactively ask the client for structured data matching a Pydantic schema; returns an ElicitationResult.",
+      "paths": ["src/mcp/server/mcpserver/context.py:196"],
+      "status": "live",
+      "signature": "async def elicit(self, message: str, schema: type[ElicitSchemaModelT]) -> ElicitationResult[ElicitSchemaModelT]"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/context.py#Context.read_resource",
+      "parent": "f:src/mcp/server/mcpserver/context.py",
+      "name": "Context.read_resource()",
+      "kind": "function",
+      "summary": "Read a resource by URI from within a handler; raises RuntimeError if the resource returns InputRequiredResult.",
+      "paths": ["src/mcp/server/mcpserver/context.py:158"],
+      "status": "live",
+      "signature": "async def read_resource(self, uri: str | AnyUrl) -> Iterable[ReadResourceContents]"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/exceptions.py",
+      "parent": "mcpserver.server-pkg",
+      "name": "Exceptions",
+      "kind": "module",
+      "summary": "MCPServer-specific exception hierarchy: ResourceError, ToolError, InvalidSignature and their Unexpected* subclasses.",
+      "detail": "MCPServerError is the base. ResourceError/ResourceNotFoundError and ToolError signal anticipated failures (logged at INFO, message shown to caller). UnexpectedResourceError and UnexpectedToolError signal crashes (logged at ERROR, only 'Error executing tool/resource <name>' shown to the client, original text withheld). InvalidSignature is raised at registration time for bad function signatures.",
+      "paths": ["src/mcp/server/mcpserver/exceptions.py:1"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/exceptions.py#ToolError",
+      "parent": "f:src/mcp/server/mcpserver/exceptions.py",
+      "name": "ToolError",
+      "kind": "class",
+      "summary": "Anticipated tool failure; the message is shown to the model as is_error=True content.",
+      "paths": ["src/mcp/server/mcpserver/exceptions.py:43"],
+      "status": "live",
+      "signature": "class ToolError(MCPServerError)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/exceptions.py#ResourceError",
+      "parent": "f:src/mcp/server/mcpserver/exceptions.py",
+      "name": "ResourceError",
+      "kind": "class",
+      "summary": "Anticipated resource read failure; translated to a protocol error with the message.",
+      "paths": ["src/mcp/server/mcpserver/exceptions.py:8"],
+      "status": "live",
+      "signature": "class ResourceError(MCPServerError)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/exceptions.py#InvalidSignature",
+      "parent": "f:src/mcp/server/mcpserver/exceptions.py",
+      "name": "InvalidSignature",
+      "kind": "class",
+      "summary": "Raised at registration time when a function signature is incompatible with MCPServer's requirements.",
+      "paths": ["src/mcp/server/mcpserver/exceptions.py:75"],
+      "status": "live",
+      "signature": "class InvalidSignature(Exception)"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resolve.py",
+      "parent": "mcpserver.server-pkg",
+      "name": "Resolver system",
+      "kind": "module",
+      "summary": "Annotated[T, Resolve(fn)] dependency injection for tool parameters: Elicit, Sample and ListRoots request markers.",
+      "detail": "A tool parameter annotated Annotated[T, Resolve(fn)] is filled by running fn before the tool body. Resolvers form a directed acyclic graph (DAG): each resolver may depend on other resolvers, tool arguments by name, and the Context. Markers (Elicit, Sample, ListRoots) allow a resolver to request client input; the framework batches them into InputRequiredResult on protocol >= 2026-07-28 or sends standalone server-to-client requests on older revisions. build_resolver_plans statically analyses the DAG for cycles and unresolvable parameters. resolve_arguments executes the DAG and returns either a dict of injected values or an InputRequiredResult. Per-round progress is encoded into request_state (SHA-256 digests of question renders guard against stale answers from reworded questions).",
+      "paths": ["src/mcp/server/mcpserver/resolve.py:1"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "InputRequiredResult batching requires protocol >= 2026-07-28",
+        "STATE_VERSION = 3; mismatched version drops state rather than failing",
+        "Resolve(...) and InputRequiredResult return type cannot both be used by the same tool",
+        "Question digests: first 16 bytes of SHA-256 of compact-JSON-rendered request params"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resolve.py#Resolve",
+      "parent": "f:src/mcp/server/mcpserver/resolve.py",
+      "name": "Resolve",
+      "kind": "class",
+      "summary": "Annotation marker: Annotated[T, Resolve(fn)] tells the framework to fill the parameter by running fn.",
+      "paths": ["src/mcp/server/mcpserver/resolve.py:102"],
+      "status": "live",
+      "signature": "class Resolve"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resolve.py#Elicit",
+      "parent": "f:src/mcp/server/mcpserver/resolve.py",
+      "name": "Elicit",
+      "kind": "class",
+      "summary": "Resolver return marker: request client input conforming to a Pydantic schema before the tool body runs.",
+      "paths": ["src/mcp/server/mcpserver/resolve.py:109"],
+      "status": "live",
+      "signature": "class Elicit(Generic[T])"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resolve.py#Sample",
+      "parent": "f:src/mcp/server/mcpserver/resolve.py",
+      "name": "Sample",
+      "kind": "class",
+      "summary": "Resolver return marker: invoke sampling/createMessage on the client's LLM and inject the result.",
+      "paths": ["src/mcp/server/mcpserver/resolve.py:121"],
+      "status": "live",
+      "signature": "class Sample"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resolve.py#build_resolver_plans",
+      "parent": "f:src/mcp/server/mcpserver/resolve.py",
+      "name": "build_resolver_plans()",
+      "kind": "function",
+      "summary": "Statically analyse the resolver DAG for a tool, detecting cycles and unresolvable parameters.",
+      "paths": ["src/mcp/server/mcpserver/resolve.py:347"],
+      "status": "live",
+      "signature": "def build_resolver_plans(resolved_params, tool_arg_names) -> dict[Hashable, _ResolverPlan]"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resolve.py#resolve_arguments",
+      "parent": "f:src/mcp/server/mcpserver/resolve.py",
+      "name": "resolve_arguments()",
+      "kind": "function",
+      "summary": "Execute the resolver DAG for a call, returning injected values or an InputRequiredResult if input is still needed.",
+      "paths": ["src/mcp/server/mcpserver/resolve.py:475"],
+      "status": "live",
+      "signature": "async def resolve_arguments(resolved_params, plans, tool_args, context) -> dict[str, Any] | InputRequiredResult",
+      "code": "res = _Resolution(plans, tool_args, context, _uses_input_required(context.protocol_version))\ninjected: dict[str, Any] = {}\nfor name, (marker, wants_union) in resolved_params.items():\n    try:\n        outcome = await _resolve(marker.fn, res)\n    except _Pending:\n        continue\n    injected[name] = outcome if wants_union else _unwrap(outcome, name)\nif res.pending:\n    return InputRequiredResult(input_requests=res.pending, request_state=_encode_state(res.persist, asked))\nreturn injected"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/tools/__init__.py",
+      "parent": "mcpserver.tools-grp",
+      "name": "Tools package init",
+      "kind": "module",
+      "summary": "Package init for mcpserver/tools; re-exports Tool and ToolManager.",
+      "detail": "Imports Tool from base and ToolManager from tool_manager and declares __all__. No logic.",
+      "paths": ["src/mcp/server/mcpserver/tools/__init__.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/prompts/__init__.py",
+      "parent": "mcpserver.prompts-grp",
+      "name": "Prompts package init",
+      "kind": "module",
+      "summary": "Package init for mcpserver/prompts; re-exports Prompt and PromptManager.",
+      "detail": "Imports Prompt, PromptManager from their respective modules and declares __all__. No logic.",
+      "paths": ["src/mcp/server/mcpserver/prompts/__init__.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/resources/__init__.py",
+      "parent": "mcpserver.resources-grp",
+      "name": "Resources package init",
+      "kind": "module",
+      "summary": "Package init for mcpserver/resources; re-exports Resource, all concrete types, ResourceTemplate, ResourceManager, ResourceSecurity and DEFAULT_RESOURCE_SECURITY.",
+      "detail": "Collects the public API of the resources sub-package: base.Resource, all concrete types from types, ResourceTemplate and ResourceSecurity from templates, and ResourceManager. Declares __all__.",
+      "paths": ["src/mcp/server/mcpserver/resources/__init__.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/utilities/__init__.py",
+      "parent": "mcpserver.utilities-grp",
+      "name": "Utilities package init",
+      "kind": "module",
+      "summary": "Empty package init for mcpserver/utilities.",
+      "detail": "Contains only the package marker; individual utilities are imported directly by their callers.",
+      "paths": ["src/mcp/server/mcpserver/utilities/__init__.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "d:tests/server/mcpserver",
+      "parent": "mcpserver.server-pkg",
+      "name": "MCPServer tests",
+      "kind": "test",
+      "summary": "Test suite for the MCPServer package: server, tool manager, func metadata, resolve, extensions, elicitation, auth integration and sub-suites for tools, resources and prompts.",
+      "paths": [
+        "tests/server/mcpserver/test_server.py",
+        "tests/server/mcpserver/test_tool_manager.py",
+        "tests/server/mcpserver/test_func_metadata.py",
+        "tests/server/mcpserver/test_resolve.py",
+        "tests/server/mcpserver/test_integration.py",
+        "tests/server/mcpserver/test_extension.py",
+        "tests/server/mcpserver/test_elicitation.py",
+        "tests/server/mcpserver/test_url_elicitation.py",
+        "tests/server/mcpserver/tools/test_base.py",
+        "tests/server/mcpserver/resources/test_resources.py",
+        "tests/server/mcpserver/resources/test_resource_manager.py",
+        "tests/server/mcpserver/resources/test_resource_template.py",
+        "tests/server/mcpserver/resources/test_function_resources.py",
+        "tests/server/mcpserver/resources/test_file_resources.py",
+        "tests/server/mcpserver/prompts/test_base.py",
+        "tests/server/mcpserver/prompts/test_manager.py",
+        "tests/server/mcpserver/auth/test_auth_integration.py",
+        "tests/server/mcpserver/test_parameter_descriptions.py",
+        "tests/server/mcpserver/test_title.py"
+      ],
+      "status": "live"
+    },
+
+    {
+      "id": "d:tests/interaction/mcpserver",
+      "parent": "mcpserver.server-pkg",
+      "name": "MCPServer interaction tests",
+      "kind": "test",
+      "summary": "End-to-end interaction tests for MCPServer: tools, resources, prompts and extensions over in-memory transports.",
+      "paths": [
+        "tests/interaction/mcpserver/test_tools.py",
+        "tests/interaction/mcpserver/test_resources.py",
+        "tests/interaction/mcpserver/test_prompts.py",
+        "tests/interaction/mcpserver/test_extensions.py"
+      ],
+      "status": "live"
+    },
+
+    {
+      "id": "d:tests/docs_src",
+      "parent": "mcpserver.server-pkg",
+      "name": "Docs source tests",
+      "kind": "test",
+      "summary": "Tests that verify the documentation's code examples work: tools, resources, prompts, logging, URI templates.",
+      "detail": "These test files import and exercise the Python code snippets embedded in the documentation pages to ensure doc examples stay correct as the SDK evolves.",
+      "paths": [
+        "tests/docs_src/test_tools.py",
+        "tests/docs_src/test_resources.py",
+        "tests/docs_src/test_prompts.py",
+        "tests/docs_src/test_logging.py",
+        "tests/docs_src/test_uri_templates.py"
+      ],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_read_resource",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer._handle_read_resource()",
+      "kind": "function",
+      "summary": "Internal handler: builds a Context, delegates to read_resource(), converts str/bytes to protocol content types.",
+      "detail": "Creates a Context from the ServerRequestContext and calls self.read_resource(). Catches ResourceError: ResourceNotFoundError maps to INVALID_PARAMS, other ResourceError to INTERNAL_ERROR. Converts str content to TextResourceContents and bytes to base64-encoded BlobResourceContents. Passes InputRequiredResult through unchanged for multi-round-trip flows.",
+      "paths": ["src/mcp/server/mcpserver/server.py:463"],
+      "status": "live",
+      "signature": "async def _handle_read_resource(self, ctx: ServerRequestContext, params: ReadResourceRequestParams) -> ReadResourceResult | InputRequiredResult",
+      "code": "context = Context(request_context=ctx, mcp_server=self, input_params=params, subscriptions=self._subscriptions)\ntry:\n    results = await self.read_resource(params.uri, context)\nexcept ResourceError as err:\n    ...\n    raise MCPError(code=code, message=str(err), data={\"uri\": str(params.uri)})\nif isinstance(results, InputRequiredResult):\n    return results"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.call_tool",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.call_tool()",
+      "kind": "function",
+      "summary": "Public method: look up a tool by name and invoke it, returning CallToolResult or InputRequiredResult.",
+      "detail": "Creates a default Context if none is supplied, then delegates to ToolManager.call_tool with convert_result=True so the result is converted to a CallToolResult.",
+      "paths": ["src/mcp/server/mcpserver/server.py:533"],
+      "status": "live",
+      "signature": "async def call_tool(self, name: str, arguments: dict[str, Any], context: Context | None = None) -> CallToolResult | InputRequiredResult"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.read_resource",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.read_resource()",
+      "kind": "function",
+      "summary": "Public method: get a resource or template result for a URI, calling resource.read() and returning content.",
+      "detail": "Delegates to ResourceManager.get_resource(). If the result is an InputRequiredResult it is returned immediately (multi-round-trip template flow). Otherwise calls resource.read() and validates the return type, then wraps the result in a list of ReadResourceContents. Wraps non-MCPError, non-ResourceError exceptions as UnexpectedResourceError.",
+      "paths": ["src/mcp/server/mcpserver/server.py:584"],
+      "status": "live",
+      "signature": "async def read_resource(self, uri: AnyUrl | str, context: Context | None = None) -> Iterable[ReadResourceContents] | InputRequiredResult",
+      "code": "resource = await self._resource_manager.get_resource(uri, context)\nif isinstance(resource, InputRequiredResult):\n    return resource\ncontent = cast(object, await resource.read())\nif not isinstance(content, str | bytes):\n    raise TypeError(f\"Resource.read() must return str or bytes, not {type(content).__name__}\")\nreturn [ReadResourceContents(content=content, mime_type=resource.mime_type, meta=resource.meta)]"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.run_stdio_async",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.run_stdio_async()",
+      "kind": "function",
+      "summary": "Async entry point for the stdio transport: opens stdin/stdout streams and runs the low-level server.",
+      "paths": ["src/mcp/server/mcpserver/server.py:1074"],
+      "status": "live",
+      "signature": "async def run_stdio_async(self) -> None"
+    },
+
+    {
+      "id": "f:src/mcp/server/mcpserver/server.py#MCPServer.get_prompt",
+      "parent": "f:src/mcp/server/mcpserver/server.py",
+      "name": "MCPServer.get_prompt()",
+      "kind": "function",
+      "summary": "Public method: render a prompt by name with optional arguments, returning GetPromptResult or InputRequiredResult.",
+      "detail": "Delegates to PromptManager.get_prompt to look up the Prompt, raises MCPError with INVALID_PARAMS for unknown names, then calls Prompt.render. Passes InputRequiredResult through unchanged. Wraps non-MCPError exceptions as ValueError.",
+      "paths": ["src/mcp/server/mcpserver/server.py:1342"],
+      "status": "live",
+      "signature": "async def get_prompt(self, name: str, arguments: dict[str, Any] | None = None, context: Context | None = None) -> GetPromptResult | InputRequiredResult"
+    }
+
+  ],
+
+  "edges": [
+
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager",
+      "kind": "calls",
+      "label": "owns ToolManager, delegates @tool and call_tool",
+      "evidence": "src/mcp/server/mcpserver/server.py:200"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "f:src/mcp/server/mcpserver/resources/resource_manager.py#ResourceManager",
+      "kind": "calls",
+      "label": "owns ResourceManager, delegates @resource and read_resource",
+      "evidence": "src/mcp/server/mcpserver/server.py:201"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "f:src/mcp/server/mcpserver/prompts/manager.py#PromptManager",
+      "kind": "calls",
+      "label": "owns PromptManager, delegates @prompt and get_prompt",
+      "evidence": "src/mcp/server/mcpserver/server.py:204"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "f:src/mcp/server/mcpserver/context.py#Context",
+      "kind": "generates",
+      "label": "creates Context on each tool, resource and prompt call",
+      "evidence": "src/mcp/server/mcpserver/server.py:440"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "f:src/mcp/server/lowlevel/server.py",
+      "kind": "calls",
+      "label": "wraps low-level Server, registers handlers and middleware",
+      "evidence": "src/mcp/server/mcpserver/server.py:212"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.run",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "anyio.run() to start the async event loop",
+      "evidence": "src/mcp/server/mcpserver/server.py:421"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.sse_app",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "builds SSE Starlette app with auth middleware",
+      "evidence": "src/mcp/server/mcpserver/server.py:1286"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.run",
+      "to": "x:uvicorn",
+      "kind": "calls",
+      "label": "uvicorn.Server serves SSE and StreamableHTTP apps",
+      "evidence": "src/mcp/server/mcpserver/server.py:1110"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+      "kind": "calls",
+      "label": "derives Pydantic argument model and JSON Schema",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:102"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+      "to": "f:src/mcp/server/mcpserver/resolve.py#build_resolver_plans",
+      "kind": "calls",
+      "label": "analyzes resolver DAG at registration time",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:116"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/tools/base.py#Tool.run",
+      "to": "f:src/mcp/server/mcpserver/resolve.py#resolve_arguments",
+      "kind": "calls",
+      "label": "runs resolver DAG when Resolve params are present",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:174"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/tools/base.py#Tool.run",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#FuncMetadata",
+      "kind": "calls",
+      "label": "validate_arguments, call_fn, convert_result",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:154"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager.add_tool",
+      "to": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+      "kind": "calls",
+      "label": "creates Tool from callable",
+      "evidence": "src/mcp/server/mcpserver/tools/tool_manager.py:51"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager.call_tool",
+      "to": "f:src/mcp/server/mcpserver/tools/base.py#Tool.run",
+      "kind": "calls",
+      "label": "delegates invocation to Tool.run",
+      "evidence": "src/mcp/server/mcpserver/tools/tool_manager.py:87"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resources/resource_manager.py#ResourceManager",
+      "to": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate.matches",
+      "kind": "calls",
+      "label": "tests each template against the incoming URI",
+      "evidence": "src/mcp/server/mcpserver/resources/resource_manager.py:122"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resources/resource_manager.py#ResourceManager",
+      "to": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate.create_resource",
+      "kind": "calls",
+      "label": "instantiates the resource from matched template parameters",
+      "evidence": "src/mcp/server/mcpserver/resources/resource_manager.py:125"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+      "kind": "calls",
+      "label": "derives parameter model from template function signature",
+      "evidence": "src/mcp/server/mcpserver/resources/templates.py:153"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt.from_function",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+      "kind": "calls",
+      "label": "derives argument model and PromptArgument list",
+      "evidence": "src/mcp/server/mcpserver/prompts/base.py:127"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#FuncMetadata",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "create_model, TypeAdapter, GenerateJsonSchema",
+      "evidence": "src/mcp/server/mcpserver/utilities/func_metadata.py:370"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#FuncMetadata",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "anyio.to_thread.run_sync for sync function calls",
+      "evidence": "src/mcp/server/mcpserver/utilities/func_metadata.py:176"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/context.py#Context.elicit",
+      "to": "f:src/mcp/server/elicitation.py",
+      "kind": "calls",
+      "label": "delegates to elicit_with_validation",
+      "evidence": "src/mcp/server/mcpserver/context.py:222"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/context.py#Context.read_resource",
+      "to": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "kind": "calls",
+      "label": "calls MCPServer.read_resource via _nested_invocation context",
+      "evidence": "src/mcp/server/mcpserver/context.py:188"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resolve.py#resolve_arguments",
+      "to": "f:src/mcp/server/mcpserver/context.py#Context.elicit",
+      "kind": "calls",
+      "label": "fulfils Elicit markers via ctx.elicit (pre-2026)",
+      "evidence": "src/mcp/server/mcpserver/resolve.py:578"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/utilities/context_injection.py#find_context_parameter",
+      "to": "f:src/mcp/server/mcpserver/context.py#Context",
+      "kind": "reads",
+      "label": "detects parameters annotated with Context",
+      "evidence": "src/mcp/server/mcpserver/utilities/context_injection.py:35"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "f:src/mcp/server/auth/middleware/bearer_auth.py",
+      "kind": "calls",
+      "label": "installs BearerAuthBackend when auth is configured",
+      "evidence": "src/mcp/server/mcpserver/server.py:1197"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resources/types.py#FunctionResource",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "anyio.to_thread.run_sync for sync resource read functions",
+      "evidence": "src/mcp/server/mcpserver/resources/types.py:86"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resources/types.py",
+      "to": "x:httpx",
+      "kind": "calls",
+      "label": "httpx2.AsyncClient for HttpResource reads",
+      "evidence": "src/mcp/server/mcpserver/resources/types.py:192"
+    },
+    {
+      "from": "d:tests/server/mcpserver",
+      "to": "f:src/mcp/server/mcpserver/server.py",
+      "kind": "tests",
+      "label": "tests decorators, transport runners and error handling",
+      "evidence": "tests/server/mcpserver/test_server.py"
+    },
+    {
+      "from": "d:tests/server/mcpserver",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py",
+      "kind": "tests",
+      "label": "tests schema derivation and argument validation",
+      "evidence": "tests/server/mcpserver/test_func_metadata.py"
+    },
+    {
+      "from": "d:tests/server/mcpserver",
+      "to": "f:src/mcp/server/mcpserver/resolve.py",
+      "kind": "tests",
+      "label": "tests resolver DAG and InputRequiredResult round-trips",
+      "evidence": "tests/server/mcpserver/test_resolve.py"
+    },
+    {
+      "from": "d:tests/interaction/mcpserver",
+      "to": "f:src/mcp/server/mcpserver/server.py",
+      "kind": "tests",
+      "label": "end-to-end tests over in-memory Client(MCPServer) transport",
+      "evidence": "tests/interaction/mcpserver/test_tools.py"
+    },
+    {
+      "from": "d:tests/docs_src",
+      "to": "f:src/mcp/server/mcpserver/server.py",
+      "kind": "tests",
+      "label": "runs documentation code examples as tests",
+      "evidence": "tests/docs_src/test_tools.py"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "x:mcp-host",
+      "kind": "http",
+      "label": "serves MCP requests from LLM hosts over all transports",
+      "evidence": "src/mcp/server/mcpserver/server.py:404"
+    },
+
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "to": "f:src/mcp/server/mcpserver/server.py#Settings",
+      "kind": "reads",
+      "label": "reads settings.debug and log_level at startup",
+      "evidence": "src/mcp/server/mcpserver/server.py:111"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.tool",
+      "to": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager.add_tool",
+      "kind": "calls",
+      "label": "decorator calls ToolManager.add_tool()",
+      "evidence": "src/mcp/server/mcpserver/server.py:725"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.resource",
+      "to": "f:src/mcp/server/mcpserver/resources/resource_manager.py#ResourceManager",
+      "kind": "calls",
+      "label": "calls add_resource or add_template",
+      "evidence": "src/mcp/server/mcpserver/server.py:788"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.prompt",
+      "to": "f:src/mcp/server/mcpserver/prompts/manager.py#PromptManager",
+      "kind": "calls",
+      "label": "delegate: decorator body calls PromptManager.add_prompt()",
+      "evidence": "src/mcp/server/mcpserver/server.py:968"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.streamable_http_app",
+      "to": "f:src/mcp/server/lowlevel/server.py",
+      "kind": "calls",
+      "label": "delegates to self._lowlevel_server.streamable_http_app()",
+      "evidence": "src/mcp/server/mcpserver/server.py:1303"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_call_tool",
+      "to": "f:src/mcp/server/mcpserver/server.py#MCPServer.call_tool",
+      "kind": "calls",
+      "label": "builds Context then calls self.call_tool()",
+      "evidence": "src/mcp/server/mcpserver/server.py:437"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_call_tool",
+      "to": "f:src/mcp/server/mcpserver/exceptions.py#ToolError",
+      "kind": "reads",
+      "label": "catches ToolError; anticipated failures logged at INFO",
+      "evidence": "src/mcp/server/mcpserver/server.py:452"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#require_client_extension",
+      "to": "f:src/mcp/server/mcpserver/server.py#MCPServer",
+      "kind": "reads",
+      "label": "reads ctx.session.client_capabilities",
+      "evidence": "src/mcp/server/mcpserver/server.py:1396"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_read_resource",
+      "to": "f:src/mcp/server/mcpserver/server.py#MCPServer.read_resource",
+      "kind": "calls",
+      "label": "builds Context then calls self.read_resource()",
+      "evidence": "src/mcp/server/mcpserver/server.py:463"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_read_resource",
+      "to": "f:src/mcp/server/mcpserver/exceptions.py#ResourceError",
+      "kind": "reads",
+      "label": "catches ResourceError to map to protocol error codes",
+      "evidence": "src/mcp/server/mcpserver/server.py:471"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.call_tool",
+      "to": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager.call_tool",
+      "kind": "calls",
+      "label": "delegates with convert_result=True",
+      "evidence": "src/mcp/server/mcpserver/server.py:548"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.read_resource",
+      "to": "f:src/mcp/server/mcpserver/resources/resource_manager.py#ResourceManager",
+      "kind": "calls",
+      "label": "calls _resource_manager.get_resource() to resolve the URI",
+      "evidence": "src/mcp/server/mcpserver/server.py:605"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.run_stdio_async",
+      "to": "f:src/mcp/server/lowlevel/server.py",
+      "kind": "calls",
+      "label": "opens stdio_server streams and calls _lowlevel_server.run()",
+      "evidence": "src/mcp/server/mcpserver/server.py:1077"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/server.py#MCPServer.get_prompt",
+      "to": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt.render",
+      "kind": "calls",
+      "label": "looks up Prompt by name then calls Prompt.render()",
+      "evidence": "src/mcp/server/mcpserver/server.py:1342"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/tools/base.py#Tool",
+      "to": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+      "kind": "calls",
+      "label": "constructed via the from_function factory",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:64"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resources/base.py#Resource",
+      "to": "f:src/mcp/server/mcpserver/resources/types.py#FileResource",
+      "kind": "calls",
+      "label": "FileResource extends Resource",
+      "evidence": "src/mcp/server/mcpserver/resources/types.py:139"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceSecurity",
+      "to": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate",
+      "kind": "configures",
+      "label": "ResourceTemplate validates URI params via ResourceSecurity",
+      "evidence": "src/mcp/server/mcpserver/resources/templates.py:104"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt",
+      "to": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt.render",
+      "kind": "calls",
+      "label": "render() executes the registered callable",
+      "evidence": "src/mcp/server/mcpserver/prompts/base.py:158"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/prompts/base.py#Prompt.render",
+      "to": "f:src/mcp/server/mcpserver/utilities/context_injection.py#find_context_parameter",
+      "kind": "calls",
+      "label": "calls inject_context to add context kwarg",
+      "evidence": "src/mcp/server/mcpserver/prompts/base.py:183"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#UntitledJsonSchema",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+      "kind": "calls",
+      "label": "passed as schema_generator to model_json_schema()",
+      "evidence": "src/mcp/server/mcpserver/utilities/func_metadata.py:65"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#ArgModelBase",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+      "kind": "calls",
+      "label": "func_metadata subclasses ArgModelBase via create_model",
+      "evidence": "src/mcp/server/mcpserver/utilities/func_metadata.py:105"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/exceptions.py#ToolError",
+      "to": "f:src/mcp/server/mcpserver/tools/base.py#Tool.run",
+      "kind": "reads",
+      "label": "Tool.run raises ToolError on bad args or unknown name",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:134"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/exceptions.py#ResourceError",
+      "to": "f:src/mcp/server/mcpserver/server.py#MCPServer.read_resource",
+      "kind": "reads",
+      "label": "read_resource raises ResourceError on URI resolution failure",
+      "evidence": "src/mcp/server/mcpserver/server.py:584"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/exceptions.py#InvalidSignature",
+      "to": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+      "kind": "reads",
+      "label": "func_metadata raises InvalidSignature for bad signatures",
+      "evidence": "src/mcp/server/mcpserver/utilities/func_metadata.py:287"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resolve.py#Resolve",
+      "to": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+      "kind": "reads",
+      "label": "Tool.from_function detects Resolve-annotated parameters",
+      "evidence": "src/mcp/server/mcpserver/tools/base.py:64"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resolve.py#Elicit",
+      "to": "f:src/mcp/server/mcpserver/resolve.py#resolve_arguments",
+      "kind": "reads",
+      "label": "resolve_arguments batches Elicit into InputRequiredResult",
+      "evidence": "src/mcp/server/mcpserver/resolve.py:109"
+    },
+    {
+      "from": "f:src/mcp/server/mcpserver/resolve.py#Sample",
+      "to": "f:src/mcp/server/mcpserver/resolve.py#resolve_arguments",
+      "kind": "reads",
+      "label": "resolve_arguments calls sampling/createMessage for Sample",
+      "evidence": "src/mcp/server/mcpserver/resolve.py:121"
+    }
+  ],
+
+  "flows": [
+    {
+      "id": "flow.mcpserver.tool-registration",
+      "name": "@mcp.tool() registers a function",
+      "summary": "How a decorated Python function becomes a named MCP tool with a JSON Schema.",
+      "steps": [
+        {
+          "node": "f:src/mcp/server/mcpserver/server.py#MCPServer.tool",
+          "text": "The @mcp.tool() decorator is applied. The decorator method calls add_tool(), which delegates to ToolManager.add_tool()."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/tools/tool_manager.py#ToolManager.add_tool",
+          "text": "ToolManager calls Tool.from_function(), which inspects the callable to validate the name, detect the context kwarg, and collect Resolve-annotated parameters."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/utilities/func_metadata.py#func_metadata",
+          "text": "func_metadata() iterates the signature's parameters, skipping the context kwarg and resolver params. For each remaining parameter it builds a Pydantic field, handling defaults and aliases. create_model() assembles an ArgModelBase subclass. The return annotation is inspected to derive an output_schema when structured output is enabled."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+          "text": "Tool.from_function() calls model_json_schema(schema_generator=UntitledJsonSchema) on the argument model and strips the generated title. build_resolver_plans() analyses the resolver directed acyclic graph (DAG) for cycles. The completed Tool is stored in ToolManager._tools."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_call_tool",
+          "text": "When a tools/call request arrives, _handle_call_tool builds a Context and calls call_tool(). ToolManager.call_tool() looks up the Tool and calls Tool.run(): validate_arguments, resolve if needed, call_fn via the event loop or a thread."
+        }
+      ]
+    },
+    {
+      "id": "flow.mcpserver.resource-template",
+      "name": "@mcp.resource('greeting://{name}') registers a templated resource",
+      "summary": "How a URI-template decorator becomes a resource that is instantiated dynamically on each read request.",
+      "steps": [
+        {
+          "node": "f:src/mcp/server/mcpserver/server.py#MCPServer.resource",
+          "text": "The @mcp.resource('greeting://{name}') decorator parses the URI at decoration time using UriTemplate.parse(). It detects the {name} variable, checks the function's parameters match, and calls ResourceManager.add_template()."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate",
+          "text": "ResourceTemplate.from_function() calls func_metadata for parameter type information, wraps the function with validate_call for argument coercion, and stores the parsed UriTemplate and ResourceSecurity policy."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/resources/resource_manager.py#ResourceManager",
+          "text": "On a resources/read request, ResourceManager.get_resource() first checks _resources (static) by exact URI. If not found, it iterates _templates and calls template.matches(uri_str). A security policy violation raises ResourceSecurityError, which is converted to ResourceNotFoundError."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/resources/templates.py#ResourceTemplate.create_resource",
+          "text": "create_resource() injects the context kwarg if requested, runs the template function (async or on a thread), and wraps the result in a FunctionResource. An InputRequiredResult is passed through unchanged."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_read_resource",
+          "text": "_handle_read_resource calls read_resource(), which calls resource.read() on the returned FunctionResource and converts str/bytes to TextResourceContents or BlobResourceContents."
+        }
+      ]
+    },
+    {
+      "id": "flow.mcpserver.resolver-elicit",
+      "name": "Resolve(fn) elicits client input before the tool body runs",
+      "summary": "How a tool parameter annotated with Resolve(fn) collects client input across one or more protocol round-trips.",
+      "steps": [
+        {
+          "node": "f:src/mcp/server/mcpserver/tools/base.py#Tool.from_function",
+          "text": "At registration, find_resolved_parameters() detects Annotated[T, Resolve(fn)] parameters. build_resolver_plans() analyses the resolver directed acyclic graph, assigns stable wire keys (module:qualname) and validates no cycles exist."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/tools/base.py#Tool.run",
+          "text": "On the first tools/call, Tool.run() validates arguments, then calls resolve_arguments() with the resolver plans and an empty answers dict."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/resolve.py#resolve_arguments",
+          "text": "_Resolution checks the protocol version. On >= 2026-07-28, each resolver returns an Elicit marker; resolve_arguments() collects pending questions, packs them into an InputRequiredResult with a base64-encoded request_state, and returns it. The tool body does not run this round."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/server.py#MCPServer._handle_call_tool",
+          "text": "_handle_call_tool passes the InputRequiredResult through to the wire. The client displays the elicitation questions and retries the call with input_responses and the echoed request_state."
+        },
+        {
+          "node": "f:src/mcp/server/mcpserver/resolve.py#resolve_arguments",
+          "text": "On the retry, _decode_state unpacks previously answered outcomes. Each resolver re-runs; answered questions restore their outcomes from request_state; new questions are fulfilled from input_responses. When all resolvers are satisfied, injected values are returned and Tool.run() calls the tool body with the full kwargs."
+        }
+      ]
+    }
+  ]
+}

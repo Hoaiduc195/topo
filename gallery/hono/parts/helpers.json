@@ -1,0 +1,2272 @@
+{
+  "area": "helpers",
+  "nodes": [
+    {
+      "id": "helpers.client",
+      "parent": "hono.helpers",
+      "name": "RPC client",
+      "kind": "group",
+      "summary": "Typed remote procedure call (RPC) client: hc<AppType>() builds a Proxy-based fetch client whose methods mirror server routes.",
+      "detail": "The client group contains the core hc() factory (client.ts), TypeScript type machinery that maps an exported Hono app type onto a chain of Proxy objects (types.ts), URL/param/search-param utilities (utils.ts), and the fetch-result-please response parser (fetch-result-please.ts). Calling hc() returns a recursive Proxy; each property access appends a path segment; appending .$get(), .$post(), etc. instantiates a ClientRequestImpl whose fetch() method assembles URL, headers, body, and delegates to the native fetch API. InferRequestType and InferResponseType extract the input/output types from any leaf of the proxy chain without a runtime import.",
+      "paths": [
+        "src/client"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.cookie",
+      "parent": "hono.helpers",
+      "name": "Cookie helper",
+      "kind": "group",
+      "summary": "Helpers for reading, writing, and deleting cookies, including HMAC (Hash-based Message Authentication Code)-signed variants.",
+      "detail": "cookie/index.ts re-exports the low-level parse/serialize/parseSigned/serializeSigned utilities from utils/cookie and wraps them in context-aware functions: getCookie/getSignedCookie read the Cookie request header; setCookie/setSignedCookie append a Set-Cookie response header via c.header(..., {append: true}); deleteCookie sets maxAge:0. The optional prefix argument applies __Secure- or __Host- cookie prefix rules per RFC 6265.",
+      "paths": [
+        "src/helper/cookie"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.html",
+      "parent": "hono.helpers",
+      "name": "HTML helper",
+      "kind": "group",
+      "summary": "Tagged-template literal html`` that assembles an HTML-escaped string buffer, deferring async values.",
+      "detail": "html/index.ts exports the html tagged template and re-exports raw(). The template iterates the interleaved strings and values: strings are appended directly; non-escaped string values are escaped via escapeToBuffer; objects with isEscaped=true are appended as-is or deferred if they carry callbacks; Promises are hoisted into the buffer for async resolution. The result is either a synchronous HtmlEscapedString or a Promise<HtmlEscapedString>.",
+      "paths": [
+        "src/helper/html"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.css",
+      "parent": "hono.helpers",
+      "name": "CSS helper",
+      "kind": "group",
+      "summary": "CSS-in-JS helper: css`...` generates a hashed class name and injects the style rule lazily into a <style> element.",
+      "detail": "css/index.ts provides createCssContext() which creates an isolated set of css/cx/keyframes/viewTransition/Style functions keyed to a named <style id> element. Each css`` call hashes the minified style string (via toHash from common.ts) to produce a class name like css-12345678, records the class name and style string in a per-render-context WeakMap, and returns a Promise<string> that carries a callback. The callback, when the HTML buffer is flushed, either patches the existing <style> element in the buffer or emits an inline <script> that appends to it at runtime. The default context uses id='hono-css'. All helpers are marked @experimental.",
+      "paths": [
+        "src/helper/css"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.streaming",
+      "parent": "hono.helpers",
+      "name": "Streaming helper",
+      "kind": "group",
+      "summary": "stream(), streamText(), and streamSSE() build a streamed Response from a TransformStream and a user callback.",
+      "detail": "streaming/stream.ts creates a TransformStream, wraps the writable side in a StreamingApi (from utils/stream), runs the caller's async callback with that API, and passes the readable side to c.newResponse(). It stashes the Context in a WeakMap to prevent early GC in Bun. streaming/text.ts wraps stream() with text/plain headers and X-Content-Type-Options: nosniff. streaming/sse.ts extends StreamingApi as SSEStreamingApi whose writeSSE() method formats a Server-Sent Events (SSE) message (event:/data:/id:/retry: fields, double newline terminator) and writes it to the stream; streamSSE() sets the SSE-specific response headers before creating the stream.",
+      "paths": [
+        "src/helper/streaming"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.ssg",
+      "parent": "hono.helpers",
+      "name": "Static site generator helper",
+      "kind": "group",
+      "summary": "toSSG() walks all GET routes of an app, renders each to a file, and writes output through a runtime-supplied FileSystemModule.",
+      "detail": "ssg/ssg.ts is the core: toSSG() calls filterStaticGenerateRoutes() to collect all non-middleware GET routes, then fetchRoutesContent() issues app.fetch() calls (with SSG_CONTEXT flag) to discover dynamic params via ssgParams middleware, then issues app.request() per param set to get the rendered content. saveContentToFile() determines the output filename from the MIME type and route path, calls fsModule.mkdir/writeFile. The FileSystemModule interface (writeFile, mkdir) is supplied by the caller (e.g. the Bun or Deno adapter), keeping ssg.ts itself runtime-agnostic. Concurrency is controlled via createPool() from utils/concurrent (default 2). ssg/middleware.ts provides SSG-aware middleware helpers. ssg/plugins.ts provides defaultPlugin and redirectPlugin as afterResponseHook hooks.",
+      "paths": [
+        "src/helper/ssg"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.proxy",
+      "parent": "hono.helpers",
+      "name": "Proxy helper",
+      "kind": "group",
+      "summary": "proxy() is a fetch-compatible function that forwards a request upstream, stripping hop-by-hop headers.",
+      "detail": "proxy/index.ts exports a single async proxy() function. It strips all hop-by-hop headers (connection, keep-alive, transfer-encoding, etc.) from the inbound request before forwarding, optionally processes the Connection header per RFC 9110 when strictConnectionProcessing is true (which also validates header names against the token pattern), deletes accept-encoding so the upstream can choose its own framing, then calls fetch (or a provided customFetch). On the response it again removes hop-by-hop headers and strips content-encoding/content-length when the upstream sent compressed content.",
+      "paths": [
+        "src/helper/proxy"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.conninfo",
+      "parent": "hono.helpers",
+      "name": "ConnInfo helper",
+      "kind": "group",
+      "summary": "Type definitions for connection information (remote address, transport, port) obtained from runtime adapters.",
+      "detail": "conninfo/index.ts re-exports only types: AddressType, NetAddrInfo, ConnInfo, GetConnInfo. The GetConnInfo function type is the contract that every runtime adapter implements; the actual implementation lives in each adapter (Bun, Deno, Node, Cloudflare Workers, etc.) and is not present here. This file is the runtime-agnostic interface layer.",
+      "paths": [
+        "src/helper/conninfo"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.websocket",
+      "parent": "hono.helpers",
+      "name": "WebSocket helper",
+      "kind": "group",
+      "summary": "Runtime-agnostic WebSocket abstraction: WSContext wraps a native socket, and defineWebSocketHelper creates a typed UpgradeWebSocket function.",
+      "detail": "websocket/index.ts defines the WSContext class that wraps a WSContextInit provided by the adapter; its send/close methods delegate to that init. defineWebSocketHelper() takes a low-level handler (c, events, options) => Response and returns an UpgradeWebSocket function that can be called either as middleware (createEvents factory) or directly (c, events). Like conninfo, the actual upgrade logic lives in each runtime adapter (Bun, Deno, Cloudflare Workers, etc.); the helper only provides the portable interface layer and the shared WSContext class.",
+      "paths": [
+        "src/helper/websocket"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.factory",
+      "parent": "hono.helpers",
+      "name": "Factory helper",
+      "kind": "group",
+      "summary": "Factory class and createFactory() that stamp-out typed Hono apps and handler arrays bound to a specific Env type.",
+      "detail": "factory/index.ts exports the Factory<E, P> class and the createFactory/createMiddleware free functions. Factory.createApp() instantiates a new Hono<E> (applying any shared initApp and defaultAppOptions). Factory.createHandlers() is an identity function with up to 10 overloads that narrows the return type to a tuple of typed handlers, allowing a route file to export pre-typed handlers without constructing an app. createMiddleware() is a typed identity function for middleware declared outside a factory.",
+      "paths": [
+        "src/helper/factory"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.testing",
+      "parent": "hono.helpers",
+      "name": "Testing helper",
+      "kind": "group",
+      "summary": "testClient() wraps a Hono app in an hc-based typed test client that routes calls through app.request() without network I/O.",
+      "detail": "testing/index.ts exports a single testClient() function. It creates a customFetch closure that calls app.request() directly, bypassing network I/O, and passes it to hc() as the fetch option. The return type is UnionToIntersection<Client<T, 'http://localhost'>>, giving the caller the same typed proxy surface as a real client. Optional Env bindings and an ExecutionContext can be supplied for Cloudflare Workers-style testing.",
+      "paths": [
+        "src/helper/testing"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.accepts",
+      "parent": "hono.helpers",
+      "name": "Accepts helper",
+      "kind": "group",
+      "summary": "accepts() negotiates a request Accept (or Accept-Language/Accept-Encoding) header against a list of supported values.",
+      "detail": "accepts/accepts.ts parses the header with parseAccept() from utils/accept, then scores each accept type by quality (q) and specificity (exact > wildcard-subtype > wildcard), returning the best matching entry from the supports list. Quality value q=0 entries are never matched. An optional custom match function overrides the default scoring. Returns options.default when the header is absent.",
+      "paths": [
+        "src/helper/accepts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.route",
+      "parent": "hono.helpers",
+      "name": "Route introspection helper",
+      "kind": "group",
+      "summary": "matchedRoutes(), routePath(), baseRoutePath(), and basePath() expose the matched route metadata inside a running handler.",
+      "detail": "route/index.ts reads the internal GET_MATCH_RESULT symbol from the request to retrieve the router's raw match result. matchedRoutes() returns all matched RouterRoute objects; routePath() returns the path pattern at the current route index; baseRoutePath() returns the mounted base path; basePath() computes the base path with dynamic segments resolved from the actual request URL, caching per-Context in a WeakMap. These helpers are useful for logging, tracing, and sub-app composition.",
+      "paths": [
+        "src/helper/route"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.adapter",
+      "parent": "hono.helpers",
+      "name": "Adapter detection helper",
+      "kind": "group",
+      "summary": "getRuntimeKey() sniffs navigator.userAgent and global flags to identify the current JavaScript runtime.",
+      "detail": "adapter/index.ts exports getRuntimeKey() which checks navigator.userAgent against known agent strings (Deno, Bun, Cloudflare-Workers, Node.js), then falls back to EdgeRuntime, fastly, process.release.name checks. env() uses the runtime key to read environment variables from the correct source: process.env for Node/Bun/edge-light, Deno.env.toObject() for Deno, c.env for workerd (Cloudflare Workers), empty objects for Fastly and other. The Runtime type union lists all recognized keys.",
+      "paths": [
+        "src/helper/adapter"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "helpers.dev",
+      "parent": "hono.helpers",
+      "name": "Dev helper",
+      "kind": "group",
+      "summary": "showRoutes() and inspectRoutes() print or return the registered routes of a Hono app for development inspection.",
+      "detail": "dev/index.ts iterates hono.routes, calls findTargetHandler/isMiddleware to classify each entry, and formats a colored table to stdout (optional ANSI color via getColorEnabled). inspectRoutes() returns the raw RouteData[] for programmatic use. getRouterName() triggers a dummy match to initialize the router and returns its .name property.",
+      "paths": [
+        "src/helper/dev"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/client.ts",
+      "parent": "helpers.client",
+      "name": "RPC proxy factory",
+      "kind": "module",
+      "summary": "Exports hc(), which builds a fully typed Proxy-based fetch client from a Hono app type and a base URL.",
+      "detail": "client.ts contains two cooperating pieces. createProxy() builds a recursive ES Proxy: property reads accumulate path segments; function calls invoke the callback. hc() is the public entry point that creates such a Proxy with a callback that inspects the accumulated path, extracts the HTTP method (the last $-prefixed segment), constructs a ClientRequestImpl, merges base and per-call headers/options, and calls req.fetch(). Special last-segment values 'url', 'path', and 'ws' short-circuit into URL construction or WebSocket upgrade.",
+      "paths": [
+        "src/client/client.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/client.ts#createProxy",
+      "parent": "f:src/client/client.ts",
+      "name": "createProxy()",
+      "kind": "function",
+      "summary": "Recursively wraps a callback in an ES Proxy whose property reads extend the path and function calls invoke the callback.",
+      "detail": "Called recursively so each property access returns a new Proxy with the key appended to the path array. When the proxy is called as a function (apply trap), callback is invoked with the accumulated path and the call arguments. The key 'then' is excluded so the proxy is not mistaken for a thenable.",
+      "paths": [
+        "src/client/client.ts:15-31"
+      ],
+      "signature": "createProxy(callback: Callback, path: string[]): unknown",
+      "code": "const createProxy = (callback: Callback, path: string[]) => {\n  const proxy: unknown = new Proxy(() => {}, {\n    get(_obj, key) {\n      if (typeof key !== 'string' || key === 'then') {\n        return undefined\n      }\n      return createProxy(callback, [...path, key])\n    },\n    apply(_1, _2, args) {\n      return callback({ path, args })\n    },\n  })\n  return proxy\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/client.ts#ClientRequestImpl",
+      "parent": "f:src/client/client.ts",
+      "name": "ClientRequestImpl",
+      "kind": "class",
+      "summary": "Accumulates URL, method, query params, path params, body and headers, then issues the fetch call.",
+      "detail": "Constructed with a URL, HTTP method and a buildSearchParams option. Its fetch() method processes the ValidationTargets argument: query -> URLSearchParams, form -> FormData, json -> JSON.stringify (sets Content-Type: application/json), param -> replaceUrlParam. Cookies are serialized via the cookie utils and placed in a Cookie header. GET/HEAD requests omit the body. The final fetch is delegated to opt.fetch or the global fetch.",
+      "paths": [
+        "src/client/client.ts:38-148"
+      ],
+      "signature": "class ClientRequestImpl { fetch(args?, opt?): Promise<Response> }",
+      "code": "fetch = async (args?, opt?) => {\n  if (args?.query) this.queryParams = this.buildSearchParams(args.query)\n  if (args?.json !== undefined) {\n    this.rBody = JSON.stringify(args.json)\n    this.cType = 'application/json'\n  }\n  if (args?.param) this.pathParams = args.param\n  url = replaceUrlParam(url, this.pathParams)\n  const setBody = !(methodUpperCase === 'GET' || methodUpperCase === 'HEAD')\n  return (opt?.fetch || fetch)(url, {\n    body: setBody ? this.rBody : undefined,\n    method: methodUpperCase, headers,\n    ...opt?.init,\n  })\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/client.ts#hc",
+      "parent": "f:src/client/client.ts",
+      "name": "hc()",
+      "kind": "function",
+      "summary": "Public RPC client factory: wraps createProxy with a callback that maps path+method to a ClientRequestImpl.fetch() call.",
+      "detail": "hc<T extends Hono, Prefix extends string>(baseUrl, options?) creates a proxy callback that extracts the last $-prefixed path segment as the HTTP method, joins the remaining segments into a URL with mergePath, then instantiates a ClientRequestImpl and calls its fetch with merged options. Special methods 'url'/'path'/'ws' bypass the fetch and return a typed URL object, a path string, or a WebSocket respectively. The return type is cast to UnionToIntersection<Client<T, Prefix>>.",
+      "paths": [
+        "src/client/client.ts:151-249"
+      ],
+      "signature": "hc<T extends Hono<any,any,any>, Prefix extends string>(baseUrl: Prefix, options?: ClientRequestOptions): UnionToIntersection<Client<T, Prefix>>",
+      "code": "export const hc = <T extends Hono<any,any,any>, Prefix extends string>(\n  baseUrl: Prefix,\n  options?: ClientRequestOptions\n) =>\n  createProxy(function proxyCallback(opts) {\n    const parts = [...opts.path]\n    let method = ''\n    if (/^\\$/.test(lastParts[0])) {\n      method = parts.pop()!.replace(/^\\$/, '')\n    }\n    const url = mergePath(baseUrl, parts.join('/'))\n    if (method === 'url') return new URL(removeIndexString(url))\n    const req = new ClientRequestImpl(url, method, { buildSearchParams })\n    return req.fetch(opts.args[0], args)\n  }, []) as UnionToIntersection<Client<T, Prefix>>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/types.ts",
+      "parent": "helpers.client",
+      "name": "Client type machinery",
+      "kind": "module",
+      "summary": "TypeScript types that map a Hono app's route schema onto the typed proxy surface, plus InferRequestType and InferResponseType.",
+      "detail": "types.ts exports the full type lattice of the RPC client: ClientRequest<Prefix, Path, S> builds per-route typed method objects with $url/$path/$ws helpers; Client<T, Prefix> maps the full schema to a PathToChain intersection; InferRequestType<T>/InferResponseType<T,U> extract request input and response output from a client method type; FilterClientResponseByStatusCode, ApplyGlobalResponse, and PickResponseByStatusCode let callers reshape the response union. ExpandAllMethod expands $all into all standard methods.",
+      "paths": [
+        "src/client/types.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/types.ts#InferRequestType",
+      "parent": "f:src/client/types.ts",
+      "name": "InferRequestType",
+      "kind": "function",
+      "summary": "Extracts the args type from an hc client method so callers get static typing for the request body/query/params.",
+      "paths": [
+        "src/client/types.ts:265-271"
+      ],
+      "signature": "type InferRequestType<T> = T extends (args: infer R, options: any) => Promise<ClientResponse<unknown>> ? NonNullable<R> : never",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/types.ts#InferResponseType",
+      "parent": "f:src/client/types.ts",
+      "name": "InferResponseType",
+      "kind": "function",
+      "summary": "Extracts the response body type from an hc client method, optionally filtered by HTTP status code.",
+      "paths": [
+        "src/client/types.ts:251-263"
+      ],
+      "signature": "type InferResponseType<T, U extends StatusCode = StatusCode>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/types.ts#ClientResponse",
+      "parent": "f:src/client/types.ts",
+      "name": "ClientResponse",
+      "kind": "class",
+      "summary": "Typed extension of the native Response interface that narrows json()/text() return types based on the route's outputFormat.",
+      "paths": [
+        "src/client/types.ts:128-154"
+      ],
+      "signature": "interface ClientResponse<T, U extends number, F extends ResponseFormat>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/utils.ts",
+      "parent": "helpers.client",
+      "name": "Client URL utilities",
+      "kind": "module",
+      "summary": "URL manipulation helpers shared by the RPC client: path merging, param substitution, query serialisation, and the parseResponse helper.",
+      "detail": "utils.ts provides mergePath() (trims trailing slashes from base, strips leading slashes from path), replaceUrlParam() (replaces /:key{regex}? segments, guards against UNC path confusion), buildSearchParams() (array values become repeated keys), replaceUrlProtocol() (http<->ws swap), removeIndexString() (strips /index segment). It also exports parseResponse() which wraps fetchRP from fetch-result-please.ts: auto-detects json vs text, throws DetailedError on non-ok responses.",
+      "paths": [
+        "src/client/utils.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/utils.ts#buildSearchParams",
+      "parent": "f:src/client/utils.ts",
+      "name": "buildSearchParams()",
+      "kind": "function",
+      "summary": "Converts a query record (string or string[] values) into a URLSearchParams, repeating the key for array values.",
+      "paths": [
+        "src/client/utils.ts:33-54"
+      ],
+      "signature": "buildSearchParams(query: Record<string, string | string[]>): URLSearchParams",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/utils.ts#parseResponse",
+      "parent": "f:src/client/utils.ts",
+      "name": "parseResponse()",
+      "kind": "function",
+      "summary": "Smartly parses an hc fetch response, returning the typed body or throwing a DetailedError for non-ok responses.",
+      "paths": [
+        "src/client/utils.ts:106-128"
+      ],
+      "signature": "async function parseResponse<T extends ClientResponse<any>>(fetchRes: T | Promise<T>): Promise<...>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/fetch-result-please.ts",
+      "parent": "helpers.client",
+      "name": "fetch-result-please",
+      "kind": "module",
+      "summary": "Minimised port of the fetch-result-please (ofetch) library: parses a Response body and throws DetailedError on non-ok status.",
+      "detail": "fetch-result-please.ts exports fetchRP() (called by parseResponse) which awaits the Response, detects the content type (json regex or text), reads the body, throws a DetailedError with statusCode and data detail if !response.ok, and returns the parsed data. Status codes 101, 204, 205, 304 are treated as bodyless. DetailedError extends Error with detail, code, log, and statusCode fields. The file header credits the upstream npm package.",
+      "paths": [
+        "src/client/fetch-result-please.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/fetch-result-please.ts#DetailedError",
+      "parent": "f:src/client/fetch-result-please.ts",
+      "name": "DetailedError",
+      "kind": "class",
+      "summary": "Structured error thrown when an hc response has a non-ok HTTP status, carrying the status code, detail, and optional log field.",
+      "paths": [
+        "src/client/fetch-result-please.ts:46-75"
+      ],
+      "signature": "class DetailedError extends Error { detail?: any; code?: any; statusCode?: any; log?: any }",
+      "code": "export class DetailedError extends Error {\n  public detail?: any\n  public code?: any\n  public log?: any\n  public statusCode?: any\n  constructor(\n    message: string,\n    options: { detail?: any; code?: any; statusCode?: number; log?: any } = {}\n  ) {\n    super(message)\n    this.name = 'DetailedError'\n    this.statusCode = options.statusCode\n    this.detail = options.detail\n  }\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/index.ts",
+      "parent": "helpers.client",
+      "name": "client index",
+      "kind": "module",
+      "summary": "Public barrel for the RPC client subsystem: re-exports hc, parseResponse, DetailedError and all client types.",
+      "paths": [
+        "src/client/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "detail": "Public barrel for the RPC client subsystem. Re-exports hc() from client.ts, parseResponse() and DetailedError from utils.ts, and all TypeScript types (InferResponseType, InferRequestType, Fetch, ClientRequestOptions, ClientRequest, ClientResponse, ApplyGlobalResponse, PickResponseByStatusCode) from types.ts. This is the entry point consumers import as hono/client."
+    },
+    {
+      "id": "f:src/helper/cookie/index.ts",
+      "parent": "helpers.cookie",
+      "name": "Cookie helper module",
+      "kind": "module",
+      "summary": "Context-aware cookie read/write/delete helpers that delegate encoding and signing to utils/cookie.",
+      "detail": "getCookie(c, key?, prefix?) reads the Cookie header via c.req.raw.headers.get and delegates to parse(). getSignedCookie does the same but calls parseSigned() which uses HMAC-SHA-256. setCookie/setSignedCookie call serialize/serializeSigned then append to the Set-Cookie header. deleteCookie first reads the current value, then sets it to '' with maxAge:0. generateCookie and generateSignedCookie are the pure serialization helpers (no Context needed).",
+      "paths": [
+        "src/helper/cookie/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "export const getCookie: GetCookie = (c, key?, prefix?: CookiePrefixOptions) => {\n  const cookie = c.req.raw.headers.get('Cookie')\n  if (typeof key === 'string') {\n    if (!cookie) { return undefined }\n    let finalKey = key\n    if (prefix === 'secure') { finalKey = '__Secure-' + key }\n    else if (prefix === 'host') { finalKey = '__Host-' + key }\n    const obj = parse(cookie, finalKey)\n    return obj[finalKey]\n  }\n  if (!cookie) { return {} }\n  return parse(cookie) as any\n}"
+    },
+    {
+      "id": "f:src/helper/cookie/index.ts#getCookie",
+      "parent": "f:src/helper/cookie/index.ts",
+      "name": "getCookie()",
+      "kind": "function",
+      "summary": "Reads one or all cookies from the request; supports __Secure- and __Host- prefix validation.",
+      "paths": [
+        "src/helper/cookie/index.ts:27-48"
+      ],
+      "signature": "getCookie(c: Context, key?: string, prefix?: CookiePrefixOptions): string | undefined | Cookie",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/cookie/index.ts#setCookie",
+      "parent": "f:src/helper/cookie/index.ts",
+      "name": "setCookie()",
+      "kind": "function",
+      "summary": "Appends a Set-Cookie header to the response with serialized cookie options.",
+      "paths": [
+        "src/helper/cookie/index.ts:99-102"
+      ],
+      "signature": "setCookie(c: Context, name: string, value: string, opt?: CookieOptions): void",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/cookie/index.ts#deleteCookie",
+      "parent": "f:src/helper/cookie/index.ts",
+      "name": "deleteCookie()",
+      "kind": "function",
+      "summary": "Expires a cookie by setting it to empty with maxAge:0 and returns the previous value.",
+      "paths": [
+        "src/helper/cookie/index.ts:141-145"
+      ],
+      "signature": "deleteCookie(c: Context, name: string, opt?: CookieOptions): string | undefined",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/cookie/index.ts#getSignedCookie",
+      "parent": "f:src/helper/cookie/index.ts",
+      "name": "getSignedCookie()",
+      "kind": "function",
+      "summary": "Reads and HMAC-verifies a signed cookie; returns false when the signature does not match.",
+      "paths": [
+        "src/helper/cookie/index.ts:50-76"
+      ],
+      "signature": "getSignedCookie(c: Context, secret: string | BufferSource, key?: string): Promise<string | undefined | false | SignedCookie>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/html/index.ts",
+      "parent": "helpers.html",
+      "name": "html tagged template",
+      "kind": "module",
+      "summary": "Exports the html tagged template literal that escapes string values and assembles a streaming-capable HtmlEscapedString.",
+      "detail": "The template accumulates segments into a StringBufferWithCallbacks. String values are HTML-escaped; numbers are appended as-is; already-escaped HtmlEscapedString objects are merged or deferred if they carry async callbacks. When all values are synchronous the result is a plain HtmlEscapedString; when any value is a Promise the buffer is handed to stringBufferToString which resolves them in order.",
+      "paths": [
+        "src/helper/html/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "export const html = (\n  strings: TemplateStringsArray,\n  ...values: unknown[]\n): HtmlEscapedString | Promise<HtmlEscapedString> => {\n  const buffer: StringBufferWithCallbacks = [''] as StringBufferWithCallbacks\n  for (let i = 0, len = strings.length - 1; i < len; i++) {\n    buffer[0] += strings[i]\n    // escapeToBuffer / handle Promises / handle HtmlEscaped objects\n  }\n  buffer[0] += strings.at(-1) as string\n  return buffer.length === 1 ? raw(buffer[0]) : stringBufferToString(buffer, buffer.callbacks)\n}"
+    },
+    {
+      "id": "f:src/helper/html/index.ts#html",
+      "parent": "f:src/helper/html/index.ts",
+      "name": "html``",
+      "kind": "function",
+      "summary": "Tagged template that escapes interpolated string values and coalesces them into an HtmlEscapedString.",
+      "paths": [
+        "src/helper/html/index.ts:11-57"
+      ],
+      "signature": "html(strings: TemplateStringsArray, ...values: unknown[]): HtmlEscapedString | Promise<HtmlEscapedString>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.ts",
+      "parent": "helpers.css",
+      "name": "css helper module",
+      "kind": "module",
+      "summary": "Exports createCssContext(), plus the default css/cx/keyframes/viewTransition/Style bound to id='hono-css'.",
+      "detail": "createCssContext() builds a closed-over set of helpers keyed to a named <style> element. Each css`` call wraps cssCommon() (from common.ts) in newCssClassNameObject() which registers a lazy HtmlEscapedCallback on the returned Promise. The callback, fired during HTML flushing, either patches the buffer's existing <style> tag or emits an inline <script>. The Style component renders the seed <style id> element and registers a nonce-capture callback.",
+      "paths": [
+        "src/helper/css/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.ts#createCssContext",
+      "parent": "f:src/helper/css/index.ts",
+      "name": "createCssContext()",
+      "kind": "function",
+      "summary": "Factory that creates an isolated css/cx/keyframes/viewTransition/Style context keyed to a given style element id.",
+      "paths": [
+        "src/helper/css/index.ts:72-215"
+      ],
+      "signature": "createCssContext({ id, classNameSlug?, onInvalidSlug? }: {...}): DefaultContextType",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/common.ts",
+      "parent": "helpers.css",
+      "name": "css common utilities",
+      "kind": "module",
+      "summary": "Runtime-shared CSS hashing, minification, buildStyleString, cssCommon, cxCommon, keyframesCommon and viewTransitionCommon.",
+      "detail": "common.ts provides the pure logic used by both server and DOM renderers. toHash() computes a stable djb2-variant hash of the style string. minify() strips comments and redundant whitespace with a single-pass regex. buildStyleString() assembles the template literal, inlining nested CssClassName values and collecting @keyframes references. cssCommon() calls buildStyleString, hashes the result, optionally replaces the hash with a user-supplied classNameSlug, and returns a CssClassName object with four symbol-keyed fields (SELECTOR, CLASS_NAME, STYLE_STRING, SELECTORS).",
+      "paths": [
+        "src/helper/css/common.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "const toHash = (str: string): string => {\n  let i = 0, out = 11\n  while (i < str.length) {\n    out = (101 * out + str.charCodeAt(i++)) >>> 0\n  }\n  return 'css-' + out\n}\nexport const cssCommon = (\n  strings: TemplateStringsArray,\n  values: CssVariableType[]\n): CssClassName => {\n  const [label, styleStr] = buildStyleString(strings, values)\n  const hash = toHash(label + styleStr)\n  return { [SELECTOR]: hash, [CLASS_NAME]: hash, ... }\n}"
+    },
+    {
+      "id": "f:src/helper/css/common.ts#cssCommon",
+      "parent": "f:src/helper/css/common.ts",
+      "name": "cssCommon()",
+      "kind": "function",
+      "summary": "Core CSS class name builder: hashes the minified style string and returns a CssClassName descriptor object.",
+      "paths": [
+        "src/helper/css/common.ts:202-239"
+      ],
+      "signature": "cssCommon(strings, values, classNameSlug?, onInvalidSlug?): CssClassName",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/streaming/stream.ts",
+      "parent": "helpers.streaming",
+      "name": "stream() factory",
+      "kind": "module",
+      "summary": "stream() creates a TransformStream, launches the caller's callback in a background async task, and returns a Response from the readable side.",
+      "detail": "A new TransformStream is created each call. The writable side is wrapped in a StreamingApi from utils/stream. A WeakMap stashes the Context against the readable stream to prevent Bun from garbage-collecting it before streaming completes. For old Bun versions (before 1.1.27), an abort listener closes the stream when the client disconnects. The async IIFE runs the callback, handles errors via onError, and always calls stream.close() in finally.",
+      "paths": [
+        "src/helper/streaming/stream.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "export const stream = (\n  c: Context,\n  cb: (stream: StreamingApi) => Promise<void>,\n  onError?: (e: Error, stream: StreamingApi) => Promise<void>\n): Response => {\n  const { readable, writable } = new TransformStream()\n  const stream = new StreamingApi(writable, readable)\n  contextStash.set(stream.responseReadable, c)\n  ;(async () => {\n    try { await cb(stream) }\n    catch (e) { if (e instanceof Error && onError) await onError(e, stream) }\n    finally { stream.close() }\n  })()\n  return c.newResponse(stream.responseReadable)\n}"
+    },
+    {
+      "id": "f:src/helper/streaming/stream.ts#stream",
+      "parent": "f:src/helper/streaming/stream.ts",
+      "name": "stream()",
+      "kind": "function",
+      "summary": "Creates a streaming Response from a TransformStream; the caller writes to it via a StreamingApi callback.",
+      "paths": [
+        "src/helper/streaming/stream.ts:7-45"
+      ],
+      "signature": "stream(c: Context, cb: (stream: StreamingApi) => Promise<void>, onError?): Response",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/streaming/sse.ts",
+      "parent": "helpers.streaming",
+      "name": "SSE streaming module",
+      "kind": "module",
+      "summary": "SSEStreamingApi extends StreamingApi with writeSSE() for Server-Sent Events (SSE); streamSSE() sets the SSE headers and returns the streamed Response.",
+      "detail": "SSEStreamingApi.writeSSE() formats each SSEMessage field (event, data lines, id, retry) into the SSE wire format, validates that event/id/retry contain no line breaks (fix for CVE-pattern injection), and calls this.write(). streamSSE() sets Content-Type: text/event-stream, Cache-Control: no-cache, Connection: keep-alive, Transfer-Encoding: chunked, then delegates stream creation to the same TransformStream pattern as stream.ts.",
+      "paths": [
+        "src/helper/streaming/sse.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "async writeSSE(message: SSEMessage) {\n  const data = await resolveCallback(message.data, ...)\n  const dataLines = (data as string).split(/\\r\\n|\\r|\\n/).map((line) => `data: ${line}`).join('\\n')\n  for (const key of ['event', 'id', 'retry'] as const) {\n    const value = message[key]\n    if (value && /[\\r\\n]/.test(String(value))) {\n      throw new Error(`${key} must not contain \"\\\\r\" or \"\\\\n\"`)\n    }\n  }\n  const sseData = [...].filter(Boolean).join('\\n') + '\\n\\n'\n  await this.write(sseData)\n}"
+    },
+    {
+      "id": "f:src/helper/streaming/sse.ts#SSEStreamingApi",
+      "parent": "f:src/helper/streaming/sse.ts",
+      "name": "SSEStreamingApi",
+      "kind": "class",
+      "summary": "Extends StreamingApi with writeSSE() that formats and writes a single Server-Sent Events message.",
+      "paths": [
+        "src/helper/streaming/sse.ts:13-46"
+      ],
+      "signature": "class SSEStreamingApi extends StreamingApi { writeSSE(message: SSEMessage): Promise<void> }",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/streaming/sse.ts#streamSSE",
+      "parent": "f:src/helper/streaming/sse.ts",
+      "name": "streamSSE()",
+      "kind": "function",
+      "summary": "Returns a streaming SSE Response with the correct SSE headers and an SSEStreamingApi callback.",
+      "paths": [
+        "src/helper/streaming/sse.ts:73-101"
+      ],
+      "signature": "streamSSE(c: Context, cb: (stream: SSEStreamingApi) => Promise<void>, onError?): Response",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/streaming/text.ts",
+      "parent": "helpers.streaming",
+      "name": "streamText()",
+      "kind": "module",
+      "summary": "streamText() sets text/plain and X-Content-Type-Options: nosniff headers, then delegates to stream().",
+      "paths": [
+        "src/helper/streaming/text.ts"
+      ],
+      "signature": "streamText(c: Context, cb: (stream: StreamingApi) => Promise<void>, onError?): Response",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "detail": "Single-function module that sets the Content-Type to text/plain (via the TEXT_PLAIN constant from context.ts), adds X-Content-Type-Options: nosniff and Transfer-Encoding: chunked response headers, then delegates to stream() to build the TransformStream-based streaming Response."
+    },
+    {
+      "id": "f:src/helper/streaming/utils.ts",
+      "parent": "helpers.streaming",
+      "name": "Streaming Bun version guard",
+      "kind": "module",
+      "summary": "isOldBunVersion() detects Bun versions before 1.1.27 that did not call cancel() on Response ReadableStreams.",
+      "paths": [
+        "src/helper/streaming/utils.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "detail": "Provides isOldBunVersion(), a memoised runtime check that reads Bun.version and returns true for Bun versions before 1.1.27. Those versions did not call cancel() on Response ReadableStreams from Bun.serve(), requiring an explicit abort listener. After the first call the function replaces itself with a constant closure to avoid re-checking on every request."
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.ts",
+      "parent": "helpers.ssg",
+      "name": "SSG core",
+      "kind": "module",
+      "summary": "toSSG() orchestrates static site generation: route discovery, rendering, and file writes through a FileSystemModule.",
+      "detail": "toSSG() builds combined before/after request and response hook chains from options.plugins and legacy options fields. It calls fetchRoutesContent() to get a generator of route fetch Promises, collects all saveContentToFile() Promises, then awaits them all. The FileSystemModule interface (writeFile, mkdir) is supplied at call time and must be provided by the caller (Bun, Deno, or Node). DEFAULT_CONCURRENCY is 2. generateFilePath() determines the output file path from the MIME type, mapping via defaultExtensionMap or a user-supplied extensionMap.",
+      "paths": [
+        "src/helper/ssg/ssg.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.ts#toSSG",
+      "parent": "f:src/helper/ssg/ssg.ts",
+      "name": "toSSG()",
+      "kind": "function",
+      "summary": "Renders all GET routes of a Hono app to static files using a caller-supplied FileSystemModule.",
+      "detail": "Collects plugins, builds combined hook chains, calls fetchRoutesContent() to discover routes and their ssgParams, iterates content generators, and calls saveContentToFile() for each route/param combination. Returns a ToSSGResult with success, files list, and optional Error. Calls afterGenerateHooks when complete.",
+      "paths": [
+        "src/helper/ssg/ssg.ts:375-480"
+      ],
+      "signature": "toSSG(app: Hono<any,any,any>, fsModule: FileSystemModule, options?: ToSSGOptions): Promise<ToSSGResult>",
+      "code": "export const toSSG: ToSSGInterface = async (app, fs, options) => {\n  const outputDir = options?.dir ?? DEFAULT_OUTPUT_DIR\n  const getInfoGen = fetchRoutesContent(app, combinedBeforeRequestHook, combinedAfterResponseHook, concurrency)\n  for (const getInfo of getInfoGen) {\n    getInfoPromises.push(getInfo.then((getContentGen) => {\n      if (!getContentGen) return\n      for (const content of getContentGen) {\n        savePromises.push(saveContentToFile(content, fs, outputDir, ...))\n      }\n    }))\n  }\n  await Promise.all(getInfoPromises)\n  // await savePromises sequentially...\n  return { success: true, files }\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.ts#fetchRoutesContent",
+      "parent": "f:src/helper/ssg/ssg.ts",
+      "name": "fetchRoutesContent()",
+      "kind": "function",
+      "summary": "Generator that issues SSG_CONTEXT fetch requests per route to discover dynamic params, then yields per-param render Promises.",
+      "paths": [
+        "src/helper/ssg/ssg.ts:209-306"
+      ],
+      "signature": "fetchRoutesContent*(app, beforeRequestHook?, afterResponseHook?, concurrency?): Generator<Promise<Generator<...> | undefined>>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.ts#FileSystemModule",
+      "parent": "f:src/helper/ssg/ssg.ts",
+      "name": "FileSystemModule",
+      "kind": "data",
+      "summary": "Runtime-agnostic interface for writing files and creating directories during SSG, implemented by each runtime adapter.",
+      "paths": [
+        "src/helper/ssg/ssg.ts:34-37"
+      ],
+      "signature": "interface FileSystemModule { writeFile(path: string, data: string | Uint8Array): Promise<void>; mkdir(path: string, options: { recursive: boolean }): Promise<void | string> }",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/middleware.ts",
+      "parent": "helpers.ssg",
+      "name": "SSG middleware helpers",
+      "kind": "module",
+      "summary": "ssgParams(), disableSSG(), onlySSG(), and isSSGContext() are SSG-aware middleware that control route rendering during toSSG().",
+      "detail": "ssgParams() middleware stores dynamic parameter sets on the request object so fetchRoutesContent() can discover them. disableSSG() short-circuits routes that must not be rendered statically by setting the X-Hono-Disable-SSG response header and returning 404. onlySSG() does the reverse: 404 for live requests. isSSGContext() checks whether the request was made by the SSG runner via the SSG_CONTEXT env key. SSG_DISABLED_RESPONSE is deprecated in favour of the header approach.",
+      "paths": [
+        "src/helper/ssg/middleware.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/middleware.ts#ssgParams",
+      "parent": "f:src/helper/ssg/middleware.ts",
+      "name": "ssgParams()",
+      "kind": "function",
+      "summary": "Middleware that attaches dynamic SSG parameter sets to the raw request so toSSG() can expand dynamic routes.",
+      "paths": [
+        "src/helper/ssg/middleware.ts:43-49"
+      ],
+      "signature": "ssgParams(generateParams | params): MiddlewareHandler",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/utils.ts",
+      "parent": "helpers.ssg",
+      "name": "SSG path utilities",
+      "kind": "module",
+      "summary": "filterStaticGenerateRoutes(), isDynamicRoute(), joinPaths(), ensureWithinOutDir(), and dirname() used by toSSG().",
+      "detail": "filterStaticGenerateRoutes() walks hono.routes and keeps GET and METHOD_NAME_ALL (all-methods) non-middleware handlers. isDynamicRoute() checks for :param or * segments. joinPaths() normalises paths across Unix/Windows/UNC roots. ensureWithinOutDir() performs a path-traversal check: it splits both paths into segments and throws if the file path escapes the output directory.",
+      "paths": [
+        "src/helper/ssg/utils.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "export const ensureWithinOutDir = (outDir: string, filePath: string): void => {\n  const outDirSegments = toSegments(joinPaths(outDir))\n  const filePathSegments = toSegments(joinPaths(filePath))\n  const climbsAboveOutDir = filePathSegments[outDirSegments.length] === '..'\n  if (hasMismatchedPathRoot || filePathSegments.length <= outDirSegments.length ||\n      !outDirSegments.every((segment, i) => segment === filePathSegments[i]) ||\n      climbsAboveOutDir) {\n    throw new Error(`Path traversal detected: \"${filePath}\" is outside the output directory`)\n  }\n}"
+    },
+    {
+      "id": "f:src/helper/ssg/plugins.ts",
+      "parent": "helpers.ssg",
+      "name": "SSG plugins",
+      "kind": "module",
+      "summary": "defaultPlugin() skips non-200 responses; redirectPlugin() converts 301/302/303/307/308 redirects into HTML meta-refresh pages.",
+      "detail": "SSGPlugin is an object with optional beforeRequestHook/afterResponseHook/afterGenerateHook arrays. defaultPlugin() implements afterResponseHook: returns false (skip) for any non-200 response. redirectPlugin() checks for redirect status codes, reads the Location header, generates a minimal HTML redirect page using the html`` template, and returns a 200 response with that body. The docs note that redirectPlugin must precede defaultPlugin in the plugins array.",
+      "paths": [
+        "src/helper/ssg/plugins.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/proxy/index.ts",
+      "parent": "helpers.proxy",
+      "name": "proxy() fetch wrapper",
+      "kind": "module",
+      "summary": "proxy() forwards a request to an upstream, stripping hop-by-hop headers on both request and response.",
+      "detail": "Builds a new Request by merging the raw inbound request's headers (after stripping hop-by-hop headers and optionally processing Connection per RFC 9110) with any caller-supplied overrides. The accept-encoding header is removed so the runtime picks its own framing. After the upstream responds, hop-by-hop headers and content-encoding/content-length are removed from the response before returning a fresh Response.",
+      "paths": [
+        "src/helper/proxy/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "export const proxy: ProxyFetch = async (input, proxyInit) => {\n  const req = new Request(input, {\n    ...buildRequestInitFromRequest(raw, strictConnectionProcessing),\n    ...preprocessRequestInit(requestInit as RequestInit),\n  })\n  req.headers.delete('transfer-encoding')\n  req.headers.delete('keep-alive')\n  req.headers.delete('accept-encoding')\n  const res = await (customFetch || fetch)(req)\n  hopByHopHeaders.forEach((header) => { resHeaders.delete(header) })\n  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: resHeaders })\n}"
+    },
+    {
+      "id": "f:src/helper/proxy/index.ts#proxy",
+      "parent": "f:src/helper/proxy/index.ts",
+      "name": "proxy()",
+      "kind": "function",
+      "summary": "Fetch-compatible upstream proxy function that sanitizes hop-by-hop headers on both request and response.",
+      "paths": [
+        "src/helper/proxy/index.ts:160-205"
+      ],
+      "signature": "proxy(input: string | URL | Request, init?: ProxyRequestInit): Promise<Response>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/conninfo/index.ts",
+      "parent": "helpers.conninfo",
+      "name": "ConnInfo types barrel",
+      "kind": "module",
+      "summary": "Re-exports AddressType, NetAddrInfo, ConnInfo, and GetConnInfo from types.ts; no runtime code.",
+      "paths": [
+        "src/helper/conninfo/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "detail": "Barrel that re-exports the four types from conninfo/types.ts: AddressType, NetAddrInfo, ConnInfo, and GetConnInfo. Contains no runtime code; it exists solely to give the helper a stable import path (hono/conninfo). The actual conninfo implementations live in each runtime adapter."
+    },
+    {
+      "id": "f:src/helper/conninfo/types.ts",
+      "parent": "helpers.conninfo",
+      "name": "ConnInfo types",
+      "kind": "module",
+      "summary": "Defines the ConnInfo, NetAddrInfo, AddressType interfaces used by all runtime adapters to expose remote address data.",
+      "paths": [
+        "src/helper/conninfo/types.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "detail": "Defines the shared type contract for connection info. NetAddrInfo carries the remote address (string), addressType (IPv4/IPv6/undefined), and optional transport and port. ConnInfo wraps NetAddrInfo under a remote field. GetConnInfo is the function-type contract every runtime adapter must implement to expose the peer address from a Context."
+    },
+    {
+      "id": "f:src/helper/conninfo/types.ts#GetConnInfo",
+      "parent": "f:src/helper/conninfo/types.ts",
+      "name": "GetConnInfo",
+      "kind": "function",
+      "summary": "Function type contract that runtime adapters implement to return connection info from a Context.",
+      "paths": [
+        "src/helper/conninfo/types.ts:45-46"
+      ],
+      "signature": "type GetConnInfo = (c: Context) => ConnInfo",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/websocket/index.ts",
+      "parent": "helpers.websocket",
+      "name": "WebSocket helper module",
+      "kind": "module",
+      "summary": "Defines WSContext, defineWebSocketHelper(), and the UpgradeWebSocket interface for runtime-agnostic WebSocket support.",
+      "detail": "WSContext wraps a WSContextInit supplied by the adapter; it exposes send/close, readyState, url, protocol, and binaryType. defineWebSocketHelper() accepts a low-level handler and returns an UpgradeWebSocket that can either be used as middleware (function overload: receives createEvents factory) or called directly (c, events overload). The actual upgrade syscall is delegated to the adapter; this module only provides the portable abstraction.",
+      "paths": [
+        "src/helper/websocket/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/websocket/index.ts#WSContext",
+      "parent": "f:src/helper/websocket/index.ts",
+      "name": "WSContext",
+      "kind": "class",
+      "summary": "Portable WebSocket context class that wraps an adapter-supplied WSContextInit and exposes send/close/readyState.",
+      "paths": [
+        "src/helper/websocket/index.ts:80-101"
+      ],
+      "signature": "class WSContext<T> { send(source, options?): void; close(code?, reason?): void; readonly readyState: WSReadyState }",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/websocket/index.ts#defineWebSocketHelper",
+      "parent": "f:src/helper/websocket/index.ts",
+      "name": "defineWebSocketHelper()",
+      "kind": "function",
+      "summary": "Factory that creates a typed UpgradeWebSocket function from a runtime-specific low-level upgrade handler.",
+      "paths": [
+        "src/helper/websocket/index.ts:121-150"
+      ],
+      "signature": "defineWebSocketHelper<T, U>(handler: WebSocketHelperDefineHandler<T, U>): UpgradeWebSocket<T, U>",
+      "code": "export const defineWebSocketHelper = <T, U>(\n  handler: WebSocketHelperDefineHandler<T, U>\n): UpgradeWebSocket<T, U> => {\n  return ((...args) => {\n    if (typeof args[0] === 'function') {\n      const [createEvents, options] = args\n      return async function upgradeWebSocket(c, next) {\n        const events = await createEvents(c)\n        const result = await handler(c, events, options)\n        if (result) return result; await next()\n      }\n    }\n    return handler(args[0], args[1], args[2])\n  }) as UpgradeWebSocket<T, U>\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/factory/index.ts",
+      "parent": "helpers.factory",
+      "name": "Factory helper module",
+      "kind": "module",
+      "summary": "Exports the Factory class, createFactory(), and createMiddleware() for building reusable typed Hono handlers.",
+      "detail": "Factory<E, P> stores optional initApp and defaultAppOptions. createApp() merges those defaults with call-time options and optionally runs initApp. createHandlers() is typed with 10 overloads to return a typed handler tuple. createMiddleware() is a typed identity for standalone middleware. createFactory() is a convenience wrapper for new Factory().",
+      "paths": [
+        "src/helper/factory/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/factory/index.ts#Factory",
+      "parent": "f:src/helper/factory/index.ts",
+      "name": "Factory",
+      "kind": "class",
+      "summary": "Binds a fixed Env type to createApp/createMiddleware/createHandlers so all handlers in a module share the same type context.",
+      "paths": [
+        "src/helper/factory/index.ts:332-361"
+      ],
+      "signature": "class Factory<E extends Env, P extends string> { createApp(options?): Hono<E>; createHandlers(...): [...]; createMiddleware(mw): MiddlewareHandler }",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/factory/index.ts#createFactory",
+      "parent": "f:src/helper/factory/index.ts",
+      "name": "createFactory()",
+      "kind": "function",
+      "summary": "Convenience factory for new Factory<E, P>(init), binding Env and path types at construction.",
+      "paths": [
+        "src/helper/factory/index.ts:363-367"
+      ],
+      "signature": "createFactory<E extends Env, P extends string>(init?): Factory<E, P>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/factory/index.ts#createMiddleware",
+      "parent": "f:src/helper/factory/index.ts",
+      "name": "createMiddleware()",
+      "kind": "function",
+      "summary": "Typed identity function that infers the Env and Input types for a standalone middleware.",
+      "paths": [
+        "src/helper/factory/index.ts:368-375"
+      ],
+      "signature": "createMiddleware<E, P, I, R>(middleware: MiddlewareHandler<E,P,I,R>): MiddlewareHandler<E,P,I,R>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/testing/index.ts",
+      "parent": "helpers.testing",
+      "name": "testClient() helper",
+      "kind": "module",
+      "summary": "testClient() wraps a Hono app in an hc proxy that bypasses network I/O and routes calls through app.request().",
+      "detail": "Creates a customFetch closure that calls app.request(input, init, Env, executionCtx). Passes this as the fetch option to hc() with base URL 'http://localhost'. The return type is the same typed proxy surface as hc, giving full TypeScript inference in tests. Optional Env bindings and ExecutionContext let tests simulate Cloudflare Workers runtime bindings.",
+      "paths": [
+        "src/helper/testing/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "code": "export const testClient = <T extends Hono<any, Schema, string>>(\n  app: T,\n  Env?: ExtractEnv<T>['Bindings'] | {},\n  executionCtx?: ExecutionContext,\n  options?: Omit<ClientRequestOptions, 'fetch'>\n): UnionToIntersection<Client<T, 'http://localhost'>> => {\n  const customFetch = (input: RequestInfo | URL, init?: RequestInit) => {\n    return app.request(input, init, Env, executionCtx)\n  }\n  return hc<typeof app, 'http://localhost'>('http://localhost', { ...options, fetch: customFetch })\n}"
+    },
+    {
+      "id": "f:src/helper/testing/index.ts#testClient",
+      "parent": "f:src/helper/testing/index.ts",
+      "name": "testClient()",
+      "kind": "function",
+      "summary": "Returns an hc-typed test client that sends requests directly to app.request() without network I/O.",
+      "paths": [
+        "src/helper/testing/index.ts:17-28"
+      ],
+      "signature": "testClient<T extends Hono<any, Schema, string>>(app, Env?, executionCtx?, options?): UnionToIntersection<Client<T, 'http://localhost'>>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/accepts/accepts.ts",
+      "parent": "helpers.accepts",
+      "name": "accepts() negotiation",
+      "kind": "module",
+      "summary": "Parses an Accept-* header and returns the best matching value from the caller's supported list.",
+      "detail": "defaultMatch() scores each parsed accept entry by q value and specificity (exact=3, type/*=2, */*=1); q=0 entries are excluded. It iterates in descending priority and returns the first entry from supports that matches via matchType(). matchType() does case-insensitive comparison and handles wildcard subtypes (e.g. image/* matches image/png). accepts() reads the header from c.req and delegates to the match function.",
+      "paths": [
+        "src/helper/accepts/accepts.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/accepts/accepts.ts#accepts",
+      "parent": "f:src/helper/accepts/accepts.ts",
+      "name": "accepts()",
+      "kind": "function",
+      "summary": "Negotiates an Accept-* header value against a supported list, returning the best match or the configured default.",
+      "paths": [
+        "src/helper/accepts/accepts.ts:104-113"
+      ],
+      "signature": "accepts(c: Context, options: acceptsOptions): string",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/accepts/accepts.ts#defaultMatch",
+      "parent": "f:src/helper/accepts/accepts.ts",
+      "name": "defaultMatch()",
+      "kind": "function",
+      "summary": "Scores Accept header entries by quality and specificity, returning the highest-priority matching supported value.",
+      "paths": [
+        "src/helper/accepts/accepts.ts:52-84"
+      ],
+      "signature": "defaultMatch(accepts: Accept[], config: acceptsConfig): string",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/route/index.ts",
+      "parent": "helpers.route",
+      "name": "Route introspection module",
+      "kind": "module",
+      "summary": "matchedRoutes(), routePath(), baseRoutePath(), and basePath() expose matched route metadata inside a handler.",
+      "detail": "matchedRoutes() reads the internal GET_MATCH_RESULT symbol off c.req (a private internal field) to get the raw router match array and maps it to RouterRoute objects. basePath() resolves dynamic segments in the matched base path against the actual request URL and caches the result in a WeakMap<Context, Record<number, string>>.",
+      "paths": [
+        "src/helper/route/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/route/index.ts#matchedRoutes",
+      "parent": "f:src/helper/route/index.ts",
+      "name": "matchedRoutes()",
+      "kind": "function",
+      "summary": "Returns all RouterRoute objects matched for the current request by reading the internal match result.",
+      "paths": [
+        "src/helper/route/index.ts:32-34"
+      ],
+      "signature": "matchedRoutes(c: Context): RouterRoute[]",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/adapter/index.ts",
+      "parent": "helpers.adapter",
+      "name": "Adapter detection module",
+      "kind": "module",
+      "summary": "getRuntimeKey() identifies the current JavaScript runtime; env() returns the environment variables for that runtime.",
+      "paths": [
+        "src/helper/adapter/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "detail": "Exports getRuntimeKey() which sniffs the JavaScript runtime from navigator.userAgent (Deno, Bun, Cloudflare-Workers, Node.js), EdgeRuntime global, fastly global, and process.release.name. exports env<T>(c, runtime?) which dispatches to the right environment-variable source for the detected runtime: process.env for Node/Bun/edge-light, Deno.env.toObject() for Deno, c.env for workerd, empty object for Fastly and other. The Runtime type union lists all recognised keys."
+    },
+    {
+      "id": "f:src/helper/adapter/index.ts#getRuntimeKey",
+      "parent": "f:src/helper/adapter/index.ts",
+      "name": "getRuntimeKey()",
+      "kind": "function",
+      "summary": "Sniffs the JavaScript runtime by checking navigator.userAgent, EdgeRuntime, fastly globals, and process.release.",
+      "paths": [
+        "src/helper/adapter/index.ts:50-84"
+      ],
+      "signature": "getRuntimeKey(): Runtime",
+      "code": "export const getRuntimeKey = (): Runtime => {\n  const userAgentSupported = typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string'\n  if (userAgentSupported) {\n    for (const [runtimeKey, userAgent] of Object.entries(knownUserAgents)) {\n      if (checkUserAgentEquals(userAgent)) return runtimeKey as Runtime\n    }\n  }\n  if (typeof global?.EdgeRuntime === 'string') return 'edge-light'\n  if (global?.fastly !== undefined) return 'fastly'\n  if (global?.process?.release?.name === 'node') return 'node'\n  return 'other'\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/adapter/index.ts#env",
+      "parent": "f:src/helper/adapter/index.ts",
+      "name": "env()",
+      "kind": "function",
+      "summary": "Returns the environment variables appropriate for the detected (or supplied) JavaScript runtime.",
+      "paths": [
+        "src/helper/adapter/index.ts:10-41"
+      ],
+      "signature": "env<T>(c: Context, runtime?: Runtime): T & Context['env']",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/dev/index.ts",
+      "parent": "helpers.dev",
+      "name": "Dev helper module",
+      "kind": "module",
+      "summary": "showRoutes() prints registered routes to stdout; inspectRoutes() returns structured route data; getRouterName() returns the active router name.",
+      "paths": [
+        "src/helper/dev/index.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live",
+      "detail": "Development utility module. inspectRoutes() maps hono.routes through findTargetHandler/isMiddleware to produce RouteData objects. showRoutes() groups routes by method+path, formats each as a padded method/path row, and optionally prints handler names on subsequent lines; ANSI color is controlled by getColorEnabled() from utils/color. getRouterName() triggers a dummy match call to initialise the router, then returns its name property."
+    },
+    {
+      "id": "f:src/helper/dev/index.ts#showRoutes",
+      "parent": "f:src/helper/dev/index.ts",
+      "name": "showRoutes()",
+      "kind": "function",
+      "summary": "Prints all non-middleware routes (or all when verbose) to stdout as a colored method+path table.",
+      "paths": [
+        "src/helper/dev/index.ts:39-73"
+      ],
+      "signature": "showRoutes<E extends Env>(hono: Hono<E>, opts?: ShowRoutesOptions): void",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/dev/index.ts#inspectRoutes",
+      "parent": "f:src/helper/dev/index.ts",
+      "name": "inspectRoutes()",
+      "kind": "function",
+      "summary": "Returns an array of RouteData (path, method, handler name, isMiddleware) for all registered routes.",
+      "paths": [
+        "src/helper/dev/index.ts:27-37"
+      ],
+      "signature": "inspectRoutes<E extends Env>(hono: Hono<E>): RouteData[]",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/client.test.ts",
+      "parent": "helpers.client",
+      "name": "RPC client tests",
+      "kind": "test",
+      "summary": "Integration tests for hc(), ClientRequestImpl, path/query/param/json/form/cookie handling, WebSocket, and parseResponse.",
+      "paths": [
+        "src/client/client.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/types.test.ts",
+      "parent": "helpers.client",
+      "name": "Client types tests",
+      "kind": "test",
+      "summary": "Type-level tests for InferRequestType, InferResponseType, ClientResponse, and ApplyGlobalResponse.",
+      "paths": [
+        "src/client/types.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/utils.test.ts",
+      "parent": "helpers.client",
+      "name": "Client utils tests",
+      "kind": "test",
+      "summary": "Unit tests for mergePath, replaceUrlParam, buildSearchParams, removeIndexString, and deepMerge.",
+      "paths": [
+        "src/client/utils.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/cookie/index.test.ts",
+      "parent": "helpers.cookie",
+      "name": "Cookie helper tests",
+      "kind": "test",
+      "summary": "Tests getCookie, setCookie, deleteCookie, getSignedCookie, setSignedCookie with prefix and signing variants.",
+      "paths": [
+        "src/helper/cookie/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.test.tsx",
+      "parent": "helpers.css",
+      "name": "CSS helper tests",
+      "kind": "test",
+      "summary": "Tests css``, cx, keyframes, viewTransition, Style component, createCssContext, and classNameSlug hooks.",
+      "paths": [
+        "src/helper/css/index.test.tsx",
+        "src/helper/css/common.case.test.tsx"
+      ],
+      "tech": [
+        "TypeScript",
+        "JSX"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/streaming/stream.test.ts",
+      "parent": "helpers.streaming",
+      "name": "Streaming tests",
+      "kind": "test",
+      "summary": "Tests stream(), streamText(), and SSE streaming with abort, error handling, and old-Bun version guards.",
+      "paths": [
+        "src/helper/streaming/stream.test.ts",
+        "src/helper/streaming/text.test.ts",
+        "src/helper/streaming/sse.test.tsx"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.test.tsx",
+      "parent": "helpers.ssg",
+      "name": "SSG tests",
+      "kind": "test",
+      "summary": "Tests toSSG(), ssgParams, disableSSG, onlySSG, plugins, path traversal protection, and extensionMap.",
+      "paths": [
+        "src/helper/ssg/ssg.test.tsx",
+        "src/helper/ssg/utils.test.ts",
+        "src/helper/ssg/plugins.test.tsx"
+      ],
+      "tech": [
+        "TypeScript",
+        "JSX"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/proxy/index.test.ts",
+      "parent": "helpers.proxy",
+      "name": "Proxy helper tests",
+      "kind": "test",
+      "summary": "Tests proxy() hop-by-hop stripping, strictConnectionProcessing, customFetch, and header null-deletion.",
+      "paths": [
+        "src/helper/proxy/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/factory/index.test.ts",
+      "parent": "helpers.factory",
+      "name": "Factory helper tests",
+      "kind": "test",
+      "summary": "Tests createFactory, createApp, createHandlers, createMiddleware, and initApp callback.",
+      "paths": [
+        "src/helper/factory/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/testing/index.test.ts",
+      "parent": "helpers.testing",
+      "name": "Testing helper tests",
+      "kind": "test",
+      "summary": "Tests testClient() with various route patterns, Env bindings, and that it bypasses network I/O.",
+      "paths": [
+        "src/helper/testing/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/accepts/accepts.test.ts",
+      "parent": "helpers.accepts",
+      "name": "Accepts helper tests",
+      "kind": "test",
+      "summary": "Tests accepts() with quality values, wildcards, language negotiation, and custom match functions.",
+      "paths": [
+        "src/helper/accepts/accepts.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/route/index.test.ts",
+      "parent": "helpers.route",
+      "name": "Route introspection tests",
+      "kind": "test",
+      "summary": "Tests matchedRoutes, routePath, baseRoutePath, and basePath in sub-app composition scenarios.",
+      "paths": [
+        "src/helper/route/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/adapter/index.test.ts",
+      "parent": "helpers.adapter",
+      "name": "Adapter helper tests",
+      "kind": "test",
+      "summary": "Tests getRuntimeKey detection and env() for each supported runtime.",
+      "paths": [
+        "src/helper/adapter/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/dev/index.test.ts",
+      "parent": "helpers.dev",
+      "name": "Dev helper tests",
+      "kind": "test",
+      "summary": "Tests showRoutes output, inspectRoutes data, and getRouterName for different router types.",
+      "paths": [
+        "src/helper/dev/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/websocket/index.test.ts",
+      "parent": "helpers.websocket",
+      "name": "WebSocket helper tests",
+      "kind": "test",
+      "summary": "Tests WSContext, defineWebSocketHelper middleware and direct-call overloads, and createWSMessageEvent.",
+      "paths": [
+        "src/helper/websocket/index.test.ts"
+      ],
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.ts#css",
+      "parent": "f:src/helper/css/index.ts",
+      "name": "css``",
+      "kind": "function",
+      "summary": "Default-context css tagged template: hashes the style string and returns a lazy class name Promise.",
+      "paths": [
+        "src/helper/css/index.ts:234"
+      ],
+      "signature": "css(strings: TemplateStringsArray, ...values: CssVariableType[]): Promise<string> & HtmlEscapedString",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.ts#cx",
+      "parent": "f:src/helper/css/index.ts",
+      "name": "cx()",
+      "kind": "function",
+      "summary": "Default-context cx: composes multiple css class names or conditional expressions into a single space-separated string.",
+      "paths": [
+        "src/helper/css/index.ts:241"
+      ],
+      "signature": "cx(...args: (CssClassName | string | boolean | null | undefined)[]): Promise<string> & HtmlEscapedString",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.ts#keyframes",
+      "parent": "f:src/helper/css/index.ts",
+      "name": "keyframes``",
+      "kind": "function",
+      "summary": "Default-context keyframes: defines a @keyframes animation block and returns a hashed animation-name token.",
+      "paths": [
+        "src/helper/css/index.ts:248"
+      ],
+      "signature": "keyframes(strings: TemplateStringsArray, ...values: CssVariableType[]): CssClassName",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.ts#viewTransition",
+      "parent": "f:src/helper/css/index.ts",
+      "name": "viewTransition()",
+      "kind": "function",
+      "summary": "Default-context viewTransition: wraps styles in a @view-transition block and returns a hashed transition-name.",
+      "paths": [
+        "src/helper/css/index.ts:255"
+      ],
+      "signature": "viewTransition(strings: TemplateStringsArray, ...values: CssVariableType[]): Promise<string> & HtmlEscapedString",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/css/index.ts#Style",
+      "parent": "f:src/helper/css/index.ts",
+      "name": "Style",
+      "kind": "component",
+      "summary": "Default-context Style JSX component: renders the seed <style id='hono-css'> element that the css callbacks patch.",
+      "paths": [
+        "src/helper/css/index.ts:262"
+      ],
+      "signature": "Style(props?: { nonce?: string }): HtmlEscapedString | Promise<HtmlEscapedString>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.ts#combineBeforeRequestHooks",
+      "parent": "f:src/helper/ssg/ssg.ts",
+      "name": "combineBeforeRequestHooks()",
+      "kind": "function",
+      "summary": "Folds an array of BeforeRequestHook functions into a single async hook that runs them in sequence, short-circuiting on false.",
+      "paths": [
+        "src/helper/ssg/ssg.ts:122-141"
+      ],
+      "signature": "combineBeforeRequestHooks(hooks: BeforeRequestHook | BeforeRequestHook[]): BeforeRequestHook",
+      "code": "export const combineBeforeRequestHooks = (\n  hooks: BeforeRequestHook | BeforeRequestHook[]\n): BeforeRequestHook => {\n  if (!Array.isArray(hooks)) { return hooks }\n  return async (req: Request): Promise<Request | false> => {\n    let currentReq = req\n    for (const hook of hooks) {\n      const result = await hook(currentReq)\n      if (result === false) return false\n      if (result instanceof Request) currentReq = result\n    }\n    return currentReq\n  }\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.ts#combineAfterResponseHooks",
+      "parent": "f:src/helper/ssg/ssg.ts",
+      "name": "combineAfterResponseHooks()",
+      "kind": "function",
+      "summary": "Folds an array of AfterResponseHook functions into one async hook; returning false from any hook skips that route.",
+      "paths": [
+        "src/helper/ssg/ssg.ts:143-162"
+      ],
+      "signature": "combineAfterResponseHooks(hooks: AfterResponseHook | AfterResponseHook[]): AfterResponseHook",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/ssg.ts#saveContentToFile",
+      "parent": "f:src/helper/ssg/ssg.ts",
+      "name": "saveContentToFile()",
+      "kind": "function",
+      "summary": "Awaits a route's rendered content, determines its file path from MIME type, creates the directory, and writes the file.",
+      "paths": [
+        "src/helper/ssg/ssg.ts:313-340"
+      ],
+      "signature": "saveContentToFile(data: Promise<{routePath, content, mimeType}|undefined>, fsModule: FileSystemModule, outDir: string, extensionMap?, createdDirs?): Promise<string|undefined>",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/utils.ts#filterStaticGenerateRoutes",
+      "parent": "f:src/helper/ssg/utils.ts",
+      "name": "filterStaticGenerateRoutes()",
+      "kind": "function",
+      "summary": "Returns all GET and METHOD_NAME_ALL non-middleware routes from a Hono app for static generation.",
+      "paths": [
+        "src/helper/ssg/utils.ts:66-76"
+      ],
+      "signature": "filterStaticGenerateRoutes<E extends Env>(hono: Hono<E>): FilterStaticGenerateRouteData[]",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/utils.ts#isDynamicRoute",
+      "parent": "f:src/helper/ssg/utils.ts",
+      "name": "isDynamicRoute()",
+      "kind": "function",
+      "summary": "Returns true when a route path contains a :param segment or wildcard *, indicating dynamic parameters.",
+      "paths": [
+        "src/helper/ssg/utils.ts:78-80"
+      ],
+      "signature": "isDynamicRoute(path: string): boolean",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/helper/ssg/utils.ts#ensureWithinOutDir",
+      "parent": "f:src/helper/ssg/utils.ts",
+      "name": "ensureWithinOutDir()",
+      "kind": "function",
+      "summary": "Guards against path traversal attacks by verifying filePath stays within outDir, throwing on escape.",
+      "paths": [
+        "src/helper/ssg/utils.ts:100-118"
+      ],
+      "signature": "ensureWithinOutDir(outDir: string, filePath: string): void",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/utils.ts#mergePath",
+      "parent": "f:src/client/utils.ts",
+      "name": "mergePath()",
+      "kind": "function",
+      "summary": "Joins a base URL and a relative path, trimming trailing slashes from base and leading slashes from path.",
+      "paths": [
+        "src/client/utils.ts:11-18"
+      ],
+      "signature": "mergePath(base: string, path: string): string",
+      "code": "export const mergePath = (base: string, path: string) => {\n  let end = base.length\n  while (base[end - 1] === '/') { end-- }\n  path = path.replace(/^\\/+/, '')\n  return base.slice(0, end) + '/' + path\n}",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/utils.ts#replaceUrlParam",
+      "parent": "f:src/client/utils.ts",
+      "name": "replaceUrlParam()",
+      "kind": "function",
+      "summary": "Substitutes :param segments in a URL string with values from a record, guarding against UNC path injection.",
+      "paths": [
+        "src/client/utils.ts:22-31"
+      ],
+      "signature": "replaceUrlParam(urlString: string, params: Record<string, string | undefined>): string",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "f:src/client/utils.ts#deepMerge",
+      "parent": "f:src/client/utils.ts",
+      "name": "deepMerge()",
+      "kind": "function",
+      "summary": "Recursively merges a source record into a target, deep-copying plain-object values and overwriting primitives.",
+      "paths": [
+        "src/client/utils.ts:80-96"
+      ],
+      "signature": "deepMerge<T>(target: T, source: Record<string, unknown>): T",
+      "tech": [
+        "TypeScript"
+      ],
+      "status": "live"
+    }
+  ],
+  "edges": [
+    {
+      "from": "f:src/client/client.ts#hc",
+      "to": "f:src/client/client.ts#createProxy",
+      "kind": "calls",
+      "label": "builds recursive Proxy chain",
+      "evidence": "src/client/client.ts:155"
+    },
+    {
+      "from": "f:src/client/client.ts#hc",
+      "to": "f:src/client/client.ts#ClientRequestImpl",
+      "kind": "calls",
+      "label": "instantiates per-route request object",
+      "evidence": "src/client/client.ts:231"
+    },
+    {
+      "from": "f:src/client/client.ts#ClientRequestImpl",
+      "to": "f:src/client/utils.ts#buildSearchParams",
+      "kind": "calls",
+      "label": "serializes query params",
+      "evidence": "src/client/client.ts:66"
+    },
+    {
+      "from": "f:src/client/utils.ts#parseResponse",
+      "to": "f:src/client/fetch-result-please.ts",
+      "kind": "calls",
+      "label": "delegates to fetchRP for body parsing and error",
+      "evidence": "src/client/utils.ts:127"
+    },
+    {
+      "from": "f:src/client/client.ts",
+      "to": "f:src/client/utils.ts",
+      "kind": "calls",
+      "label": "URL path and param utilities",
+      "evidence": "src/client/client.ts:9-13"
+    },
+    {
+      "from": "f:src/client/client.ts#ClientRequestImpl",
+      "to": "f:src/client/types.ts",
+      "kind": "reads",
+      "label": "uses ValidationTargets and ClientRequestOptions types",
+      "evidence": "src/client/client.ts:5"
+    },
+    {
+      "from": "f:src/helper/testing/index.ts#testClient",
+      "to": "f:src/client/client.ts#hc",
+      "kind": "calls",
+      "label": "wraps app.request as customFetch and passes to hc",
+      "evidence": "src/helper/testing/index.ts:27"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#toSSG",
+      "to": "f:src/helper/ssg/ssg.ts#fetchRoutesContent",
+      "kind": "calls",
+      "label": "iterates route content generator",
+      "evidence": "src/helper/ssg/ssg.ts:438"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#toSSG",
+      "to": "f:src/helper/ssg/plugins.ts",
+      "kind": "calls",
+      "label": "applies default plugin and user plugins",
+      "evidence": "src/helper/ssg/ssg.ts:379"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#fetchRoutesContent",
+      "to": "f:src/helper/ssg/utils.ts",
+      "kind": "calls",
+      "label": "filterStaticGenerateRoutes, isDynamicRoute, replaceUrlParam",
+      "evidence": "src/helper/ssg/ssg.ts:229"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts",
+      "to": "f:src/helper/ssg/middleware.ts",
+      "kind": "reads",
+      "label": "reads SSG constants from middleware",
+      "evidence": "src/helper/ssg/ssg.ts:7"
+    },
+    {
+      "from": "f:src/helper/ssg/plugins.ts",
+      "to": "f:src/helper/html/index.ts#html",
+      "kind": "calls",
+      "label": "generates HTML redirect page with html template",
+      "evidence": "src/helper/ssg/plugins.ts:26"
+    },
+    {
+      "from": "f:src/helper/css/index.ts#createCssContext",
+      "to": "f:src/helper/css/common.ts#cssCommon",
+      "kind": "calls",
+      "label": "delegates css hash and style string building",
+      "evidence": "src/helper/css/index.ts:170"
+    },
+    {
+      "from": "f:src/helper/css/index.ts",
+      "to": "f:src/helper/html/index.ts",
+      "kind": "calls",
+      "label": "uses raw() to emit style injection HTML",
+      "evidence": "src/helper/css/index.ts:6"
+    },
+    {
+      "from": "f:src/helper/streaming/sse.ts#SSEStreamingApi",
+      "to": "f:src/helper/streaming/stream.ts#stream",
+      "kind": "calls",
+      "label": "streamSSE() uses same TransformStream pattern as stream()",
+      "evidence": "src/helper/streaming/sse.ts:79"
+    },
+    {
+      "from": "f:src/helper/streaming/text.ts",
+      "to": "f:src/helper/streaming/stream.ts#stream",
+      "kind": "calls",
+      "label": "delegates to stream() after setting headers",
+      "evidence": "src/helper/streaming/text.ts:14"
+    },
+    {
+      "from": "f:src/helper/cookie/index.ts#getCookie",
+      "to": "f:src/helper/cookie/index.ts#setCookie",
+      "kind": "calls",
+      "label": "deleteCookie reads value via getCookie before expiring",
+      "evidence": "src/helper/cookie/index.ts:142"
+    },
+    {
+      "from": "f:src/helper/factory/index.ts#Factory",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "createApp() instantiates Hono<E> from core",
+      "evidence": "src/helper/factory/index.ts:342"
+    },
+    {
+      "from": "f:src/helper/dev/index.ts#inspectRoutes",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "calls findTargetHandler and isMiddleware from utils/handler",
+      "evidence": "src/helper/dev/index.ts:9"
+    },
+    {
+      "from": "f:src/helper/ssg/utils.ts",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "filters GET routes from hono.routes",
+      "evidence": "src/helper/ssg/utils.ts:66"
+    },
+    {
+      "from": "f:src/helper/ssg/utils.ts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "calls findTargetHandler and isMiddleware from utils/handler",
+      "evidence": "src/helper/ssg/utils.ts:4"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "createPool() from utils/concurrent for concurrency control",
+      "evidence": "src/helper/ssg/ssg.ts:5"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#toSSG",
+      "to": "f:src/helper/ssg/ssg.ts#FileSystemModule",
+      "kind": "calls",
+      "label": "delegates writeFile/mkdir to runtime FileSystemModule",
+      "evidence": "src/helper/ssg/ssg.ts:313"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#FileSystemModule",
+      "to": "hono.adapters",
+      "kind": "reads",
+      "label": "adapters supply FileSystemModule impl",
+      "evidence": "src/helper/ssg/ssg.ts:34-37",
+      "source": "inferred"
+    },
+    {
+      "from": "f:src/helper/websocket/index.ts#defineWebSocketHelper",
+      "to": "hono.adapters",
+      "kind": "reads",
+      "label": "adapters supply the low-level upgrade handler",
+      "evidence": "src/helper/websocket/index.ts:121",
+      "source": "inferred"
+    },
+    {
+      "from": "f:src/helper/conninfo/types.ts#GetConnInfo",
+      "to": "hono.adapters",
+      "kind": "reads",
+      "label": "adapters implement GetConnInfo to expose remote address info",
+      "evidence": "src/helper/conninfo/types.ts:45",
+      "source": "inferred"
+    },
+    {
+      "from": "f:src/helper/adapter/index.ts#env",
+      "to": "x:deno",
+      "kind": "reads",
+      "label": "reads Deno.env.toObject() on Deno runtime",
+      "evidence": "src/helper/adapter/index.ts:29"
+    },
+    {
+      "from": "f:src/helper/adapter/index.ts#env",
+      "to": "x:cloudflare-workers",
+      "kind": "reads",
+      "label": "returns c.env for workerd (Cloudflare Workers) runtime",
+      "evidence": "src/helper/adapter/index.ts:33"
+    },
+    {
+      "from": "f:src/helper/accepts/accepts.ts#accepts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "parseAccept() from utils/accept",
+      "evidence": "src/helper/accepts/accepts.ts:2"
+    },
+    {
+      "from": "f:src/helper/route/index.ts#matchedRoutes",
+      "to": "hono.core",
+      "kind": "reads",
+      "label": "reads GET_MATCH_RESULT from src/request/constants",
+      "evidence": "src/helper/route/index.ts:2"
+    },
+    {
+      "from": "f:src/helper/route/index.ts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "splitRoutingPath and getPattern from utils/url",
+      "evidence": "src/helper/route/index.ts:4"
+    },
+    {
+      "from": "f:src/client/client.ts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "serialize from utils/cookie to encode cookie headers",
+      "evidence": "src/client/client.ts:3"
+    },
+    {
+      "from": "f:src/helper/cookie/index.ts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "cookie parse/serialize utilities",
+      "evidence": "src/helper/cookie/index.ts:7"
+    },
+    {
+      "from": "f:src/helper/html/index.ts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "html escape and buffer utilities",
+      "evidence": "src/helper/html/index.ts:6"
+    },
+    {
+      "from": "f:src/helper/proxy/index.ts#proxy",
+      "to": "hono.core",
+      "kind": "calls",
+      "label": "throws HTTPException on invalid headers",
+      "evidence": "src/helper/proxy/index.ts:6"
+    },
+    {
+      "from": "f:src/helper/streaming/sse.ts",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "resolveCallback for async SSE data",
+      "evidence": "src/helper/streaming/sse.ts:2"
+    },
+    {
+      "from": "f:src/client/client.test.ts",
+      "to": "f:src/client/client.ts",
+      "kind": "tests",
+      "label": "tests hc, ClientRequestImpl, and proxy path",
+      "evidence": "src/client/client.test.ts:1"
+    },
+    {
+      "from": "f:src/client/utils.test.ts",
+      "to": "f:src/client/utils.ts",
+      "kind": "tests",
+      "label": "unit tests for all URL utilities",
+      "evidence": "src/client/utils.test.ts:1"
+    },
+    {
+      "from": "f:src/client/types.test.ts",
+      "to": "f:src/client/types.ts",
+      "kind": "tests",
+      "label": "type-level tests for InferRequestType/InferResponseType",
+      "evidence": "src/client/types.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/cookie/index.test.ts",
+      "to": "f:src/helper/cookie/index.ts",
+      "kind": "tests",
+      "label": "tests all cookie helper variants",
+      "evidence": "src/helper/cookie/index.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/css/index.test.tsx",
+      "to": "f:src/helper/css/index.ts",
+      "kind": "tests",
+      "label": "tests css context, class generation, style injection",
+      "evidence": "src/helper/css/index.test.tsx:1"
+    },
+    {
+      "from": "f:src/helper/streaming/stream.test.ts",
+      "to": "f:src/helper/streaming/stream.ts",
+      "kind": "tests",
+      "label": "tests stream and SSE helpers",
+      "evidence": "src/helper/streaming/stream.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.test.tsx",
+      "to": "f:src/helper/ssg/ssg.ts",
+      "kind": "tests",
+      "label": "integration tests for toSSG and SSG middleware",
+      "evidence": "src/helper/ssg/ssg.test.tsx:1"
+    },
+    {
+      "from": "f:src/helper/proxy/index.test.ts",
+      "to": "f:src/helper/proxy/index.ts",
+      "kind": "tests",
+      "label": "tests hop-by-hop and strict mode",
+      "evidence": "src/helper/proxy/index.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/factory/index.test.ts",
+      "to": "f:src/helper/factory/index.ts",
+      "kind": "tests",
+      "label": "tests Factory and createMiddleware",
+      "evidence": "src/helper/factory/index.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/testing/index.test.ts",
+      "to": "f:src/helper/testing/index.ts",
+      "kind": "tests",
+      "label": "tests testClient routing through app.request",
+      "evidence": "src/helper/testing/index.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/accepts/accepts.test.ts",
+      "to": "f:src/helper/accepts/accepts.ts",
+      "kind": "tests",
+      "label": "tests accept negotiation with q values and wildcards",
+      "evidence": "src/helper/accepts/accepts.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/route/index.test.ts",
+      "to": "f:src/helper/route/index.ts",
+      "kind": "tests",
+      "label": "tests route introspection helpers",
+      "evidence": "src/helper/route/index.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/adapter/index.test.ts",
+      "to": "f:src/helper/adapter/index.ts",
+      "kind": "tests",
+      "label": "tests runtime detection and env()",
+      "evidence": "src/helper/adapter/index.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/dev/index.test.ts",
+      "to": "f:src/helper/dev/index.ts",
+      "kind": "tests",
+      "label": "tests showRoutes output and route inspection",
+      "evidence": "src/helper/dev/index.test.ts:1"
+    },
+    {
+      "from": "f:src/helper/websocket/index.test.ts",
+      "to": "f:src/helper/websocket/index.ts",
+      "kind": "tests",
+      "label": "tests WSContext and defineWebSocketHelper",
+      "evidence": "src/helper/websocket/index.test.ts:1"
+    },
+    {
+      "from": "f:src/client/utils.ts#parseResponse",
+      "to": "f:src/client/fetch-result-please.ts#DetailedError",
+      "kind": "calls",
+      "label": "fetchRP throws DetailedError on non-ok status",
+      "evidence": "src/client/utils.ts:6"
+    },
+    {
+      "from": "f:src/client/client.ts#ClientRequestImpl",
+      "to": "f:src/client/types.ts#ClientResponse",
+      "kind": "reads",
+      "label": "fetch() return type is ClientResponse",
+      "evidence": "src/client/client.ts:5"
+    },
+    {
+      "from": "f:src/client/types.ts#InferRequestType",
+      "to": "f:src/client/types.ts#ClientResponse",
+      "kind": "reads",
+      "label": "extracts args type from client method signature",
+      "evidence": "src/client/types.ts:265"
+    },
+    {
+      "from": "f:src/client/types.ts#ClientResponse",
+      "to": "f:src/client/types.ts#InferResponseType",
+      "kind": "reads",
+      "label": "InferResponseType extracts body T from ClientResponse",
+      "evidence": "src/client/types.ts:251"
+    },
+    {
+      "from": "f:src/helper/accepts/accepts.ts#accepts",
+      "to": "f:src/helper/accepts/accepts.ts#defaultMatch",
+      "kind": "calls",
+      "label": "delegates scoring to defaultMatch",
+      "evidence": "src/helper/accepts/accepts.ts:109"
+    },
+    {
+      "from": "f:src/helper/adapter/index.ts#env",
+      "to": "f:src/helper/adapter/index.ts#getRuntimeKey",
+      "kind": "calls",
+      "label": "calls getRuntimeKey() to dispatch to the right env source",
+      "evidence": "src/helper/adapter/index.ts:10"
+    },
+    {
+      "from": "f:src/helper/cookie/index.ts#deleteCookie",
+      "to": "f:src/helper/cookie/index.ts#getCookie",
+      "kind": "calls",
+      "label": "reads current cookie value before expiring it",
+      "evidence": "src/helper/cookie/index.ts:142"
+    },
+    {
+      "from": "f:src/helper/cookie/index.ts#getSignedCookie",
+      "to": "hono.utils",
+      "kind": "calls",
+      "label": "parseSigned() for HMAC-SHA-256 verification",
+      "evidence": "src/helper/cookie/index.ts:7"
+    },
+    {
+      "from": "f:src/helper/dev/index.ts#showRoutes",
+      "to": "f:src/helper/dev/index.ts#inspectRoutes",
+      "kind": "calls",
+      "label": "calls inspectRoutes() to get structured route data",
+      "evidence": "src/helper/dev/index.ts:40"
+    },
+    {
+      "from": "f:src/helper/factory/index.ts#createFactory",
+      "to": "f:src/helper/factory/index.ts#Factory",
+      "kind": "calls",
+      "label": "returns new Factory<E, P>(init) instance",
+      "evidence": "src/helper/factory/index.ts:364"
+    },
+    {
+      "from": "f:src/helper/factory/index.ts#createMiddleware",
+      "to": "f:src/helper/factory/index.ts#Factory",
+      "kind": "reads",
+      "label": "mirrors Factory.createMiddleware() as free-standing identity",
+      "evidence": "src/helper/factory/index.ts:368"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#fetchRoutesContent",
+      "to": "f:src/helper/ssg/middleware.ts#ssgParams",
+      "kind": "reads",
+      "label": "reads ssgParams stored on request by ssgParams middleware",
+      "evidence": "src/helper/ssg/ssg.ts:258"
+    },
+    {
+      "from": "f:src/helper/streaming/sse.ts#streamSSE",
+      "to": "f:src/helper/streaming/sse.ts#SSEStreamingApi",
+      "kind": "calls",
+      "label": "instantiates SSEStreamingApi over the TransformStream",
+      "evidence": "src/helper/streaming/sse.ts:79"
+    },
+    {
+      "from": "f:src/helper/websocket/index.ts#WSContext",
+      "to": "f:src/helper/websocket/index.ts#defineWebSocketHelper",
+      "kind": "reads",
+      "label": "defineWebSocketHelper passes WSContextInit to new WSContext",
+      "evidence": "src/helper/websocket/index.ts:121"
+    },
+    {
+      "from": "f:src/helper/css/index.ts#css",
+      "to": "f:src/helper/css/index.ts#createCssContext",
+      "kind": "reads",
+      "label": "bound from createCssContext({id:DEFAULT_STYLE_ID})",
+      "evidence": "src/helper/css/index.ts:225"
+    },
+    {
+      "from": "f:src/helper/css/index.ts#cx",
+      "to": "f:src/helper/css/index.ts#createCssContext",
+      "kind": "reads",
+      "label": "default cx is bound from the default context",
+      "evidence": "src/helper/css/index.ts:225"
+    },
+    {
+      "from": "f:src/helper/css/index.ts#keyframes",
+      "to": "f:src/helper/css/index.ts#createCssContext",
+      "kind": "reads",
+      "label": "default keyframes is bound from the default context",
+      "evidence": "src/helper/css/index.ts:225"
+    },
+    {
+      "from": "f:src/helper/css/index.ts#viewTransition",
+      "to": "f:src/helper/css/index.ts#createCssContext",
+      "kind": "reads",
+      "label": "default viewTransition is bound from the default context",
+      "evidence": "src/helper/css/index.ts:225"
+    },
+    {
+      "from": "f:src/helper/css/index.ts#Style",
+      "to": "f:src/helper/css/index.ts#createCssContext",
+      "kind": "reads",
+      "label": "default Style component is bound from the default context",
+      "evidence": "src/helper/css/index.ts:225"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#toSSG",
+      "to": "f:src/helper/ssg/ssg.ts#combineBeforeRequestHooks",
+      "kind": "calls",
+      "label": "builds combined before-request hook chain from plugins",
+      "evidence": "src/helper/ssg/ssg.ts:400"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#toSSG",
+      "to": "f:src/helper/ssg/ssg.ts#combineAfterResponseHooks",
+      "kind": "calls",
+      "label": "builds combined after-response hook chain from plugins",
+      "evidence": "src/helper/ssg/ssg.ts:410"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#toSSG",
+      "to": "f:src/helper/ssg/ssg.ts#saveContentToFile",
+      "kind": "calls",
+      "label": "calls saveContentToFile for each rendered route",
+      "evidence": "src/helper/ssg/ssg.ts:450"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#fetchRoutesContent",
+      "to": "f:src/helper/ssg/utils.ts#filterStaticGenerateRoutes",
+      "kind": "calls",
+      "label": "collects all GET non-middleware routes for rendering",
+      "evidence": "src/helper/ssg/ssg.ts:229"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#fetchRoutesContent",
+      "to": "f:src/helper/ssg/utils.ts#isDynamicRoute",
+      "kind": "calls",
+      "label": "detects dynamic :param routes before fetching ssgParams",
+      "evidence": "src/helper/ssg/ssg.ts:244"
+    },
+    {
+      "from": "f:src/helper/ssg/ssg.ts#saveContentToFile",
+      "to": "f:src/helper/ssg/utils.ts#ensureWithinOutDir",
+      "kind": "calls",
+      "label": "guards against path traversal before writing file",
+      "evidence": "src/helper/ssg/ssg.ts:327"
+    },
+    {
+      "from": "f:src/client/client.ts#hc",
+      "to": "f:src/client/utils.ts#mergePath",
+      "kind": "calls",
+      "label": "joins base URL and accumulated path segments",
+      "evidence": "src/client/client.ts:9"
+    },
+    {
+      "from": "f:src/client/client.ts#ClientRequestImpl",
+      "to": "f:src/client/utils.ts#replaceUrlParam",
+      "kind": "calls",
+      "label": "substitutes :param placeholders with actual values",
+      "evidence": "src/client/client.ts:11"
+    },
+    {
+      "from": "f:src/client/client.ts",
+      "to": "f:src/client/utils.ts#deepMerge",
+      "kind": "calls",
+      "label": "deep-merges base options with per-call options",
+      "evidence": "src/client/client.ts:13"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow.helpers.rpc-call",
+      "name": "Typed RPC client call",
+      "summary": "A typed hc<AppType>()...$get() call builds a fetch Request and infers the response type at compile time.",
+      "steps": [
+        {
+          "node": "f:src/client/client.ts#hc",
+          "text": "The caller calls hc<AppType>('https://api.example.com') which invokes createProxy with an empty path array. The returned Proxy has type UnionToIntersection<Client<AppType, Prefix>> so every property access is type-checked against the app's route schema."
+        },
+        {
+          "node": "f:src/client/client.ts#createProxy",
+          "text": "Each property access on the proxy (e.g. .posts, .posts.$get) calls the get trap which recursively returns a new Proxy with the key appended to the path array. This continues until the caller invokes the proxy as a function."
+        },
+        {
+          "node": "f:src/client/types.ts#InferRequestType",
+          "text": "The TypeScript compiler evaluates Client<AppType, Prefix> at the call site: PathToChain maps each route key to a ClientRequest whose method signatures are derived from the route's Schema. InferRequestType extracts the args type so the editor infers what query/body/param values are required."
+        },
+        {
+          "node": "f:src/client/client.ts#ClientRequestImpl",
+          "text": "When .$get(args, options) is called, the proxy callback pops '$get' off the path, joins the remaining segments into a URL with mergePath, instantiates ClientRequestImpl, merges base and per-call headers/options, and calls req.fetch()."
+        },
+        {
+          "node": "f:src/client/utils.ts#buildSearchParams",
+          "text": "Inside fetch(), if args.query is present buildSearchParams() converts it to a URLSearchParams object (arrays become repeated keys). Path params in args.param are substituted into the URL with replaceUrlParam()."
+        },
+        {
+          "node": "f:src/client/types.ts#ClientResponse",
+          "text": "The resulting Promise<ClientResponse<O, S, F>> is returned to the caller. ClientResponse narrows json() and text() return types based on the route's outputFormat, so the caller gets full type inference on the response body without any runtime overhead."
+        }
+      ]
+    },
+    {
+      "id": "flow.helpers.ssg-render",
+      "name": "Static site generation with toSSG()",
+      "summary": "toSSG() walks all app GET routes, renders each to HTML or other content, and writes the result through a runtime FileSystemModule.",
+      "steps": [
+        {
+          "node": "f:src/helper/ssg/ssg.ts#toSSG",
+          "text": "The caller supplies a Hono app and a FileSystemModule (e.g. Bun or Deno's fs wrapper). toSSG() assembles the combined hook chains from options.plugins (default: defaultPlugin that skips non-200 responses) and kicks off the generator."
+        },
+        {
+          "node": "f:src/helper/ssg/ssg.ts#fetchRoutesContent",
+          "text": "fetchRoutesContent() calls filterStaticGenerateRoutes() to collect all GET non-middleware routes, then issues app.fetch() with the SSG_CONTEXT env flag set to true. If a route uses ssgParams middleware, the params are attached to the request object; otherwise a single empty-param render is performed."
+        },
+        {
+          "node": "f:src/helper/ssg/middleware.ts#ssgParams",
+          "text": "For dynamic routes (:id, *), ssgParams middleware stores the SSGParams array on the raw request during the info-fetch phase and returns c.notFound() so the handler itself is not executed. toSSG() reads the params and issues a second fetch per param set."
+        },
+        {
+          "node": "f:src/helper/ssg/ssg.ts#FileSystemModule",
+          "text": "saveContentToFile() determines the output file path from the route and MIME type (via generateFilePath and defaultExtensionMap), calls fsModule.mkdir({ recursive: true }) to create parent directories (tracking already-created dirs to avoid duplicate syscalls), and calls fsModule.writeFile with the response body as a string or Uint8Array."
+        },
+        {
+          "node": "hono.adapters",
+          "text": "The FileSystemModule is supplied by the runtime adapter: Bun provides Bun.write-based helpers and Deno provides Deno.writeTextFile-based helpers. This keeps ssg.ts itself runtime-agnostic, delegating all I/O to the adapter layer."
+        }
+      ]
+    }
+  ]
+}

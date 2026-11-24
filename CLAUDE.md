@@ -7,7 +7,8 @@ work from any folder.
 
 A new map starts with `pipeline/init.py`, and its folder lives outside this repository
 (`~/topo-maps/<name>/` by default). `maps/` holds only the committed example; never put a user's map
-there.
+there. `gallery/` holds published maps of open-source projects, rebuilt by `gallery/build.py`;
+never a user's or a client's map.
 
 ## Repositories you map
 

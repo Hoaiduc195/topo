@@ -1,0 +1,9 @@
+{
+  "feature": [
+    ["flow.routing.http-request", "HTTP request through a route"],
+    ["flow.di.resolve-request", "Resolving dependencies"],
+    ["flow.io.encode-return-value", "Encoding the response"],
+    ["flow.openapi.generate-schema", "Generating the OpenAPI schema"],
+    ["flow.security.guard-endpoint", "Guarding an endpoint"]
+  ]
+}

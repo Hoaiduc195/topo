@@ -1,0 +1,1010 @@
+{
+  "area": "di",
+  "nodes": [
+    {
+      "id": "di.params",
+      "parent": "fastapi.di",
+      "name": "Parameter marker classes",
+      "kind": "group",
+      "summary": "Pydantic FieldInfo subclasses and Depends/Security dataclasses used as endpoint signature markers.",
+      "detail": "fastapi/params.py defines the class hierarchy: Param (extends FieldInfo) is the base for all HTTP location markers; Path, Query, Header, Cookie extend Param; Body extends FieldInfo directly with an embed flag and a media_type; Form and File extend Body. Each subclass sets its in_ attribute (a ParamTypes enum) so that get_dependant can sort fields by location. Depends is a frozen dataclass that holds a dependency callable, a use_cache flag, an optional scope ('function' or 'request'), and an optional max_concurrency that creates a _DependencyConcurrency semaphore. Security extends Depends with a scopes list for OAuth2 scope propagation.",
+      "paths": ["fastapi/params.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "di.param_functions",
+      "parent": "fastapi.di",
+      "name": "Public parameter factories",
+      "kind": "group",
+      "summary": "Module-level functions (Path, Query, Header, Cookie, Body, Form, File, Depends, Security) that expose the parameter markers in the public FastAPI API.",
+      "detail": "fastapi/param_functions.py re-exports nine entry-point functions that the application developer calls in endpoint signatures. Each function carries full annotated_doc Doc strings for all parameters so the generated OpenAPI examples and IDE tooling reflect the metadata. The functions are thin wrappers: each one forwards every keyword argument to the corresponding class in fastapi/params.py and returns the instance. Depends and Security are re-exported from params directly rather than re-wrapped.",
+      "paths": ["fastapi/param_functions.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "di.models",
+      "parent": "fastapi.di",
+      "name": "Dependency models",
+      "kind": "group",
+      "summary": "The Dependant dataclass and the callable-classification helpers that describe a resolved endpoint signature.",
+      "detail": "fastapi/dependencies/models.py holds Dependant (a slots dataclass) and the private helper functions that reason about its call attribute. Dependant splits an endpoint or sub-dependency into five lists of ModelField (path, query, header, cookie, body params) plus a dependencies list of child Dependants; it also records which parameter names should receive the Request, WebSocket, Response, BackgroundTasks and SecurityScopes objects. The helper functions (_is_gen_callable, _is_async_gen_callable, _is_coroutine_callable) determine how a callable must be driven at request time and are memoized via lru_cache on a _CallIdentity wrapper to avoid repeated inspect calls. _get_cache_key computes the tuple key used to identify an already-solved dependency in the per-request cache.",
+      "paths": ["fastapi/dependencies/models.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "di.utils",
+      "parent": "fastapi.di",
+      "name": "Dependency utilities",
+      "kind": "group",
+      "summary": "The analysis and resolution engine: get_dependant, solve_dependencies, and the validation helpers.",
+      "detail": "fastapi/dependencies/utils.py is the core of the DI (dependency injection) system. At route-registration time get_dependant walks the endpoint signature, calling analyze_param for each parameter, and returns a fully populated Dependant tree. At request time solve_dependencies walks that tree recursively, resolving each sub-dependency (with cache, generator or coroutine semantics), then calling request_params_to_args for path/query/header/cookie parameters and request_body_to_args for body/form/file parameters. Validation errors from all branches are collected and raised together. The same Dependant tree is consumed by fastapi/openapi/utils.py at schema-generation time, so the analysis is shared between runtime validation and OpenAPI documentation.",
+      "paths": ["fastapi/dependencies/utils.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "AnyIO"]
+    },
+
+    {
+      "id": "f:fastapi/params.py",
+      "parent": "di.params",
+      "name": "params.py",
+      "kind": "module",
+      "summary": "Defines the Param/Body class hierarchy and the Depends/Security dataclasses used to annotate endpoint parameters.",
+      "detail": "Contains ParamTypes enum (query, header, path, cookie), Param(FieldInfo) base, Path/Query/Header/Cookie subclasses, Body(FieldInfo) with embed and media_type, Form(Body) with application/x-www-form-urlencoded default, File(Form) with multipart/form-data default. Depends is a frozen dataclass with use_cache (default True), scope, max_concurrency and an internal _concurrency field. Security extends Depends with a scopes sequence. All Param and Body constructors pass through the full Pydantic FieldInfo keyword set so validation constraints reach Pydantic.",
+      "paths": ["fastapi/params.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "Path default must be Ellipsis (...); the constructor asserts this",
+        "Header.convert_underscores defaults to True",
+        "Body.media_type defaults to 'application/json'",
+        "Form.media_type defaults to 'application/x-www-form-urlencoded'",
+        "File.media_type defaults to 'multipart/form-data'"
+      ]
+    },
+    {
+      "id": "f:fastapi/params.py#ParamTypes",
+      "parent": "f:fastapi/params.py",
+      "name": "ParamTypes",
+      "kind": "class",
+      "summary": "Enum of the four HTTP parameter locations: query, header, path, cookie.",
+      "paths": ["fastapi/params.py:21"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class ParamTypes(Enum): query = 'query'; header = 'header'; path = 'path'; cookie = 'cookie'"
+    },
+    {
+      "id": "f:fastapi/params.py#Param",
+      "parent": "f:fastapi/params.py",
+      "name": "Param",
+      "kind": "class",
+      "summary": "Base FieldInfo subclass for all HTTP location-bound parameters; carries an in_ attribute.",
+      "detail": "Param extends pydantic.fields.FieldInfo with the include_in_schema, openapi_examples and example attributes in addition to the standard FieldInfo fields. It issues a deprecation warning if the legacy example keyword is used. All validation constraints (gt, ge, lt, le, min_length, max_length, pattern, regex) are forwarded to FieldInfo via super().__init__. The regex parameter is itself deprecated in favour of pattern since FastAPI 0.100.0.",
+      "paths": ["fastapi/params.py:28"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Param(FieldInfo): in_: ParamTypes",
+      "code": "class Param(FieldInfo):\n    in_: ParamTypes\n\n    def __init__(self, default: Any = Undefined, *, ...):\n        self.include_in_schema = include_in_schema\n        self.openapi_examples = openapi_examples\n        kwargs = {\"default\": default, ...}\n        use_kwargs = {k: v for k, v in kwargs.items() if v is not _Unset}\n        super().__init__(**use_kwargs)"
+    },
+    {
+      "id": "f:fastapi/params.py#Path",
+      "parent": "f:fastapi/params.py",
+      "name": "Path",
+      "kind": "class",
+      "summary": "Param subclass for path parameters; in_ = ParamTypes.path; default must be Ellipsis.",
+      "paths": ["fastapi/params.py:143"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Path(Param): in_ = ParamTypes.path"
+    },
+    {
+      "id": "f:fastapi/params.py#Query",
+      "parent": "f:fastapi/params.py",
+      "name": "Query",
+      "kind": "class",
+      "summary": "Param subclass for query string parameters; in_ = ParamTypes.query.",
+      "paths": ["fastapi/params.py:233"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Query(Param): in_ = ParamTypes.query"
+    },
+    {
+      "id": "f:fastapi/params.py#Header",
+      "parent": "f:fastapi/params.py",
+      "name": "Header",
+      "kind": "class",
+      "summary": "Param subclass for HTTP request headers; adds convert_underscores flag (default True).",
+      "paths": ["fastapi/params.py:321"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Header(Param): in_ = ParamTypes.header; convert_underscores: bool = True"
+    },
+    {
+      "id": "f:fastapi/params.py#Cookie",
+      "parent": "f:fastapi/params.py",
+      "name": "Cookie",
+      "kind": "class",
+      "summary": "Param subclass for HTTP cookie parameters; in_ = ParamTypes.cookie.",
+      "paths": ["fastapi/params.py:411"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Cookie(Param): in_ = ParamTypes.cookie"
+    },
+    {
+      "id": "f:fastapi/params.py#Body",
+      "parent": "f:fastapi/params.py",
+      "name": "Body",
+      "kind": "class",
+      "summary": "FieldInfo subclass for JSON request bodies; holds embed and media_type.",
+      "paths": ["fastapi/params.py:499"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Body(FieldInfo): embed: bool | None; media_type: str = 'application/json'"
+    },
+    {
+      "id": "f:fastapi/params.py#Form",
+      "parent": "f:fastapi/params.py",
+      "name": "Form",
+      "kind": "class",
+      "summary": "Body subclass for URL-encoded form fields; media_type defaults to application/x-www-form-urlencoded.",
+      "paths": ["fastapi/params.py:615"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class Form(Body): media_type: str = 'application/x-www-form-urlencoded'"
+    },
+    {
+      "id": "f:fastapi/params.py#File",
+      "parent": "f:fastapi/params.py",
+      "name": "File",
+      "kind": "class",
+      "summary": "Form subclass for multipart file uploads; media_type defaults to multipart/form-data.",
+      "paths": ["fastapi/params.py:703"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class File(Form): media_type: str = 'multipart/form-data'"
+    },
+    {
+      "id": "f:fastapi/params.py#Depends",
+      "parent": "f:fastapi/params.py",
+      "name": "Depends",
+      "kind": "class",
+      "summary": "Frozen dataclass marking a parameter as a resolved sub-dependency; carries use_cache, scope and max_concurrency.",
+      "detail": "Depends holds a dependency callable (optional, inferred from type annotation when None), use_cache flag (default True), scope ('function' or 'request', defaults to None), max_concurrency (a positive integer or None) and an internal _concurrency (_DependencyConcurrency) that wraps the semaphore. __post_init__ validates max_concurrency and constructs the _DependencyConcurrency object only when max_concurrency changes.",
+      "paths": ["fastapi/params.py:791"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass(frozen=True)\nclass Depends:\n    dependency: Callable | None = None\n    use_cache: bool = True\n    scope: Literal['function', 'request'] | None = None\n    max_concurrency: int | None = None",
+      "code": "@dataclass(frozen=True)\nclass Depends:\n    dependency: Callable[..., Any] | None = None\n    use_cache: bool = True\n    scope: Literal[\"function\", \"request\"] | None = None\n    max_concurrency: int | None = field(default=None, kw_only=True)\n    _concurrency: _DependencyConcurrency | None = field(\n        default=None, repr=False, kw_only=True\n    )\n\n    def __post_init__(self) -> None:\n        if self.max_concurrency is None:\n            object.__setattr__(self, \"_concurrency\", None)\n            return"
+    },
+    {
+      "id": "f:fastapi/params.py#Security",
+      "parent": "f:fastapi/params.py",
+      "name": "Security",
+      "kind": "class",
+      "summary": "Depends subclass that also declares OAuth2 scopes required by the endpoint.",
+      "paths": ["fastapi/params.py:820"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass(frozen=True)\nclass Security(Depends): scopes: Sequence[str] | None = None"
+    },
+
+    {
+      "id": "f:fastapi/param_functions.py",
+      "parent": "di.param_functions",
+      "name": "param_functions.py",
+      "kind": "module",
+      "summary": "Public factory functions (Path, Query, Header, Cookie, Body, Form, File, Depends, Security) that application code imports from fastapi.",
+      "detail": "Each function in this module is the public-facing constructor for a params.py class. The function signatures carry annotated_doc Doc metadata on every parameter so that IDEs and documentation generators expose FastAPI documentation inline. The functions are named with uppercase first letters (N802 noqa) to look like classes in user code. All keyword arguments are forwarded verbatim to the corresponding class. Depends and Security are defined in params.py and re-exported by the fastapi package __init__; they are not duplicated here.",
+      "paths": ["fastapi/param_functions.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+    {
+      "id": "f:fastapi/param_functions.py#Path",
+      "parent": "f:fastapi/param_functions.py",
+      "name": "Path()",
+      "kind": "function",
+      "summary": "Factory that returns a params.Path instance; annotates path parameter constraints for OpenAPI.",
+      "paths": ["fastapi/param_functions.py:14"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def Path(default: Any = ..., *, alias, title, description, gt, ge, lt, le, ...) -> Any"
+    },
+    {
+      "id": "f:fastapi/param_functions.py#Query",
+      "parent": "f:fastapi/param_functions.py",
+      "name": "Query()",
+      "kind": "function",
+      "summary": "Factory that returns a params.Query instance for query string parameters.",
+      "paths": ["fastapi/param_functions.py:375"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def Query(default: Any = Undefined, *, alias, title, ...) -> Any"
+    },
+    {
+      "id": "f:fastapi/param_functions.py#Header",
+      "parent": "f:fastapi/param_functions.py",
+      "name": "Header()",
+      "kind": "function",
+      "summary": "Factory that returns a params.Header instance; convert_underscores defaults to True.",
+      "paths": ["fastapi/param_functions.py:734"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def Header(default: Any = Undefined, *, convert_underscores: bool = True, ...) -> Any"
+    },
+    {
+      "id": "f:fastapi/param_functions.py#Cookie",
+      "parent": "f:fastapi/param_functions.py",
+      "name": "Cookie()",
+      "kind": "function",
+      "summary": "Factory that returns a params.Cookie instance for cookie parameters.",
+      "paths": ["fastapi/param_functions.py:1066"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def Cookie(default: Any = Undefined, ...) -> Any"
+    },
+    {
+      "id": "f:fastapi/param_functions.py#Body",
+      "parent": "f:fastapi/param_functions.py",
+      "name": "Body()",
+      "kind": "function",
+      "summary": "Factory that returns a params.Body instance for JSON request bodies.",
+      "paths": ["fastapi/param_functions.py:1386"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def Body(default: Any = Undefined, *, embed: bool | None = None, media_type: str = 'application/json', ...) -> Any"
+    },
+    {
+      "id": "f:fastapi/param_functions.py#Form",
+      "parent": "f:fastapi/param_functions.py",
+      "name": "Form()",
+      "kind": "function",
+      "summary": "Factory that returns a params.Form instance for form-encoded body fields.",
+      "paths": ["fastapi/param_functions.py:1731"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def Form(default: Any = Undefined, *, media_type: str = 'application/x-www-form-urlencoded', ...) -> Any"
+    },
+    {
+      "id": "f:fastapi/param_functions.py#File",
+      "parent": "f:fastapi/param_functions.py",
+      "name": "File()",
+      "kind": "function",
+      "summary": "Factory that returns a params.File instance for multipart file upload fields.",
+      "paths": ["fastapi/param_functions.py:2061"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def File(default: Any = Undefined, *, media_type: str = 'multipart/form-data', ...) -> Any"
+    },
+
+    {
+      "id": "f:fastapi/dependencies/models.py",
+      "parent": "di.models",
+      "name": "dependencies/models.py",
+      "kind": "module",
+      "summary": "Defines the Dependant dataclass and callable-classification helpers used by the DI engine.",
+      "detail": "This module has no runtime dependency on the HTTP layer. It defines Dependant as a slots dataclass, the _CallIdentity wrapper (hashes by object identity to avoid collisions between different callables that evaluate as equal), and three lru_cache-memoized classification functions: _is_gen_callable, _is_async_gen_callable and _is_coroutine_callable. All three check the callable itself, its __call__ method, and the unwrapped form via inspect.unwrap to handle decorators. The cache size is 4096 entries. _get_cache_key returns a tuple (call, scopes_tuple, computed_scope) used as the dependency cache key in solve_dependencies.",
+      "paths": ["fastapi/dependencies/models.py"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": [
+        "_CALLABLE_CLASSIFICATION_CACHE_SIZE = 4096 entries per lru_cache",
+        "Uses asyncio.iscoroutinefunction on Python 3.11/3.12 to preserve _is_coroutine marker detection",
+        "Dependant.scope can be 'function' or 'request' (None means inferred from callable type)",
+        "_get_computed_scope returns 'request' for generator/async-generator callables"
+      ]
+    },
+    {
+      "id": "f:fastapi/dependencies/models.py#Dependant",
+      "parent": "f:fastapi/dependencies/models.py",
+      "name": "Dependant",
+      "kind": "class",
+      "summary": "Slots dataclass holding the analyzed signature of one endpoint or sub-dependency.",
+      "detail": "Dependant stores five lists of ModelField (path_params, query_params, header_params, cookie_params, body_params), a dependencies list of child Dependant objects, the callable itself, and six optional parameter name strings for the special injection targets (request, websocket, http_connection, response, background_tasks, security_scopes). own_oauth_scopes and parent_oauth_scopes propagate Security scopes through the tree. The scope field ('function' or 'request') controls which AsyncExitStack is used for generator cleanup.",
+      "paths": ["fastapi/dependencies/models.py:36"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass(slots=True)\nclass Dependant:\n    path_params: list[ModelField]\n    query_params: list[ModelField]\n    header_params: list[ModelField]\n    cookie_params: list[ModelField]\n    body_params: list[ModelField]\n    dependencies: list[Dependant]\n    call: Callable | None\n    use_cache: bool = True\n    scope: Literal['function', 'request'] | None = None",
+      "code": "@dataclass(slots=True)\nclass Dependant:\n    path_params: list[ModelField] = field(default_factory=list)\n    query_params: list[ModelField] = field(default_factory=list)\n    header_params: list[ModelField] = field(default_factory=list)\n    cookie_params: list[ModelField] = field(default_factory=list)\n    body_params: list[ModelField] = field(default_factory=list)\n    dependencies: list[\"Dependant\"] = field(default_factory=list)\n    name: str | None = None\n    call: Callable[..., Any] | None = None\n    use_cache: bool = True\n    scope: Literal[\"function\", \"request\"] | None = None\n    concurrency: _DependencyConcurrency | None = None"
+    },
+    {
+      "id": "f:fastapi/dependencies/models.py#_get_cache_key",
+      "parent": "f:fastapi/dependencies/models.py",
+      "name": "_get_cache_key()",
+      "kind": "function",
+      "summary": "Returns the (call, scopes_tuple, computed_scope) tuple used as the per-request dependency cache key.",
+      "paths": ["fastapi/dependencies/models.py:87"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _get_cache_key(*, dependant: Dependant, uses_scopes_cache: _UsesScopesCache | None = None) -> DependencyCacheKey",
+      "code": "def _get_cache_key(\n    *,\n    dependant: Dependant,\n    uses_scopes_cache: _UsesScopesCache | None = None,\n) -> DependencyCacheKey:\n    scopes_for_cache = (\n        tuple(sorted(set(_get_oauth_scopes(dependant=dependant))))\n        if _uses_scopes(dependant=dependant, cache=uses_scopes_cache)\n        else ()\n    )\n    return (\n        dependant.call,\n        scopes_for_cache,\n        _get_computed_scope(dependant=dependant) or \"\",\n    )"
+    },
+    {
+      "id": "f:fastapi/dependencies/models.py#_is_gen_callable",
+      "parent": "f:fastapi/dependencies/models.py",
+      "name": "_is_gen_callable()",
+      "kind": "function",
+      "summary": "Returns True if the callable is a synchronous generator function (including wrapped callables and __call__ methods).",
+      "paths": ["fastapi/dependencies/models.py:166"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _is_gen_callable(call: Callable | None) -> bool"
+    },
+    {
+      "id": "f:fastapi/dependencies/models.py#_is_async_gen_callable",
+      "parent": "f:fastapi/dependencies/models.py",
+      "name": "_is_async_gen_callable()",
+      "kind": "function",
+      "summary": "Returns True if the callable is an async generator function; memoized via lru_cache.",
+      "paths": ["fastapi/dependencies/models.py:196"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _is_async_gen_callable(call: Callable | None) -> bool"
+    },
+    {
+      "id": "f:fastapi/dependencies/models.py#_is_coroutine_callable",
+      "parent": "f:fastapi/dependencies/models.py",
+      "name": "_is_coroutine_callable()",
+      "kind": "function",
+      "summary": "Returns True if the callable is a coroutine function; uses asyncio.iscoroutinefunction on Python 3.11/3.12.",
+      "paths": ["fastapi/dependencies/models.py:234"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _is_coroutine_callable(call: Callable | None) -> bool"
+    },
+
+    {
+      "id": "f:fastapi/dependencies/utils.py",
+      "parent": "di.utils",
+      "name": "dependencies/utils.py",
+      "kind": "module",
+      "summary": "The dependency injection engine: signature analysis at registration time and dependency resolution per request.",
+      "detail": "This is the largest file in the DI area (~1,514 lines). It is split into three layers: (1) signature analysis (get_dependant, analyze_param, get_typed_signature) which runs once per route at startup; (2) request-time resolution (solve_dependencies, _solve_generator, request_params_to_args, request_body_to_args) which runs on every request; (3) OpenAPI helpers (_get_body_field, _should_embed_body_fields, _get_form_model_schema, get_flat_params) which are called at schema-generation time and share the Dependant tree built at startup. The module also contains ensure_multipart_is_installed which raises a RuntimeError with an actionable message when form or file parameters are used without python-multipart installed.",
+      "paths": ["fastapi/dependencies/utils.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic", "AnyIO"],
+      "facts": [
+        "ensure_multipart_is_installed requires python-multipart > 0.0.12",
+        "solve_dependencies uses two AsyncExitStack scopes per request: fastapi_inner_astack (request scope) and fastapi_function_astack (function scope)",
+        "Dependency cache key is (call, scopes_tuple, computed_scope)"
+      ]
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#get_dependant",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "get_dependant()",
+      "kind": "function",
+      "summary": "Analyzes a callable's signature into a Dependant tree; called once at route registration.",
+      "detail": "get_dependant creates a Dependant for the given callable and path string. It calls get_typed_signature to resolve forward references, then iterates over each parameter. For each parameter it calls analyze_param which returns a ParamDetails with either a Depends, a ModelField, or a special-injection type. Sub-dependencies are recursed into by calling get_dependant again, inheriting and extending the OAuth2 scope list. Special parameters (Request, WebSocket, HTTPConnection, Response, BackgroundTasks, SecurityScopes) are routed to named slots on the Dependant. All other fields are sorted by their FieldInfo type into the five param lists.",
+      "paths": ["fastapi/dependencies/utils.py:305"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_dependant(*, path: str, call: Callable, name: str | None = None, own_oauth_scopes: list[str] | None = None, parent_oauth_scopes: list[str] | None = None, use_cache: bool = True, scope: Literal['function', 'request'] | None = None, concurrency: _DependencyConcurrency | None = None) -> Dependant",
+      "code": "def get_dependant(*, path: str, call: Callable, ...) -> Dependant:\n    dependant = Dependant(call=call, name=name, path=path, ...)\n    path_param_names = get_path_param_names(path)\n    endpoint_signature = get_typed_signature(call)\n    for param_name, param in endpoint_signature.parameters.items():\n        param_details = analyze_param(param_name=param_name, ...)\n        if param_details.depends is not None:\n            sub_dependant = get_dependant(path=path, call=..., ...)\n            dependant.dependencies.append(sub_dependant)\n            continue\n        if add_non_field_param_to_dependency(...):\n            continue\n        if isinstance(param_details.field.field_info, params.Body):\n            dependant.body_params.append(param_details.field)\n    return dependant"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#analyze_param",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "analyze_param()",
+      "kind": "function",
+      "summary": "Classifies one endpoint parameter into a ParamDetails holding a type annotation, optional Depends, and optional ModelField.",
+      "detail": "analyze_param handles four annotation forms: a plain type, Annotated[T, FieldInfo|Depends], a default value that is a FieldInfo or Depends instance, and plain type annotations for special injection targets. It unwraps PEP 695 TypeAliasType annotations. When no explicit field info is found it infers the location: UploadFile annotations become File, non-scalar types become Body, and scalars become Query. Path parameters are always Path regardless of their annotation. After building the FieldInfo it creates a ModelField via create_model_field from fastapi/utils.py.",
+      "paths": ["fastapi/dependencies/utils.py:417"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def analyze_param(*, param_name: str, annotation: Any, value: Any, path_param_names: set[str]) -> ParamDetails",
+      "code": "def analyze_param(*, param_name, annotation, value, path_param_names):\n    is_path_param = param_name in path_param_names\n    field_info = None; depends = None\n    if get_origin(use_annotation) is Annotated:\n        type_annotation = get_args(annotation)[0]\n        fastapi_annotations = [\n            a for a in get_args(annotation)[1:]\n            if isinstance(a, (FieldInfo, params.Depends))]\n    if isinstance(value, params.Depends):\n        depends = value\n    elif isinstance(value, FieldInfo):\n        field_info = value\n    return ParamDetails(type_annotation, depends, field)"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "solve_dependencies()",
+      "kind": "function",
+      "summary": "Async function that resolves a Dependant tree per request, filling a values dict or collecting validation errors.",
+      "detail": "solve_dependencies is called recursively. For each sub-dependency it checks the per-request dependency_cache (keyed by _get_cache_key). If not cached it drives the callable according to its type: async generator via _solve_generator with the request-scoped AsyncExitStack, sync generator via contextmanager_in_threadpool, coroutine via await, sync via run_in_threadpool. After resolving all sub-dependencies it calls request_params_to_args for path/query/header/cookie params and request_body_to_args for body params, injects special parameters (Request, Response, BackgroundTasks, SecurityScopes), and returns a SolvedDependency with values, errors, and the updated dependency_cache. When errors accumulate they are all raised together as a RequestValidationError by the caller in routing.py.",
+      "paths": ["fastapi/dependencies/utils.py:671"],
+      "status": "live",
+      "tech": ["Python", "AnyIO"],
+      "signature": "async def solve_dependencies(*, request: Request | WebSocket, dependant: Dependant, body: Any = Undefined, background_tasks: ..., response: Response | None = None, dependency_overrides_provider: Any | None = None, dependency_cache: dict | None = None, async_exit_stack: AsyncExitStack, embed_body_fields: bool, _uses_scopes_cache: _UsesScopesCache | None = None) -> SolvedDependency",
+      "code": "async def solve_dependencies(\n    *, request, dependant, body, ..., dependency_cache, embed_body_fields\n) -> SolvedDependency:\n    for sub_dependant in dependant.dependencies:\n        if sub_dependant.use_cache and sub_dependant_cache_key in dependency_cache:\n            solved = dependency_cache[sub_dependant_cache_key]\n        elif _is_gen_callable(use_sub_dependant.call) or _is_async_gen_callable(...):\n            solved = await _solve_generator(request=request, dependant=use_sub_dependant, stack=use_astack, ...)\n        elif _is_coroutine_callable(use_sub_dependant.call):\n            solved = await call(**solved_result.values)\n        else:\n            solved = await run_in_threadpool(call, **solved_result.values)\n    path_values, path_errors = request_params_to_args(dependant.path_params, request.path_params)\n    return SolvedDependency(values=values, errors=errors, ...)"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#request_params_to_args",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "request_params_to_args()",
+      "kind": "function",
+      "summary": "Extracts and validates path/query/header/cookie fields from the incoming request mappings.",
+      "detail": "For each ModelField it calls _get_param_aliases to find the correct request key (handling AliasChoices and convert_underscores), _get_multidict_value to fetch the raw value from the mapping (supporting multi-value fields), then _validate_value_with_model_field which calls Pydantic validation and returns (value, errors). Fields annotated with a BaseModel type are routed to _request_param_model_to_args instead, which builds a dict from the model fields and validates the whole model at once. The function returns a (values_dict, errors_list) tuple.",
+      "paths": ["fastapi/dependencies/utils.py:979"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def request_params_to_args(fields: Sequence[ModelField], received_params: Mapping[str, Any] | QueryParams | Headers) -> tuple[dict[str, Any], list[Any]]",
+      "code": "def request_params_to_args(\n    fields: Sequence[ModelField],\n    received_params: Mapping[str, Any] | QueryParams | Headers,\n) -> tuple[dict[str, Any], list[Any]]:\n    values: dict[str, Any] = {}\n    errors: list[Any] = []\n    for field in fields:\n        if (model := _get_param_model(field)) is not None:\n            v_, errors_ = _request_param_model_to_args(field, model, received_params)\n        else:\n            aliases = _get_param_aliases(field)\n            value = _get_multidict_value(field, received_params, alias=alias)\n            v_, errors_ = _validate_value_with_model_field(field=field, ...)\n    return values, errors"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#request_body_to_args",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "request_body_to_args()",
+      "kind": "function",
+      "summary": "Async function that extracts and validates body fields from JSON, form, or file data.",
+      "detail": "request_body_to_args handles three body shapes: a single non-embedded field (the whole body is passed to Pydantic), multiple embedded fields (each extracted by key from the dict or FormData), and FormData with form-model fields (extracted via _extract_form_body which handles UploadFile byte conversion). For FormData union models it calls _extract_form_model which builds a flattened dict per branch. All extraction uses _get_multidict_value to handle both scalar and sequence form values. The function is async because _extract_form_body is an async generator that may need to read file bytes.",
+      "paths": ["fastapi/dependencies/utils.py:1204"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "async def request_body_to_args(body_fields: list[ModelField], received_body: Any, embed_body_fields: bool) -> tuple[dict[str, Any], list[dict[str, Any]]]",
+      "code": "async def request_body_to_args(\n    body_fields: list[ModelField],\n    received_body: Any,\n    embed_body_fields: bool,\n) -> tuple[dict[str, Any], list[dict[str, Any]]]:\n    if isinstance(received_body, FormData):\n        async for alias, value, field in _extract_form_body(fields_to_extract, received_body):\n            body_to_process[alias] = value\n    if single_not_embedded_field:\n        v_, errors_ = _validate_value_with_model_field(field=first_field, value=body_to_process, ...)\n        return {first_field.name: v_}, errors_\n    for field in body_fields:\n        v_, errors_ = _validate_value_with_model_field(field=field, value=value, ...)\n    return values, errors"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#get_typed_signature",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "get_typed_signature()",
+      "kind": "function",
+      "summary": "Returns an inspect.Signature with all string annotations resolved to their actual types.",
+      "paths": ["fastapi/dependencies/utils.py:247"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_typed_signature(call: Callable) -> inspect.Signature"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#add_non_field_param_to_dependency",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "add_non_field_param_to_dependency()",
+      "kind": "function",
+      "summary": "Detects special injection types (Request, WebSocket, Response, BackgroundTasks, SecurityScopes) and stores their parameter name on the Dependant.",
+      "paths": ["fastapi/dependencies/utils.py:386"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def add_non_field_param_to_dependency(*, param_name: str, type_annotation: Any, dependant: Dependant) -> bool | None"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#_solve_generator",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "_solve_generator()",
+      "kind": "function",
+      "summary": "Enters an async or sync generator dependency as a context manager on the appropriate AsyncExitStack.",
+      "detail": "_solve_generator wraps async generators with asynccontextmanager and enters them on the request-scoped AsyncExitStack, using a CancelScope stored in request.scope['fastapi_async_cleanup_scopes'] to shield cleanup from cancellation. Sync generators are wrapped by contextmanager_in_threadpool and also entered on the same stack. When the Dependant.concurrency is set the context manager is further wrapped in _contextmanager_with_concurrency_limit.",
+      "paths": ["fastapi/dependencies/utils.py:631"],
+      "status": "live",
+      "tech": ["Python", "AnyIO"],
+      "signature": "async def _solve_generator(*, dependant: Dependant, stack: AsyncExitStack, sub_values: dict, request: Request | WebSocket) -> Any",
+      "code": "async def _solve_generator(\n    *, dependant, stack, sub_values, request\n) -> Any:\n    if _is_async_gen_callable(dependant.call):\n        cm = asynccontextmanager(dependant.call)(**sub_values)\n        cleanup_scopes = request.scope.setdefault(\"fastapi_async_cleanup_scopes\", {})\n        request_stack = cast(AsyncExitStack, request.scope[\"fastapi_inner_astack\"])\n        cleanup_scope = cleanup_scopes.get(request_stack)\n        if cleanup_scope is None:\n            cleanup_scope = request_stack.enter_context(CancelScope())\n        cm = _asynccontextmanager_with_shielded_exit(cm, cleanup_scope)\n    elif _is_gen_callable(dependant.call):\n        cm = contextmanager_in_threadpool(contextmanager(dependant.call)(**sub_values))\n    return await stack.enter_async_context(cm)"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#SolvedDependency",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "SolvedDependency",
+      "kind": "class",
+      "summary": "Dataclass returned by solve_dependencies holding resolved values, errors, background tasks, response and cache.",
+      "paths": ["fastapi/dependencies/utils.py:662"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass\nclass SolvedDependency:\n    values: dict[str, Any]\n    errors: list[Any]\n    background_tasks: StarletteBackgroundTasks | None\n    response: Response\n    dependency_cache: dict[DependencyCacheKey, Any]"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#_get_body_field",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "_get_body_field()",
+      "kind": "function",
+      "summary": "Builds the combined ModelField representing the full request body for OpenAPI schema generation.",
+      "detail": "_get_body_field is called at route registration time by routing.py and openapi/utils.py, not during request handling. When only one non-embedded body field is present it returns that field directly. When multiple body fields exist it dynamically creates a BodyModel Pydantic model (named 'Body_' + route name) wrapping all of them and returns a ModelField for it. For form models it applies a JSON Schema transformation via _get_form_model_schema and _apply_form_body_schema to represent flat form data as OpenAPI schema correctly.",
+      "paths": ["fastapi/dependencies/utils.py:1384"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "def _get_body_field(*, body_params: list[ModelField], name: str, embed_body_fields: bool) -> ModelField | None"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#get_flat_params",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "get_flat_params()",
+      "kind": "function",
+      "summary": "Returns all path/query/header/cookie parameters across a Dependant tree, deduplicated by cache key.",
+      "paths": ["fastapi/dependencies/utils.py:203"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_flat_params(dependant: Dependant) -> list[ModelField]"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#ensure_multipart_is_installed",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "ensure_multipart_is_installed()",
+      "kind": "function",
+      "summary": "Raises RuntimeError with an actionable message when python-multipart is absent or the wrong package is installed.",
+      "paths": ["fastapi/dependencies/utils.py:119"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def ensure_multipart_is_installed() -> None"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#_should_embed_body_fields",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "_should_embed_body_fields()",
+      "kind": "function",
+      "summary": "Returns True when multiple body fields must be embedded as named keys rather than the entire body.",
+      "paths": ["fastapi/dependencies/utils.py:1089"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def _should_embed_body_fields(fields: list[ModelField]) -> bool"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#ParamDetails",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "ParamDetails",
+      "kind": "class",
+      "summary": "Dataclass holding the result of analyze_param: a type annotation, an optional Depends, and an optional ModelField.",
+      "paths": ["fastapi/dependencies/utils.py:410"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "@dataclass\nclass ParamDetails:\n    type_annotation: Any\n    depends: params.Depends | None\n    field: ModelField | None"
+    },
+    {
+      "id": "f:fastapi/dependencies/utils.py#add_param_to_fields",
+      "parent": "f:fastapi/dependencies/utils.py",
+      "name": "add_param_to_fields()",
+      "kind": "function",
+      "summary": "Appends a ModelField to the correct list on the Dependant based on the field's in_ location.",
+      "paths": ["fastapi/dependencies/utils.py:615"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def add_param_to_fields(*, field: ModelField, dependant: Dependant) -> None"
+    },
+
+    {
+      "id": "f:tests/test_dependencies_utils.py",
+      "parent": "di.utils",
+      "name": "test_dependencies_utils.py",
+      "kind": "test",
+      "summary": "Unit tests for the low-level dependency utility functions in dependencies/utils.py.",
+      "paths": ["tests/test_dependencies_utils.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_parameter_extraction.py",
+      "parent": "di.utils",
+      "name": "test_parameter_extraction.py",
+      "kind": "test",
+      "summary": "Tests that get_dependant correctly classifies annotated endpoint parameters into their param lists.",
+      "paths": ["tests/test_parameter_extraction.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_dependency_cache.py",
+      "parent": "di.utils",
+      "name": "test_dependency_cache.py",
+      "kind": "test",
+      "summary": "Tests the per-request dependency cache: verifies a dependency is called once and its cached value reused.",
+      "paths": ["tests/test_dependency_cache.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_dependency_yield_scope.py",
+      "parent": "di.utils",
+      "name": "test_dependency_yield_scope.py",
+      "kind": "test",
+      "summary": "Tests 'function' vs 'request' scope for generator dependencies and their cleanup ordering.",
+      "paths": ["tests/test_dependency_yield_scope.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+    {
+      "id": "f:tests/test_params_repr.py",
+      "parent": "di.params",
+      "name": "test_params_repr.py",
+      "kind": "test",
+      "summary": "Tests __repr__ output for Param and Body subclasses.",
+      "paths": ["tests/test_params_repr.py"],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    }
+  ],
+
+  "edges": [
+    {
+      "from": "f:fastapi/param_functions.py#Path",
+      "to": "f:fastapi/params.py#Path",
+      "kind": "calls",
+      "label": "returns params.Path instance",
+      "evidence": "fastapi/param_functions.py:340"
+    },
+    {
+      "from": "f:fastapi/param_functions.py#Query",
+      "to": "f:fastapi/params.py#Query",
+      "kind": "calls",
+      "label": "returns params.Query instance",
+      "evidence": "fastapi/param_functions.py:699"
+    },
+    {
+      "from": "f:fastapi/param_functions.py#Header",
+      "to": "f:fastapi/params.py#Header",
+      "kind": "calls",
+      "label": "returns params.Header instance",
+      "evidence": "fastapi/param_functions.py:1030"
+    },
+    {
+      "from": "f:fastapi/param_functions.py#Cookie",
+      "to": "f:fastapi/params.py#Cookie",
+      "kind": "calls",
+      "label": "returns params.Cookie instance",
+      "evidence": "fastapi/param_functions.py:1351"
+    },
+    {
+      "from": "f:fastapi/param_functions.py#Body",
+      "to": "f:fastapi/params.py#Body",
+      "kind": "calls",
+      "label": "returns params.Body instance",
+      "evidence": "fastapi/param_functions.py:1694"
+    },
+    {
+      "from": "f:fastapi/param_functions.py#Form",
+      "to": "f:fastapi/params.py#Form",
+      "kind": "calls",
+      "label": "returns params.Form instance",
+      "evidence": "fastapi/param_functions.py:2025"
+    },
+    {
+      "from": "f:fastapi/param_functions.py#File",
+      "to": "f:fastapi/params.py#File",
+      "kind": "calls",
+      "label": "returns params.File instance",
+      "evidence": "fastapi/param_functions.py:2061"
+    },
+    {
+      "from": "f:fastapi/params.py#Param",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "extends pydantic FieldInfo",
+      "evidence": "fastapi/params.py:28"
+    },
+    {
+      "from": "f:fastapi/params.py#Body",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "extends pydantic FieldInfo",
+      "evidence": "fastapi/params.py:499"
+    },
+    {
+      "from": "f:fastapi/params.py#Path",
+      "to": "f:fastapi/params.py#Param",
+      "kind": "calls",
+      "label": "extends Param",
+      "evidence": "fastapi/params.py:143"
+    },
+    {
+      "from": "f:fastapi/params.py#Query",
+      "to": "f:fastapi/params.py#Param",
+      "kind": "calls",
+      "label": "extends Param",
+      "evidence": "fastapi/params.py:233"
+    },
+    {
+      "from": "f:fastapi/params.py#Header",
+      "to": "f:fastapi/params.py#Param",
+      "kind": "calls",
+      "label": "extends Param",
+      "evidence": "fastapi/params.py:321"
+    },
+    {
+      "from": "f:fastapi/params.py#Cookie",
+      "to": "f:fastapi/params.py#Param",
+      "kind": "calls",
+      "label": "extends Param",
+      "evidence": "fastapi/params.py:411"
+    },
+    {
+      "from": "f:fastapi/params.py#Form",
+      "to": "f:fastapi/params.py#Body",
+      "kind": "calls",
+      "label": "extends Body",
+      "evidence": "fastapi/params.py:615"
+    },
+    {
+      "from": "f:fastapi/params.py#File",
+      "to": "f:fastapi/params.py#Form",
+      "kind": "calls",
+      "label": "extends Form",
+      "evidence": "fastapi/params.py:703"
+    },
+    {
+      "from": "f:fastapi/params.py#Security",
+      "to": "f:fastapi/params.py#Depends",
+      "kind": "calls",
+      "label": "extends Depends with scopes",
+      "evidence": "fastapi/params.py:820"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#get_dependant",
+      "to": "f:fastapi/dependencies/utils.py#analyze_param",
+      "kind": "calls",
+      "label": "analyzes each signature parameter",
+      "evidence": "fastapi/dependencies/utils.py:331"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#get_dependant",
+      "to": "f:fastapi/dependencies/utils.py#add_non_field_param_to_dependency",
+      "kind": "calls",
+      "label": "handles special injection types",
+      "evidence": "fastapi/dependencies/utils.py:369"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#get_dependant",
+      "to": "f:fastapi/dependencies/utils.py#add_param_to_fields",
+      "kind": "calls",
+      "label": "sorts field into path/query/header/cookie list",
+      "evidence": "fastapi/dependencies/utils.py:382"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#get_dependant",
+      "to": "f:fastapi/dependencies/models.py#Dependant",
+      "kind": "calls",
+      "label": "creates and returns Dependant instance",
+      "evidence": "fastapi/dependencies/utils.py:316"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/utils.py#_solve_generator",
+      "kind": "calls",
+      "label": "enters generator dependency on exit stack",
+      "evidence": "fastapi/dependencies/utils.py:754"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/utils.py#request_params_to_args",
+      "kind": "calls",
+      "label": "validates path/query/header/cookie params",
+      "evidence": "fastapi/dependencies/utils.py:776"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/utils.py#request_body_to_args",
+      "kind": "calls",
+      "label": "validates body/form/file params",
+      "evidence": "fastapi/dependencies/utils.py:800"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/models.py#_get_cache_key",
+      "kind": "calls",
+      "label": "computes cache key for each sub-dependency",
+      "evidence": "fastapi/dependencies/utils.py:742"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#request_params_to_args",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "validates extracted values via ModelField.validate",
+      "evidence": "fastapi/dependencies/utils.py:1001"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#request_body_to_args",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "validates body values via ModelField.validate",
+      "evidence": "fastapi/dependencies/utils.py:1270"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#_solve_generator",
+      "to": "x:anyio",
+      "kind": "calls",
+      "label": "uses CancelScope to shield async generator cleanup",
+      "evidence": "fastapi/dependencies/utils.py:641"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "x:starlette",
+      "kind": "calls",
+      "label": "calls run_in_threadpool for sync dependencies",
+      "evidence": "fastapi/dependencies/utils.py:768"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#analyze_param",
+      "to": "f:fastapi/dependencies/utils.py#ensure_multipart_is_installed",
+      "kind": "calls",
+      "label": "checks python-multipart present for Form fields",
+      "evidence": "fastapi/dependencies/utils.py:571"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/models.py#_is_gen_callable",
+      "kind": "calls",
+      "label": "classifies sub-dependency callable as sync generator",
+      "evidence": "fastapi/dependencies/utils.py:754"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/models.py#_is_async_gen_callable",
+      "kind": "calls",
+      "label": "classifies sub-dependency callable as async generator",
+      "evidence": "fastapi/dependencies/utils.py:754"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/models.py#_is_coroutine_callable",
+      "kind": "calls",
+      "label": "classifies sub-dependency callable as coroutine to decide await vs threadpool",
+      "evidence": "fastapi/dependencies/utils.py:762"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#_solve_generator",
+      "to": "f:fastapi/dependencies/models.py#_is_gen_callable",
+      "kind": "calls",
+      "label": "checks if callable is sync generator before wrapping with contextmanager",
+      "evidence": "fastapi/dependencies/utils.py:644"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#_solve_generator",
+      "to": "f:fastapi/dependencies/models.py#_is_async_gen_callable",
+      "kind": "calls",
+      "label": "checks if callable is async generator before wrapping with asynccontextmanager",
+      "evidence": "fastapi/dependencies/utils.py:634"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#_get_body_field",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "creates dynamic BodyModel via create_body_model",
+      "evidence": "fastapi/dependencies/utils.py:1432"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#get_typed_signature",
+      "to": "f:fastapi/dependencies/utils.py#get_dependant",
+      "kind": "calls",
+      "label": "provides resolved signature for analysis",
+      "evidence": "fastapi/dependencies/utils.py:328"
+    },
+    {
+      "from": "f:tests/test_dependencies_utils.py",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "tests",
+      "label": "tests get_dependant and param analysis utilities",
+      "evidence": "tests/test_dependencies_utils.py:1"
+    },
+    {
+      "from": "f:tests/test_parameter_extraction.py",
+      "to": "f:fastapi/dependencies/utils.py#analyze_param",
+      "kind": "tests",
+      "label": "tests parameter classification logic",
+      "evidence": "tests/test_parameter_extraction.py:1"
+    },
+    {
+      "from": "f:tests/test_dependency_cache.py",
+      "to": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "kind": "tests",
+      "label": "tests dependency cache hit behavior",
+      "evidence": "tests/test_dependency_cache.py:1"
+    },
+    {
+      "from": "f:tests/test_dependency_yield_scope.py",
+      "to": "f:fastapi/dependencies/utils.py#_solve_generator",
+      "kind": "tests",
+      "label": "tests function vs request scope cleanup",
+      "evidence": "tests/test_dependency_yield_scope.py:1"
+    },
+    {
+      "from": "f:tests/test_params_repr.py",
+      "to": "f:fastapi/params.py",
+      "kind": "tests",
+      "label": "tests Param and Body __repr__",
+      "evidence": "tests/test_params_repr.py:1"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py",
+      "to": "fastapi.routing",
+      "kind": "calls",
+      "label": "get_dependant and solve_dependencies called by routing",
+      "evidence": "fastapi/dependencies/utils.py:305"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#_get_body_field",
+      "to": "fastapi.openapi",
+      "kind": "calls",
+      "label": "used by openapi/utils.py for schema generation",
+      "evidence": "fastapi/dependencies/utils.py:1384"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#get_flat_params",
+      "to": "fastapi.openapi",
+      "kind": "calls",
+      "label": "used by openapi/utils.py to list all parameters",
+      "evidence": "fastapi/dependencies/utils.py:203"
+    },
+    {
+      "from": "f:fastapi/params.py#Param",
+      "to": "f:fastapi/params.py#ParamTypes",
+      "kind": "reads",
+      "label": "in_ attribute is typed as ParamTypes; each Param subclass assigns its value",
+      "evidence": "fastapi/params.py:29"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#analyze_param",
+      "to": "f:fastapi/params.py#ParamTypes",
+      "kind": "reads",
+      "label": "reads field_info.in_ (a ParamTypes member) to route field into path/query/header/cookie list",
+      "evidence": "fastapi/dependencies/utils.py:618"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#solve_dependencies",
+      "to": "f:fastapi/dependencies/utils.py#SolvedDependency",
+      "kind": "calls",
+      "label": "returns a SolvedDependency holding resolved values, errors, background tasks and cache",
+      "evidence": "fastapi/dependencies/utils.py:830"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#get_dependant",
+      "to": "f:fastapi/dependencies/utils.py#_should_embed_body_fields",
+      "kind": "calls",
+      "label": "called after signature analysis to decide whether body fields must be embedded",
+      "evidence": "fastapi/dependencies/utils.py:1215"
+    },
+    {
+      "from": "f:fastapi/dependencies/utils.py#analyze_param",
+      "to": "f:fastapi/dependencies/utils.py#ParamDetails",
+      "kind": "calls",
+      "label": "returns a ParamDetails instance wrapping the type annotation, Depends and ModelField",
+      "evidence": "fastapi/dependencies/utils.py:605"
+    }
+  ],
+
+  "flows": [
+    {
+      "id": "flow.di.analyze-endpoint",
+      "name": "Analyzing an endpoint at registration",
+      "summary": "get_dependant walks the endpoint signature once at startup and builds a Dependant tree.",
+      "steps": [
+        {
+          "node": "f:fastapi/dependencies/utils.py#get_typed_signature",
+          "text": "get_typed_signature resolves all string annotations in the endpoint's inspect.Signature using the callable's __globals__, turning forward references into concrete types."
+        },
+        {
+          "node": "f:fastapi/dependencies/utils.py#analyze_param",
+          "text": "For each parameter, analyze_param inspects the annotation and default value. It unwraps PEP 695 TypeAliasType, extracts FastAPI-specific metadata from Annotated[], infers the location (Path/Query/Body/File) when no explicit marker is given, and creates a ModelField for each non-dependency parameter."
+        },
+        {
+          "node": "f:fastapi/dependencies/models.py#Dependant",
+          "text": "get_dependant accumulates path, query, header, cookie and body ModelFields into the Dependant's five lists. Sub-dependencies are recursed into, inheriting the OAuth2 scope list, and stored in the dependencies list. The finished Dependant is attached to the APIRoute and reused on every request."
+        }
+      ]
+    },
+    {
+      "id": "flow.di.resolve-request",
+      "name": "Resolving dependencies per request",
+      "summary": "solve_dependencies walks the Dependant tree per request, caching results and surfacing a RequestValidationError on failure.",
+      "steps": [
+        {
+          "node": "f:fastapi/dependencies/utils.py#solve_dependencies",
+          "text": "solve_dependencies is called recursively for each sub-dependency. It first checks the per-request dependency_cache (keyed by call, scopes, and scope). Cache misses drive the callable: async generators enter the request-scoped AsyncExitStack, sync generators are adapted via contextmanager_in_threadpool, coroutines are awaited, and sync functions are run in a worker thread via run_in_threadpool."
+        },
+        {
+          "node": "f:fastapi/dependencies/utils.py#request_params_to_args",
+          "text": "After sub-dependencies are resolved, request_params_to_args extracts and validates path, query, header and cookie parameters from the Starlette request mappings. Each field uses _get_param_aliases to handle AliasChoices and header underscore conversion, then _validate_value_with_model_field for Pydantic validation."
+        },
+        {
+          "node": "f:fastapi/dependencies/utils.py#request_body_to_args",
+          "text": "request_body_to_args handles JSON, form, and file bodies. For FormData it uses _extract_form_body (an async generator) to convert UploadFile fields to bytes and flatten form-model fields. All validation errors from every branch are collected into the errors list and raised together as a RequestValidationError by the routing layer."
+        }
+      ]
+    },
+    {
+      "id": "flow.di.openapi-reuse",
+      "name": "OpenAPI schema generation reusing the Dependant",
+      "summary": "The same Dependant tree built at startup drives both runtime validation and OpenAPI documentation.",
+      "steps": [
+        {
+          "node": "f:fastapi/dependencies/utils.py#get_flat_params",
+          "text": "get_flat_params traverses the full Dependant tree (following dependencies recursively, deduplicating by cache key) and returns a flat list of all path, query, header and cookie ModelFields. openapi/utils.py calls this to enumerate the parameters section of the OpenAPI operation object."
+        },
+        {
+          "node": "f:fastapi/dependencies/utils.py#_get_body_field",
+          "text": "_get_body_field combines all body_params from the Dependant into a single ModelField. For a single non-embedded body it returns that field directly; for multiple or embedded fields it creates a dynamic BodyModel Pydantic class. For form-model fields it injects a JSON Schema transformer via GetPydanticSchema so the form structure is represented correctly in the OpenAPI schema."
+        },
+        {
+          "node": "f:fastapi/dependencies/models.py#Dependant",
+          "text": "The Dependant object is the shared data structure: built once by get_dependant at route registration, read at request time by solve_dependencies, and read again at schema generation time by get_flat_params and _get_body_field. No re-analysis of the endpoint signature is ever done at request time."
+        }
+      ]
+    }
+  ]
+}

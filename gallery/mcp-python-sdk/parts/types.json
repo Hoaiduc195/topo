@@ -1,0 +1,1531 @@
+{
+  "area": "types",
+  "nodes": [
+
+    {
+      "id": "types.mcp-types-pkg",
+      "parent": "types",
+      "name": "mcp-types package",
+      "kind": "group",
+      "summary": "The standalone mcp-types distribution: wire protocol models, JSON-RPC envelopes, versioned surface types, and the method registry.",
+      "detail": "mcp-types is a minimal package (pydantic + typing-extensions only) that can be installed independently of the full SDK. It publishes the version-superset model set in mcp_types._types, two generated per-revision surface packages (_v2025_11_25, _v2026_07_28), the JSON-RPC envelope types, the method registry with its parse/serialize functions, and the protocol-version registry. The mcp package re-exports every public name from here via mcp.types.",
+      "paths": ["src/mcp-types"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+    {
+      "id": "types.mcp-types-shim",
+      "parent": "types",
+      "name": "mcp.types shim",
+      "kind": "group",
+      "summary": "Four thin re-export modules under src/mcp/types/ that mirror mcp_types under the mcp.types namespace for v1 compatibility.",
+      "detail": "Each module does only one thing: `from mcp_types.<sub> import *` and re-exports __all__. This keeps v1-style `from mcp.types import Tool` working while the canonical source of truth is mcp_types. No logic lives here.",
+      "paths": ["src/mcp/types"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py",
+      "parent": "types.mcp-types-pkg",
+      "name": "Wire type definitions",
+      "kind": "module",
+      "summary": "Version-superset Model Context Protocol (MCP) wire types as Pydantic models: every field from every supported protocol version in one file.",
+      "detail": "Defines MCPModel (camelCase alias base), all request/result/notification classes, capability structs, and content blocks. Carries fields from all supported revisions so application code uses one type regardless of negotiated version. Per-field docstrings note which version introduced or removed each field. The _v* surface packages hold schema-exact wire shapes for strict validation; this file holds the app-facing union. Forward references to InputResponses are rebuilt at module bottom via model_rebuild(). Union types (ClientRequest, ServerRequest, etc.) and their TypeAdapters are assembled at the bottom of the file.",
+      "paths": ["src/mcp-types/mcp_types/_types.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "DEFAULT_NEGOTIATED_VERSION = '2025-03-26'",
+        "CORE_RESULT_TYPES frozenset: {'complete', 'input_required'}",
+        "CacheableResult defaults: ttl_ms=0, cache_scope='private'",
+        "EmptyResult dumps as {} (result_type defaults to None)",
+        "InputRequiredResult validator requires at least one of input_requests or request_state"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "MCPModel",
+      "kind": "class",
+      "summary": "Base Pydantic model for all MCP protocol types; enables camelCase alias generation.",
+      "detail": "Sets alias_generator=to_camel and populate_by_name=True in its ConfigDict so all subclasses serialize with camelCase field names on the wire while Python code uses snake_case. All protocol models in this file inherit from this class (or from BaseModel for JSON-RPC envelopes).",
+      "paths": ["src/mcp-types/mcp_types/_types.py:45"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class MCPModel(BaseModel)",
+      "code": "class MCPModel(BaseModel):\n    \"\"\"Base class for all MCP protocol types.\"\"\"\n\n    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "Request",
+      "kind": "class",
+      "summary": "Generic base for JSON-RPC request payloads (without the envelope id/jsonrpc fields).",
+      "detail": "Generic over RequestParamsT and MethodT. The JSON-RPC envelope is attached by the session layer, not here. Declares a ClassVar name_param used by SEP-2663 to inject the Mcp-Name header for tasks/* requests. Concrete subclasses set method as a Literal and params with the specific Params type.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:128"],
+      "status": "live",
+      "signature": "class Request(MCPModel, Generic[RequestParamsT, MethodT])",
+      "code": "class Request(MCPModel, Generic[RequestParamsT, MethodT]):\n    method: MethodT\n    params: RequestParamsT\n    name_param: ClassVar[str | None] = None"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#Result",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "Result",
+      "kind": "class",
+      "summary": "Base for all JSON-RPC result payloads; carries the optional _meta field.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:174"],
+      "status": "live",
+      "signature": "class Result(MCPModel)",
+      "code": "class Result(MCPModel):\n    meta: Meta | None = Field(alias=\"_meta\", default=None)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#Notification",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "Notification",
+      "kind": "class",
+      "summary": "Generic base for JSON-RPC notification payloads (no id; no response expected).",
+      "paths": ["src/mcp-types/mcp_types/_types.py:153"],
+      "status": "live",
+      "signature": "class Notification(MCPModel, Generic[NotificationParamsT, MethodT])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#CacheableResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "CacheableResult",
+      "kind": "class",
+      "summary": "Base for results that carry client-side caching directives (2026-07-28); holds ttl_ms and cache_scope.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:198"],
+      "status": "live",
+      "signature": "class CacheableResult(Result)",
+      "code": "class CacheableResult(Result):\n    ttl_ms: Annotated[int, Field(ge=0)] = 0\n    cache_scope: Literal[\"public\", \"private\"] = \"private\""
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#InputRequiredResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "InputRequiredResult",
+      "kind": "class",
+      "summary": "Signals the server needs client input before completing a request (2026-07-28); replaces the standalone JSON-RPC round-trip.",
+      "detail": "result_type is Literal 'input_required'. A model_validator enforces that at least one of input_requests or request_state is present. The client retries the original request with the fulfilled responses and the echoed request_state.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:2078"],
+      "status": "live",
+      "signature": "class InputRequiredResult(Result)",
+      "code": "class InputRequiredResult(Result):\n    result_type: Literal[\"input_required\"] = \"input_required\"\n    input_requests: InputRequests | None = None\n    request_state: str | None = None\n\n    @model_validator(mode=\"after\")\n    def _require_one_field(self) -> Self:\n        if not self.input_requests and self.request_state is None:\n            raise ValueError(\"InputRequiredResult requires at least one ...\")\n        return self"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#InitializeRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "InitializeRequest",
+      "kind": "class",
+      "summary": "Client-to-server handshake request (protocol versions up to 2025-11-25; removed in 2026-07-28).",
+      "paths": ["src/mcp-types/mcp_types/_types.py:531"],
+      "status": "live",
+      "signature": "class InitializeRequest(Request[InitializeRequestParams, Literal['initialize']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#InitializeResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "InitializeResult",
+      "kind": "class",
+      "summary": "Server's handshake response carrying the negotiated protocol version, capabilities, and optional instructions.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:543"],
+      "status": "live",
+      "signature": "class InitializeResult(Result)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#DiscoverRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "DiscoverRequest",
+      "kind": "class",
+      "summary": "Asks the server to advertise its supported protocol versions and capabilities (2026-07-28); replaces the initialize handshake.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:584"],
+      "status": "live",
+      "signature": "class DiscoverRequest(Request[RequestParams | None, Literal['server/discover']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#DiscoverResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "DiscoverResult",
+      "kind": "class",
+      "summary": "Server's response to server/discover; extends CacheableResult with supported_versions, capabilities, and instructions.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:597"],
+      "status": "live",
+      "signature": "class DiscoverResult(CacheableResult)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#Tool",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "Tool",
+      "kind": "class",
+      "summary": "Definition for a callable tool: name, description, input_schema (JSON Schema), optional output_schema, and display hints.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1415"],
+      "status": "live",
+      "signature": "class Tool(BaseMetadata)",
+      "code": "class Tool(BaseMetadata):\n    description: str | None = None\n    input_schema: dict[str, Any]\n    execution: ToolExecution | None = None\n    output_schema: dict[str, Any] | None = None\n    icons: list[Icon] | None = None\n    annotations: ToolAnnotations | None = None\n    meta: Meta | None = Field(alias=\"_meta\", default=None)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#CallToolRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "CallToolRequest",
+      "kind": "class",
+      "summary": "Client request to invoke a named tool with optional arguments and optional task metadata.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1460"],
+      "status": "live",
+      "signature": "class CallToolRequest(Request[CallToolRequestParams, Literal['tools/call']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#CallToolResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "CallToolResult",
+      "kind": "class",
+      "summary": "Server's response to a tool call: a list of ContentBlock values, optional structured_content, and an is_error flag.",
+      "detail": "Tool-level errors are reported via is_error=True inside the result, not as JSON-RPC protocol errors, so the LLM can self-correct. Protocol-level errors (tool not found, etc.) are JSON-RPC errors.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1467"],
+      "status": "live",
+      "signature": "class CallToolResult(Result)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#Resource",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "Resource",
+      "kind": "class",
+      "summary": "A named resource the server can read, with URI, optional MIME type, size hint, and display icons.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:797"],
+      "status": "live",
+      "signature": "class Resource(BaseMetadata)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ReadResourceRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ReadResourceRequest",
+      "kind": "class",
+      "summary": "Client request to read a resource by URI; can carry input responses for multi-round-trip flows (2026-07-28).",
+      "paths": ["src/mcp-types/mcp_types/_types.py:897"],
+      "status": "live",
+      "signature": "class ReadResourceRequest(Request[ReadResourceRequestParams, Literal['resources/read']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ReadResourceResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ReadResourceResult",
+      "kind": "class",
+      "summary": "Server's response to resources/read; carries a list of TextResourceContents or BlobResourceContents.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:935"],
+      "status": "live",
+      "signature": "class ReadResourceResult(CacheableResult)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#Prompt",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "Prompt",
+      "kind": "class",
+      "summary": "A prompt template the server offers, with optional arguments list and icons.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1116"],
+      "status": "live",
+      "signature": "class Prompt(BaseMetadata)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#GetPromptResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "GetPromptResult",
+      "kind": "class",
+      "summary": "Server's response to prompts/get; contains a list of PromptMessage objects.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1337"],
+      "status": "live",
+      "signature": "class GetPromptResult(Result)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ClientCapabilities",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ClientCapabilities",
+      "kind": "class",
+      "summary": "Capability flags a client declares: sampling, elicitation, roots, tasks, and extension maps.",
+      "detail": "extra='allow' so unrecognized capability keys round-trip. Sent once at initialize through 2025-11-25; sent per-request via _meta on 2026-07-28.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:389"],
+      "status": "live",
+      "signature": "class ClientCapabilities(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ServerCapabilities",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ServerCapabilities",
+      "kind": "class",
+      "summary": "Capability flags a server declares: logging, prompts, resources, tools, completions, extensions, tasks.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:487"],
+      "status": "live",
+      "signature": "class ServerCapabilities(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#TextContent",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "TextContent",
+      "kind": "class",
+      "summary": "A plain-text content block with type discriminator 'text'; used in tool results, prompt messages, and sampling.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1154"],
+      "status": "live",
+      "signature": "class TextContent(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ImageContent",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ImageContent",
+      "kind": "class",
+      "summary": "A base64-encoded image content block with MIME type; type discriminator 'image'.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1169"],
+      "status": "live",
+      "signature": "class ImageContent(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#AudioContent",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "AudioContent",
+      "kind": "class",
+      "summary": "A base64-encoded audio content block with MIME type; type discriminator 'audio'.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1186"],
+      "status": "live",
+      "signature": "class AudioContent(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#EmbeddedResource",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "EmbeddedResource",
+      "kind": "class",
+      "summary": "A resource embedded inline in a prompt or tool result; type discriminator 'resource'.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1296"],
+      "status": "live",
+      "signature": "class EmbeddedResource(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ContentBlock",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ContentBlock",
+      "kind": "data",
+      "summary": "Union alias for content blocks in prompts and tool results: TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1323"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ClientRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ClientRequest",
+      "kind": "data",
+      "summary": "Union of all client-to-server request payloads across supported protocol versions; used as the dispatch target.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:2113"],
+      "status": "live",
+      "code": "ClientRequest = (\n    PingRequest | InitializeRequest | CompleteRequest\n    | SetLevelRequest | GetPromptRequest | ListPromptsRequest\n    | ListResourcesRequest | ListResourceTemplatesRequest\n    | ReadResourceRequest | SubscribeRequest | UnsubscribeRequest\n    | CallToolRequest | ListToolsRequest\n    | DiscoverRequest | SubscriptionsListenRequest\n)\nclient_request_adapter = TypeAdapter[ClientRequest](ClientRequest)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ServerResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ServerResult",
+      "kind": "data",
+      "summary": "Union of all server result payloads; InputRequiredResult is last because its optional fields would shadow other members in left-to-right union resolution.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:2182"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ClientNotification",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ClientNotification",
+      "kind": "data",
+      "summary": "Union of client-to-server notifications: CancelledNotification, ProgressNotification, InitializedNotification, RootsListChangedNotification.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:2138"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ServerNotification",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ServerNotification",
+      "kind": "data",
+      "summary": "Union of server-to-client notifications across all supported versions.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:2163"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ElicitRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ElicitRequest",
+      "kind": "class",
+      "summary": "Server request to elicit information from the user via the client; params are either form-mode or URL-mode.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:2009"],
+      "status": "live",
+      "signature": "class ElicitRequest(Request[ElicitRequestParams, Literal['elicitation/create']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#CreateMessageRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "CreateMessageRequest",
+      "kind": "class",
+      "summary": "Server request to sample an LLM via the client (sampling/createMessage); deprecated in 2026-07-28.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1678"],
+      "status": "live",
+      "signature": "class CreateMessageRequest(Request[CreateMessageRequestParams, Literal['sampling/createMessage']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#SubscriptionsListenRequest",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "SubscriptionsListenRequest",
+      "kind": "class",
+      "summary": "Opens a long-lived subscription channel for receiving server notifications outside any specific request (2026-07-28).",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1057"],
+      "status": "live",
+      "signature": "class SubscriptionsListenRequest(Request[SubscriptionsListenRequestParams, Literal['subscriptions/listen']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#SamplingMessage",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "SamplingMessage",
+      "kind": "class",
+      "summary": "A message in a sampling conversation (role + content block or list); content_as_list normalizes the union.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1274"],
+      "status": "live",
+      "signature": "class SamplingMessage(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#RequestParamsMeta",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "RequestParamsMeta",
+      "kind": "class",
+      "summary": "TypedDict for the _meta field on request params; open-map (extra_items=Any) holding the optional progress token and reserved io.modelcontextprotocol/* keys.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:80"],
+      "status": "live",
+      "signature": "class RequestParamsMeta(TypedDict, extra_items=Any)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#BaseMetadata",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "BaseMetadata",
+      "kind": "class",
+      "summary": "Base for entities with a programmatic name and an optional human-readable title (Tool, Resource, Prompt, etc.).",
+      "paths": ["src/mcp-types/mcp_types/_types.py:230"],
+      "status": "live",
+      "signature": "class BaseMetadata(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ToolAnnotations",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ToolAnnotations",
+      "kind": "class",
+      "summary": "Hint properties for a tool: title, read_only_hint, destructive_hint, idempotent_hint, open_world_hint; all hints, not guarantees.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1369"],
+      "status": "live",
+      "signature": "class ToolAnnotations(MCPModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ListToolsResult",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ListToolsResult",
+      "kind": "class",
+      "summary": "Paginated, cacheable list of Tool definitions; extends both PaginatedResult and CacheableResult.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1444"],
+      "status": "live",
+      "signature": "class ListToolsResult(PaginatedResult, CacheableResult)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#ProgressNotification",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "ProgressNotification",
+      "kind": "class",
+      "summary": "Out-of-band notification of progress for a long-running request, keyed by progress token.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:770"],
+      "status": "live",
+      "signature": "class ProgressNotification(Notification[ProgressNotificationParams, Literal['notifications/progress']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#CancelledNotification",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "CancelledNotification",
+      "kind": "class",
+      "summary": "Either-side notification cancelling a previously-issued in-flight request by its id.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:1911"],
+      "status": "live",
+      "signature": "class CancelledNotification(Notification[CancelledNotificationParams, Literal['notifications/cancelled']])"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_types.py#Implementation",
+      "parent": "f:src/mcp-types/mcp_types/_types.py",
+      "name": "Implementation",
+      "kind": "class",
+      "summary": "Identifies an MCP client or server implementation by name, version, description, URL, and icons; sent in clientInfo/serverInfo.",
+      "paths": ["src/mcp-types/mcp_types/_types.py:269"],
+      "status": "live",
+      "signature": "class Implementation(BaseMetadata)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "parent": "types.mcp-types-pkg",
+      "name": "JSON-RPC envelope types",
+      "kind": "module",
+      "summary": "JSON-RPC 2.0 envelope models (JSONRPCRequest, JSONRPCResponse, JSONRPCError, JSONRPCNotification) and all protocol error codes.",
+      "detail": "Defines the four message envelope classes and the jsonrpc_message_adapter TypeAdapter used to decode any incoming wire frame. Error code constants cover the standard JSON-RPC range (-32700 to -32603) plus MCP server-error range (-32000 to -32099): SDK-internal codes (-32000, -32001), MCP spec codes (-32020 to -32022, -32042). The module docstring references https://www.jsonrpc.org/specification.",
+      "paths": ["src/mcp-types/mcp_types/jsonrpc.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "JSONRPC_VERSION = '2.0'",
+        "CONNECTION_CLOSED = -32000 (SDK-only, never on wire)",
+        "REQUEST_TIMEOUT = -32001 (SDK-only)",
+        "UNSUPPORTED_PROTOCOL_VERSION = -32022 (MCP spec 2026-07-28)",
+        "URL_ELICITATION_REQUIRED = -32042 (retired at 2026-07-28)"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCRequest",
+      "parent": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "name": "JSONRPCRequest",
+      "kind": "class",
+      "summary": "JSON-RPC 2.0 request envelope with jsonrpc, id, method, and optional params dict.",
+      "paths": ["src/mcp-types/mcp_types/jsonrpc.py:39"],
+      "status": "live",
+      "signature": "class JSONRPCRequest(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCResponse",
+      "parent": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "name": "JSONRPCResponse",
+      "kind": "class",
+      "summary": "JSON-RPC 2.0 success response envelope; result field is a raw dict passed to the type-specific decoder.",
+      "paths": ["src/mcp-types/mcp_types/jsonrpc.py:56"],
+      "status": "live",
+      "signature": "class JSONRPCResponse(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCError",
+      "parent": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "name": "JSONRPCError",
+      "kind": "class",
+      "summary": "JSON-RPC 2.0 error response envelope; id is nullable (None encodes null when the id could not be determined).",
+      "paths": ["src/mcp-types/mcp_types/jsonrpc.py:132"],
+      "status": "live",
+      "signature": "class JSONRPCError(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCNotification",
+      "parent": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "name": "JSONRPCNotification",
+      "kind": "class",
+      "summary": "JSON-RPC 2.0 notification envelope (no id field; no response expected).",
+      "paths": ["src/mcp-types/mcp_types/jsonrpc.py:48"],
+      "status": "live",
+      "signature": "class JSONRPCNotification(BaseModel)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/jsonrpc.py#jsonrpc_message_adapter",
+      "parent": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "name": "jsonrpc_message_adapter",
+      "kind": "data",
+      "summary": "TypeAdapter for the JSONRPCMessage union; the entry point for decoding any inbound wire frame.",
+      "paths": ["src/mcp-types/mcp_types/jsonrpc.py:148"],
+      "status": "live",
+      "code": "JSONRPCMessage = JSONRPCRequest | JSONRPCNotification | JSONRPCResponse | JSONRPCError\njsonrpc_message_adapter: TypeAdapter[JSONRPCMessage] = TypeAdapter(JSONRPCMessage)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/methods.py",
+      "parent": "types.mcp-types-pkg",
+      "name": "Method registry",
+      "kind": "module",
+      "summary": "Per-version method maps (surface maps) and version-free method maps (monolith maps), plus two-step parse and serialize functions for every message direction.",
+      "detail": "CLIENT_REQUESTS, CLIENT_NOTIFICATIONS, SERVER_REQUESTS, SERVER_NOTIFICATIONS, SERVER_RESULTS, and CLIENT_RESULTS are MappingProxyType dicts keyed by (method, version) pointing to the per-revision surface class. MONOLITH_REQUESTS, MONOLITH_NOTIFICATIONS, and MONOLITH_RESULTS map method strings to the version-free mcp_types models. The parse_* functions first validate against the surface (catching version-gated methods and shape errors), then parse into the monolith model. serialize_server_result uses the surface to strip fields unknown to the negotiated version via extra='ignore'. CACHEABLE_METHODS and INPUT_REQUIRED_METHODS are derived from MONOLITH_RESULTS at import time.",
+      "paths": ["src/mcp-types/mcp_types/methods.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "Five protocol versions covered: 2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25, 2026-07-28",
+        "CACHEABLE_METHODS: {'prompts/list','resources/list','resources/read','resources/templates/list','server/discover','tools/list'}",
+        "INPUT_REQUIRED_METHODS: {'prompts/get','resources/read','tools/call'}",
+        "2026-07-28 SERVER_REQUESTS is empty (no server-to-client requests at that version)",
+        "_adapter() is @cache-memoized to avoid repeated TypeAdapter construction"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/methods.py#parse_client_request",
+      "parent": "f:src/mcp-types/mcp_types/methods.py",
+      "name": "parse_client_request()",
+      "kind": "function",
+      "summary": "Validate a client request against its per-version surface type, then parse and return the version-free monolith model.",
+      "paths": ["src/mcp-types/mcp_types/methods.py:504"],
+      "status": "live",
+      "signature": "def parse_client_request(method, version, params, *, surface=CLIENT_REQUESTS, monolith=MONOLITH_REQUESTS) -> types.Request",
+      "code": "def parse_client_request(\n    method: str, version: str, params: Mapping[str, Any] | None,\n    *, surface=CLIENT_REQUESTS, monolith=MONOLITH_REQUESTS,\n) -> types.Request[Any, Any]:\n    validate_client_request(method, version, params, surface=surface)\n    return _monolith_row(monolith, method).model_validate(\n        _body(method, params), by_name=False\n    )"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/methods.py#serialize_server_result",
+      "parent": "f:src/mcp-types/mcp_types/methods.py",
+      "name": "serialize_server_result()",
+      "kind": "function",
+      "summary": "Validate a result dict against the surface type for the given method and version, then dump it with version-appropriate field set (extra fields dropped).",
+      "paths": ["src/mcp-types/mcp_types/methods.py:634"],
+      "status": "live",
+      "signature": "def serialize_server_result(method, version, data, *, surface=SERVER_RESULTS) -> dict[str, Any]",
+      "code": "def serialize_server_result(\n    method: str, version: str, data: Mapping[str, Any],\n    *, surface=SERVER_RESULTS,\n) -> dict[str, Any]:\n    _check_known_version(version)\n    adapter = _adapter(surface[(method, version)])\n    return adapter.dump_python(\n        adapter.validate_python(data, by_name=False),\n        by_alias=True, mode=\"json\", exclude_none=True\n    )"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/methods.py#is_input_required",
+      "parent": "f:src/mcp-types/mcp_types/methods.py",
+      "name": "is_input_required()",
+      "kind": "function",
+      "summary": "TypeGuard returning True if a result object is an InputRequiredResult (typed or raw wire dict).",
+      "paths": ["src/mcp-types/mcp_types/methods.py:438"],
+      "status": "live",
+      "signature": "def is_input_required(result: object) -> TypeGuard[InputRequiredResult | dict]",
+      "code": "def is_input_required(result: object) -> TypeGuard[types.InputRequiredResult | dict[str, Any]]:\n    if isinstance(result, types.InputRequiredResult):\n        return True\n    return isinstance(result, Mapping) and cast(\n        \"Mapping[str, Any]\", result\n    ).get(\"resultType\") == \"input_required\""
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/methods.py#parse_server_result",
+      "parent": "f:src/mcp-types/mcp_types/methods.py",
+      "name": "parse_server_result()",
+      "kind": "function",
+      "summary": "Validate a server result dict against its surface type, then parse into the version-free monolith model.",
+      "paths": ["src/mcp-types/mcp_types/methods.py:675"],
+      "status": "live",
+      "signature": "def parse_server_result(method, version, data, *, surface=SERVER_RESULTS, monolith=MONOLITH_RESULTS) -> types.Result"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/methods.py#validate_client_request",
+      "parent": "f:src/mcp-types/mcp_types/methods.py",
+      "name": "validate_client_request()",
+      "kind": "function",
+      "summary": "Validate a client request against the surface only (no monolith parse); raises KeyError for version-gated methods.",
+      "paths": ["src/mcp-types/mcp_types/methods.py:486"],
+      "status": "live",
+      "signature": "def validate_client_request(method, version, params, *, surface=CLIENT_REQUESTS) -> None"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/version.py",
+      "parent": "types.mcp-types-pkg",
+      "name": "Protocol version registry",
+      "kind": "module",
+      "summary": "Enumerates every released MCP protocol revision, groups them by handshake vs. modern era, and provides is_version_at_least() for ordering comparisons.",
+      "detail": "KNOWN_PROTOCOL_VERSIONS is the master ordered tuple used for all ordering arithmetic. The is_version_at_least() function uses index-based comparison rather than string sorting to stay safe against non-date-shaped future revision identifiers. Unknown version strings return False conservatively. SUPPORTED_PROTOCOL_VERSIONS is kept as a deprecated alias of the full union for v1 compatibility.",
+      "paths": ["src/mcp-types/mcp_types/version.py"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": [
+        "KNOWN_PROTOCOL_VERSIONS: ('2024-11-05','2025-03-26','2025-06-18','2025-11-25','2026-07-28')",
+        "LATEST_PROTOCOL_VERSION = '2026-07-28'",
+        "LATEST_HANDSHAKE_VERSION = '2025-11-25'",
+        "LATEST_MODERN_VERSION = '2026-07-28'",
+        "OLDEST_SUPPORTED_VERSION = '2024-11-05'"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/version.py#is_version_at_least",
+      "parent": "f:src/mcp-types/mcp_types/version.py",
+      "name": "is_version_at_least()",
+      "kind": "function",
+      "summary": "Returns True if version is a known revision at least as new as minimum; unknown versions return False conservatively.",
+      "paths": ["src/mcp-types/mcp_types/version.py:63"],
+      "status": "live",
+      "signature": "def is_version_at_least(version: str, minimum: str) -> bool",
+      "code": "def is_version_at_least(version: str, minimum: str) -> bool:\n    if minimum not in KNOWN_PROTOCOL_VERSIONS:\n        raise ValueError(f\"minimum must be a known protocol version, got {minimum!r}\")\n    if version not in KNOWN_PROTOCOL_VERSIONS:\n        return False\n    return KNOWN_PROTOCOL_VERSIONS.index(version) >= KNOWN_PROTOCOL_VERSIONS.index(minimum)"
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_wire_base.py",
+      "parent": "types.mcp-types-pkg",
+      "name": "Wire model base",
+      "kind": "module",
+      "summary": "Defines WireModel, the shared Pydantic base for all generated surface type classes in _v2025_11_25 and _v2026_07_28.",
+      "detail": "WireModel enables populate_by_name=True; each generated subclass sets its own extra ('ignore') in its own ConfigDict. This is the only non-generated file in the _v* namespace boundary.",
+      "paths": ["src/mcp-types/mcp_types/_wire_base.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"]
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/_wire_base.py#WireModel",
+      "parent": "f:src/mcp-types/mcp_types/_wire_base.py",
+      "name": "WireModel",
+      "kind": "class",
+      "summary": "Base Pydantic model for generated wire types; sets populate_by_name=True; subclasses add extra='ignore'.",
+      "paths": ["src/mcp-types/mcp_types/_wire_base.py:6"],
+      "status": "live",
+      "signature": "class WireModel(BaseModel)"
+    },
+
+    {
+      "id": "d:src/mcp-types/mcp_types/_v2025_11_25",
+      "parent": "types.mcp-types-pkg",
+      "name": "Surface types v2025-11-25",
+      "kind": "module",
+      "summary": "Generated wire-shape Pydantic models for MCP protocol revision 2025-11-25; covers 2024-11-05 through 2025-11-25.",
+      "detail": "Generated by scripts/gen_surface_types.py from schema/2025-11-25.json (sha256 4e01628360a2149892eab8f298ceee626d24a58862184eb8ec85d95b8f353e31). Do not edit manually. Each class extends WireModel with extra='ignore' so unknown fields from newer versions are silently dropped during surface validation. Covers all four handshake-era protocol revisions. Contains all schema-exact shapes including JSONRPCResultResponse (the schema name for JSONRPCResponse) and per-method params classes. Approx 3,093 lines.",
+      "paths": ["src/mcp-types/mcp_types/_v2025_11_25/__init__.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "Generated; sha256 of source schema: 4e01628360a2149892eab8f298ceee626d24a58862184eb8ec85d95b8f353e31",
+        "All models set extra='ignore'",
+        "JSONRPCResponse named JSONRPCResultResponse in this module",
+        "Approx 3,093 lines"
+      ]
+    },
+
+    {
+      "id": "d:src/mcp-types/mcp_types/_v2026_07_28",
+      "parent": "types.mcp-types-pkg",
+      "name": "Surface types v2026-07-28",
+      "kind": "module",
+      "summary": "Generated wire-shape Pydantic models for MCP protocol revision 2026-07-28 (the stateless per-request-envelope era).",
+      "detail": "Generated by scripts/gen_surface_types.py from schema/2026-07-28.json (sha256 6293cdfe015c14bd36eda4b1331ce37bda377609e58ed6d09d16f28e7d3c7ad4). Do not edit manually. Contains AnyGetPromptResult, AnyReadResourceResult, AnyCallToolResult union aliases used in the SERVER_RESULTS map to allow InputRequiredResult as alternate arms. No ServerRequest union at this version. Approx 3,321 lines.",
+      "paths": ["src/mcp-types/mcp_types/_v2026_07_28/__init__.py"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "facts": [
+        "Generated; sha256 of source schema: 6293cdfe015c14bd36eda4b1331ce37bda377609e58ed6d09d16f28e7d3c7ad4",
+        "Introduces AnyGetPromptResult, AnyReadResourceResult, AnyCallToolResult union aliases",
+        "No ServerRequest entries (2026-07-28 has no server-to-client requests)",
+        "Approx 3,321 lines"
+      ]
+    },
+
+    {
+      "id": "f:src/mcp-types/mcp_types/__init__.py",
+      "parent": "types.mcp-types-pkg",
+      "name": "mcp_types public API",
+      "kind": "module",
+      "summary": "Public API surface for mcp_types: re-exports all names from _types.py, jsonrpc.py, and version.py into one flat namespace via __all__.",
+      "detail": "This module imports everything from mcp_types._types, mcp_types.jsonrpc, and mcp_types.version and declares a comprehensive __all__ with 150+ names grouped by category. The __all__ list is the contract: adding a name here is a deliberate API decision. Users import `from mcp_types import Tool` or `import mcp_types as types`.",
+      "paths": ["src/mcp-types/mcp_types/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/types/__init__.py",
+      "parent": "types.mcp-types-shim",
+      "name": "mcp.types namespace",
+      "kind": "module",
+      "summary": "Wildcard re-export of mcp_types into the mcp.types namespace for v1 backward compatibility; also binds the jsonrpc, methods, and version submodules as attributes.",
+      "detail": "Does `from mcp_types import *` and re-exports __all__. Additionally imports the three mirror submodules (jsonrpc, methods, version) so `mcp.types.version.X` resolves by attribute access as well as import. No logic.",
+      "paths": ["src/mcp/types/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/types/jsonrpc.py",
+      "parent": "types.mcp-types-shim",
+      "name": "mcp.types.jsonrpc shim",
+      "kind": "module",
+      "summary": "Wildcard mirror of mcp_types.jsonrpc into the mcp.types.jsonrpc namespace.",
+      "detail": "Does `from mcp_types.jsonrpc import *` and re-exports __all__. No new logic. Exists so code that imports `mcp` can write `from mcp.types.jsonrpc import JSONRPCRequest` without taking a direct dependency on the mcp-types distribution.",
+      "paths": ["src/mcp/types/jsonrpc.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/types/methods.py",
+      "parent": "types.mcp-types-shim",
+      "name": "mcp.types.methods shim",
+      "kind": "module",
+      "summary": "Wildcard mirror of mcp_types.methods into the mcp.types.methods namespace.",
+      "detail": "Does `from mcp_types.methods import *` and re-exports __all__. No new logic. Allows `from mcp.types.methods import parse_client_request` without a direct mcp-types dependency.",
+      "paths": ["src/mcp/types/methods.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp/types/version.py",
+      "parent": "types.mcp-types-shim",
+      "name": "mcp.types.version shim",
+      "kind": "module",
+      "summary": "Wildcard mirror of mcp_types.version into the mcp.types.version namespace.",
+      "detail": "Does `from mcp_types.version import *` and re-exports __all__. No new logic. Allows `from mcp.types.version import LATEST_MODERN_VERSION` without a direct mcp-types dependency.",
+      "paths": ["src/mcp/types/version.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:src/mcp-types/pyproject.toml",
+      "parent": "types.mcp-types-pkg",
+      "name": "mcp-types package config",
+      "kind": "config",
+      "summary": "Package manifest for the standalone mcp-types distribution: Python 3.11-3.15, pydantic>=2.12/2.14, typing-extensions>=4.13.",
+      "paths": ["src/mcp-types/pyproject.toml"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": [
+        "requires-python = '>=3.11'",
+        "pydantic>=2.14.0 for Python 3.15+; pydantic>=2.12.0 otherwise",
+        "typing-extensions>=4.13.0",
+        "Build backend: hatchling + uv-dynamic-versioning"
+      ]
+    },
+
+    {
+      "id": "f:tests/test_types.py",
+      "parent": "types",
+      "name": "Top-level types tests",
+      "kind": "test",
+      "summary": "Exercises public types from the mcp_types namespace (top-level tests/test_types.py).",
+      "paths": ["tests/test_types.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:tests/types/test_methods.py",
+      "parent": "types",
+      "name": "Method registry tests",
+      "kind": "test",
+      "summary": "Verifies surface maps, monolith maps, parse_* and serialize_* functions against expected method sets per version.",
+      "paths": ["tests/types/test_methods.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:tests/types/test_version.py",
+      "parent": "types",
+      "name": "Version registry tests",
+      "kind": "test",
+      "summary": "Tests is_version_at_least() and the protocol version constants in mcp_types.version.",
+      "paths": ["tests/types/test_version.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:tests/types/test_parity.py",
+      "parent": "types",
+      "name": "Surface-monolith parity tests",
+      "kind": "test",
+      "summary": "Asserts every per-version surface model's wire fields are a subset of its mcp_types superset counterpart.",
+      "paths": ["tests/types/test_parity.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:tests/types/test_wire_frames.py",
+      "parent": "types",
+      "name": "Wire frame round-trip tests",
+      "kind": "test",
+      "summary": "Round-trip tests for JSONRPCMessage encoding and decoding via jsonrpc_message_adapter.",
+      "paths": ["tests/types/test_wire_frames.py"],
+      "status": "live"
+    },
+
+    {
+      "id": "f:tests/types/test_request_name_param.py",
+      "parent": "types",
+      "name": "Request name_param tests",
+      "kind": "test",
+      "summary": "Tests the ClassVar name_param mechanism on Request subclasses used for the Mcp-Name header (SEP-2663).",
+      "paths": ["tests/types/test_request_name_param.py"],
+      "status": "live"
+    }
+
+  ],
+  "edges": [
+
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "extends BaseModel with camelCase config",
+      "evidence": "src/mcp-types/mcp_types/_types.py:46"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py",
+      "to": "x:mcp-spec",
+      "kind": "reads",
+      "label": "implements MCP wire protocol spec",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel",
+      "evidence": "src/mcp-types/mcp_types/_types.py:128"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#Result",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel",
+      "evidence": "src/mcp-types/mcp_types/_types.py:174"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#CacheableResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Result",
+      "kind": "calls",
+      "label": "extends Result",
+      "evidence": "src/mcp-types/mcp_types/_types.py:198"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#InputRequiredResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Result",
+      "kind": "calls",
+      "label": "extends Result with model_validator",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2078"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#CallToolResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Result",
+      "kind": "calls",
+      "label": "extends Result",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1467"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ReadResourceResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#CacheableResult",
+      "kind": "calls",
+      "label": "extends CacheableResult",
+      "evidence": "src/mcp-types/mcp_types/_types.py:935"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ListToolsResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#CacheableResult",
+      "kind": "calls",
+      "label": "extends CacheableResult + PaginatedResult",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1444"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#DiscoverResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#CacheableResult",
+      "kind": "calls",
+      "label": "extends CacheableResult",
+      "evidence": "src/mcp-types/mcp_types/_types.py:597"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#Tool",
+      "to": "f:src/mcp-types/mcp_types/_types.py#BaseMetadata",
+      "kind": "calls",
+      "label": "extends BaseMetadata",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1415"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#Resource",
+      "to": "f:src/mcp-types/mcp_types/_types.py#BaseMetadata",
+      "kind": "calls",
+      "label": "extends BaseMetadata",
+      "evidence": "src/mcp-types/mcp_types/_types.py:797"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#Prompt",
+      "to": "f:src/mcp-types/mcp_types/_types.py#BaseMetadata",
+      "kind": "calls",
+      "label": "extends BaseMetadata",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1116"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#Implementation",
+      "to": "f:src/mcp-types/mcp_types/_types.py#BaseMetadata",
+      "kind": "calls",
+      "label": "extends BaseMetadata",
+      "evidence": "src/mcp-types/mcp_types/_types.py:269"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py#parse_client_request",
+      "to": "f:src/mcp-types/mcp_types/methods.py#validate_client_request",
+      "kind": "calls",
+      "label": "surface-validates before monolith parse",
+      "evidence": "src/mcp-types/mcp_types/methods.py:527"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py#parse_server_result",
+      "to": "f:src/mcp-types/mcp_types/methods.py#serialize_server_result",
+      "kind": "calls",
+      "label": "surface-validates via serialize helper",
+      "evidence": "src/mcp-types/mcp_types/methods.py:698"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py",
+      "to": "d:src/mcp-types/mcp_types/_v2025_11_25",
+      "kind": "reads",
+      "label": "imports v2025 surface types for method maps",
+      "evidence": "src/mcp-types/mcp_types/methods.py:21"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py",
+      "to": "d:src/mcp-types/mcp_types/_v2026_07_28",
+      "kind": "reads",
+      "label": "imports v2026 surface types for method maps",
+      "evidence": "src/mcp-types/mcp_types/methods.py:22"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py",
+      "to": "f:src/mcp-types/mcp_types/version.py",
+      "kind": "reads",
+      "label": "reads KNOWN_PROTOCOL_VERSIONS for version gate",
+      "evidence": "src/mcp-types/mcp_types/methods.py:23"
+    },
+    {
+      "from": "d:src/mcp-types/mcp_types/_v2025_11_25",
+      "to": "f:src/mcp-types/mcp_types/_wire_base.py#WireModel",
+      "kind": "calls",
+      "label": "all generated classes extend WireModel",
+      "evidence": "src/mcp-types/mcp_types/_v2025_11_25/__init__.py:11"
+    },
+    {
+      "from": "d:src/mcp-types/mcp_types/_v2026_07_28",
+      "to": "f:src/mcp-types/mcp_types/_wire_base.py#WireModel",
+      "kind": "calls",
+      "label": "all generated classes extend WireModel",
+      "evidence": "src/mcp-types/mcp_types/_v2026_07_28/__init__.py:11"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/__init__.py",
+      "to": "f:src/mcp-types/mcp_types/_types.py",
+      "kind": "reads",
+      "label": "re-exports all names as public API",
+      "evidence": "src/mcp-types/mcp_types/__init__.py:8"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/__init__.py",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "kind": "reads",
+      "label": "re-exports JSON-RPC types",
+      "evidence": "src/mcp-types/mcp_types/__init__.py:201"
+    },
+    {
+      "from": "f:src/mcp/types/__init__.py",
+      "to": "f:src/mcp-types/mcp_types/__init__.py",
+      "kind": "reads",
+      "label": "wildcard re-export for mcp.types namespace",
+      "evidence": "src/mcp/types/__init__.py:23"
+    },
+    {
+      "from": "f:src/mcp/types/jsonrpc.py",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "kind": "reads",
+      "label": "wildcard mirror of mcp_types.jsonrpc",
+      "evidence": "src/mcp/types/jsonrpc.py:12"
+    },
+    {
+      "from": "f:src/mcp/types/methods.py",
+      "to": "f:src/mcp-types/mcp_types/methods.py",
+      "kind": "reads",
+      "label": "wildcard mirror of mcp_types.methods",
+      "evidence": "src/mcp/types/methods.py:12"
+    },
+    {
+      "from": "f:src/mcp/types/version.py",
+      "to": "f:src/mcp-types/mcp_types/version.py",
+      "kind": "reads",
+      "label": "wildcard mirror of mcp_types.version",
+      "evidence": "src/mcp/types/version.py:12"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/jsonrpc.py#jsonrpc_message_adapter",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "builds TypeAdapter for JSONRPCMessage union",
+      "evidence": "src/mcp-types/mcp_types/jsonrpc.py:148"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py#parse_client_request",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ClientRequest",
+      "kind": "reads",
+      "label": "returns monolith ClientRequest model instance",
+      "evidence": "src/mcp-types/mcp_types/methods.py:528"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py#serialize_server_result",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ServerResult",
+      "kind": "reads",
+      "label": "validates against surface then drops extra fields",
+      "evidence": "src/mcp-types/mcp_types/methods.py:651"
+    },
+    {
+      "from": "f:tests/types/test_methods.py",
+      "to": "f:src/mcp-types/mcp_types/methods.py",
+      "kind": "tests",
+      "label": "tests surface maps and parse functions",
+      "evidence": "tests/types/test_methods.py:1"
+    },
+    {
+      "from": "f:tests/types/test_version.py",
+      "to": "f:src/mcp-types/mcp_types/version.py",
+      "kind": "tests",
+      "label": "tests version constants and is_version_at_least",
+      "evidence": "tests/types/test_version.py:1"
+    },
+    {
+      "from": "f:tests/types/test_parity.py",
+      "to": "f:src/mcp-types/mcp_types/_types.py",
+      "kind": "tests",
+      "label": "asserts surface field subset of monolith superset",
+      "evidence": "tests/types/test_parity.py:1"
+    },
+    {
+      "from": "f:tests/types/test_wire_frames.py",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "kind": "tests",
+      "label": "round-trip tests via jsonrpc_message_adapter",
+      "evidence": "tests/types/test_wire_frames.py:1"
+    },
+    {
+      "from": "f:tests/types/test_request_name_param.py",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "tests",
+      "label": "tests ClassVar name_param on Request subclasses",
+      "evidence": "tests/types/test_request_name_param.py:1"
+    },
+    {
+      "from": "f:tests/test_types.py",
+      "to": "f:src/mcp-types/mcp_types/__init__.py",
+      "kind": "tests",
+      "label": "exercises public mcp_types API",
+      "evidence": "tests/test_types.py:1"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py",
+      "kind": "reads",
+      "label": "imports RequestId for use in _meta params",
+      "evidence": "src/mcp-types/mcp_types/_types.py:24"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ClientCapabilities",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel with extra=allow",
+      "evidence": "src/mcp-types/mcp_types/_types.py:389"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ServerCapabilities",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel with extra=allow",
+      "evidence": "src/mcp-types/mcp_types/_types.py:487"
+    },
+    {
+      "from": "f:src/mcp/types/__init__.py",
+      "to": "shared",
+      "kind": "calls",
+      "label": "consumed by mcp.__init__ re-export",
+      "evidence": "src/mcp/types/__init__.py:23"
+    },
+
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#Notification",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel",
+      "evidence": "src/mcp-types/mcp_types/_types.py:153"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#InitializeRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "calls",
+      "label": "extends Request[InitializeRequestParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:531"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#InitializeResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Result",
+      "kind": "calls",
+      "label": "extends Result; carries ServerCapabilities",
+      "evidence": "src/mcp-types/mcp_types/_types.py:543"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#InitializeResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ServerCapabilities",
+      "kind": "reads",
+      "label": "capabilities field is ServerCapabilities",
+      "evidence": "src/mcp-types/mcp_types/_types.py:552"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#InitializeRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#InitializeResult",
+      "kind": "reads",
+      "label": "request/result pair for initialize handshake",
+      "evidence": "src/mcp-types/mcp_types/_types.py:531-554"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#DiscoverRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "calls",
+      "label": "extends Request[RequestParams | None]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:584"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#DiscoverRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#DiscoverResult",
+      "kind": "reads",
+      "label": "request/result pair for server/discover",
+      "evidence": "src/mcp-types/mcp_types/_types.py:584-611"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#CallToolRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "calls",
+      "label": "extends Request[CallToolRequestParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1460"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#CallToolRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#CallToolResult",
+      "kind": "reads",
+      "label": "request/result pair for tools/call",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1460-1489"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ReadResourceRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "calls",
+      "label": "extends Request[ReadResourceRequestParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:897"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ReadResourceRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ReadResourceResult",
+      "kind": "reads",
+      "label": "request/result pair for resources/read",
+      "evidence": "src/mcp-types/mcp_types/_types.py:897-942"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#GetPromptResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Result",
+      "kind": "calls",
+      "label": "extends Result; messages field holds list[PromptMessage]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1337"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#GetPromptResult",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ContentBlock",
+      "kind": "reads",
+      "label": "PromptMessage.content is ContentBlock",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1334"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#TextContent",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel; type discriminator 'text'",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1154"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#TextContent",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ContentBlock",
+      "kind": "reads",
+      "label": "TextContent is a member of ContentBlock union",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1323"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ImageContent",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel; type discriminator 'image'",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1169"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ImageContent",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ContentBlock",
+      "kind": "reads",
+      "label": "ImageContent is a member of ContentBlock union",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1323"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#AudioContent",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel; type discriminator 'audio'",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1186"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#AudioContent",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ContentBlock",
+      "kind": "reads",
+      "label": "AudioContent is a member of ContentBlock union",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1323"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#EmbeddedResource",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel; type discriminator 'resource'",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1296"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#EmbeddedResource",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ContentBlock",
+      "kind": "reads",
+      "label": "EmbeddedResource is a member of ContentBlock union",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1323"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ContentBlock",
+      "to": "f:src/mcp-types/mcp_types/_types.py#CallToolResult",
+      "kind": "reads",
+      "label": "CallToolResult.content is list[ContentBlock]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1476"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ClientNotification",
+      "to": "f:src/mcp-types/mcp_types/_types.py#CancelledNotification",
+      "kind": "reads",
+      "label": "CancelledNotification member of ClientNotification",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2138"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ClientNotification",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ProgressNotification",
+      "kind": "reads",
+      "label": "ProgressNotification is a member of ClientNotification union",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2138"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ServerNotification",
+      "to": "f:src/mcp-types/mcp_types/_types.py#CancelledNotification",
+      "kind": "reads",
+      "label": "CancelledNotification member of ServerNotification",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2163"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ServerNotification",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ProgressNotification",
+      "kind": "reads",
+      "label": "ProgressNotification is a member of ServerNotification union",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2163"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ElicitRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "calls",
+      "label": "extends Request[ElicitRequestParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2009"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ElicitRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#InputRequiredResult",
+      "kind": "reads",
+      "label": "embedded in InputRequiredResult.input_requests on 2026-07-28",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2049"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#CreateMessageRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "calls",
+      "label": "extends Request[CreateMessageRequestParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1678"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#CreateMessageRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#SamplingMessage",
+      "kind": "reads",
+      "label": "CreateMessageRequestParams.messages is list[SamplingMessage]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1640"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#SubscriptionsListenRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "calls",
+      "label": "extends Request[SubscriptionsListenRequestParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1057"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#SubscriptionsListenRequest",
+      "to": "f:src/mcp-types/mcp_types/_types.py#ClientRequest",
+      "kind": "reads",
+      "label": "member of ClientRequest union",
+      "evidence": "src/mcp-types/mcp_types/_types.py:2128"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#SamplingMessage",
+      "to": "f:src/mcp-types/mcp_types/_types.py#MCPModel",
+      "kind": "calls",
+      "label": "extends MCPModel; holds role + SamplingMessageContentBlock",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1274"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#RequestParamsMeta",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Request",
+      "kind": "reads",
+      "label": "carried in RequestParams._meta on all requests",
+      "evidence": "src/mcp-types/mcp_types/_types.py:97"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ToolAnnotations",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Tool",
+      "kind": "reads",
+      "label": "Tool.annotations field is ToolAnnotations",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1437"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#ProgressNotification",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Notification",
+      "kind": "calls",
+      "label": "extends Notification[ProgressNotificationParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:770"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/_types.py#CancelledNotification",
+      "to": "f:src/mcp-types/mcp_types/_types.py#Notification",
+      "kind": "calls",
+      "label": "extends Notification[CancelledNotificationParams]",
+      "evidence": "src/mcp-types/mcp_types/_types.py:1911"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCRequest",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py#jsonrpc_message_adapter",
+      "kind": "reads",
+      "label": "member of JSONRPCMessage union",
+      "evidence": "src/mcp-types/mcp_types/jsonrpc.py:145"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCResponse",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py#jsonrpc_message_adapter",
+      "kind": "reads",
+      "label": "member of JSONRPCMessage union",
+      "evidence": "src/mcp-types/mcp_types/jsonrpc.py:145"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCError",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py#jsonrpc_message_adapter",
+      "kind": "reads",
+      "label": "member of JSONRPCMessage union",
+      "evidence": "src/mcp-types/mcp_types/jsonrpc.py:145"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCNotification",
+      "to": "f:src/mcp-types/mcp_types/jsonrpc.py#jsonrpc_message_adapter",
+      "kind": "reads",
+      "label": "member of JSONRPCMessage union",
+      "evidence": "src/mcp-types/mcp_types/jsonrpc.py:145"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/methods.py#is_input_required",
+      "to": "f:src/mcp-types/mcp_types/_types.py#InputRequiredResult",
+      "kind": "reads",
+      "label": "TypeGuard checks isinstance against InputRequiredResult",
+      "evidence": "src/mcp-types/mcp_types/methods.py:438"
+    },
+    {
+      "from": "f:src/mcp-types/mcp_types/version.py#is_version_at_least",
+      "to": "f:src/mcp-types/mcp_types/version.py",
+      "kind": "reads",
+      "label": "index lookup in KNOWN_PROTOCOL_VERSIONS",
+      "evidence": "src/mcp-types/mcp_types/version.py:63"
+    }
+
+  ],
+  "flows": [
+
+    {
+      "id": "flow.types.jsonrpc-to-typed",
+      "name": "Raw JSON-RPC request validated into a typed model",
+      "summary": "An inbound JSON bytes frame is decoded, the method is looked up in the per-version surface map, validated, and returned as a monolith model.",
+      "steps": [
+        {
+          "node": "f:src/mcp-types/mcp_types/jsonrpc.py#jsonrpc_message_adapter",
+          "text": "The session layer calls jsonrpc_message_adapter.validate_json() on the raw bytes. The TypeAdapter dispatches on the presence of an 'id' field to pick JSONRPCRequest vs JSONRPCNotification."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/methods.py#validate_client_request",
+          "text": "The session extracts method and params from the envelope, then calls validate_client_request(method, version, params). A KeyError here means the method is not valid for the negotiated version; pydantic.ValidationError means the params shape is wrong."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/methods.py#parse_client_request",
+          "text": "If validation passes, parse_client_request() re-runs the surface check and then parses into the monolith row: a concrete CallToolRequest, GetPromptRequest, etc. that the handler receives."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/_types.py#ClientRequest",
+          "text": "The returned instance is a member of the ClientRequest union. The session dispatches it to the appropriate handler by its method literal."
+        }
+      ]
+    },
+
+    {
+      "id": "flow.types.result-serialized",
+      "name": "Handler result serialized back to wire format",
+      "summary": "A monolith result object from a handler is validated and serialized to a version-appropriate wire dict for the JSONRPCResponse envelope.",
+      "steps": [
+        {
+          "node": "f:src/mcp-types/mcp_types/_types.py#ServerResult",
+          "text": "The handler returns a typed result such as CallToolResult or InputRequiredResult. These are members of ServerResult."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/methods.py#serialize_server_result",
+          "text": "serialize_server_result(method, version, result.model_dump()) looks up the surface class for (method, version) in SERVER_RESULTS, re-validates, and dumps with by_alias=True and exclude_none=True. Fields added in later versions are silently dropped by extra='ignore' in the surface class."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/jsonrpc.py#JSONRPCResponse",
+          "text": "The resulting dict is placed into a JSONRPCResponse(jsonrpc='2.0', id=request_id, result=...) and serialized to bytes for the transport."
+        }
+      ]
+    },
+
+    {
+      "id": "flow.types.version-negotiation",
+      "name": "Protocol version negotiation",
+      "summary": "On connection setup the client and server agree on a protocol version, which is then used as the key for all subsequent method map lookups.",
+      "steps": [
+        {
+          "node": "f:src/mcp-types/mcp_types/version.py",
+          "text": "The client's offered version string is checked against KNOWN_PROTOCOL_VERSIONS. is_version_at_least() determines whether the client supports the server's minimum requirement."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/_types.py#InitializeRequest",
+          "text": "For handshake-era sessions (through 2025-11-25), the client sends InitializeRequest with protocol_version and capabilities. The server responds with InitializeResult carrying the agreed version."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/_types.py#DiscoverRequest",
+          "text": "For the modern era (2026-07-28), the client may send DiscoverRequest first. The server's DiscoverResult carries supported_versions; the client picks one and stamps it on subsequent requests via the _meta PROTOCOL_VERSION_META_KEY."
+        },
+        {
+          "node": "f:src/mcp-types/mcp_types/methods.py",
+          "text": "Once the version is agreed, all method map lookups use (method, negotiated_version). A missing key is a valid version gate: the method is not allowed in this revision."
+        }
+      ]
+    }
+
+  ]
+}

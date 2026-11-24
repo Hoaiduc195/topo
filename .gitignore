@@ -5,3 +5,4 @@ node_modules/
 
 # logo drafts and AI concepts, kept local (brand/contour_logo.py and final_logo.py write here)
 brand/explorations/
+gallery/*/topo-data.json

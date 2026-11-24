@@ -1,0 +1,67 @@
+{
+ "title": "hono",
+ "generated": "24 November 2026",
+ "repos": [
+  {
+   "key": "app:hono",
+   "name": "hono",
+   "url": "https://github.com/honojs/hono",
+   "commit": "79f23af6080ad49f35f9e4fd1a4d9becb63c552f",
+   "note": "mapped from its source code (honojs/hono main, last commit 2026-11-24)."
+  }
+ ],
+ "regions": [
+  {
+   "id": "app:hono",
+   "rect": [
+    0,
+    0,
+    2600,
+    1000
+   ],
+   "hue": 262,
+   "sat": 40
+  },
+  {
+   "id": "ext",
+   "rect": [
+    0,
+    1100,
+    2600,
+    1420
+   ],
+   "hue": 212,
+   "sat": 14
+  }
+ ],
+ "apps": {
+  "app:hono": {
+   "provenance": "Mapped from source · November 2026"
+  }
+ },
+ "owners": [
+  ["src/router/", "hono.router"],
+  ["src/router.ts", "hono.router"],
+  ["src/middleware/", "hono.middleware"],
+  ["src/helper/", "hono.helpers"],
+  ["src/client/", "hono.helpers"],
+  ["src/utils/", "hono.utils"],
+  ["src/jsx/", "hono.jsx"],
+  ["src/adapter/", "hono.adapters"],
+  ["adapters/", "hono.adapters"],
+  ["src/validator/", "hono.core"],
+  ["src/preset/", "hono.core"],
+  ["src/", "hono.core"]
+ ],
+ "endpoint_fallback": {},
+ "prefix_fallback": {},
+ "area_names": {
+  "core": "Core & lifecycle",
+  "middleware": "Middleware",
+  "helpers": "Helpers & RPC",
+  "utils": "Utilities",
+  "jsx": "JSX",
+  "adapters": "Adapters"
+ },
+ "depth": "standard"
+}

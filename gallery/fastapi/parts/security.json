@@ -1,0 +1,848 @@
+{
+  "area": "security",
+  "nodes": [
+
+    {
+      "id": "security.pkg",
+      "parent": "fastapi.security",
+      "name": "Security package",
+      "kind": "group",
+      "summary": "Public re-exports from the security sub-package: all scheme classes, credential models and SecurityScopes.",
+      "detail": "fastapi/security/__init__.py re-exports every public name from the five implementation modules so callers import from fastapi.security without knowing the sub-module layout. The file contains no logic; it is a pure namespace aggregator. 15 names are exported in alphabetical order.",
+      "paths": ["fastapi/security/__init__.py"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:fastapi/security/base.py",
+      "parent": "security.pkg",
+      "name": "SecurityBase module",
+      "kind": "module",
+      "summary": "Defines the SecurityBase abstract base that every scheme class inherits.",
+      "detail": "Three lines: imports SecurityBase (the Pydantic model from fastapi.openapi.models) and declares the SecurityBase class with two class-level annotations: model (a SecurityBaseModel instance) and scheme_name (str). No __init__, no __call__. Concrete subclasses fill both attributes during construction. The dependency injection engine in fastapi/dependencies/models.py uses isinstance(obj, SecurityBase) to detect security dependencies and read their .model and .scheme_name.",
+      "paths": ["fastapi/security/base.py:1-7"],
+      "status": "live",
+      "tech": ["Python"]
+    },
+
+    {
+      "id": "f:fastapi/security/base.py#SecurityBase",
+      "parent": "f:fastapi/security/base.py",
+      "name": "SecurityBase",
+      "kind": "class",
+      "summary": "Abstract marker class every scheme inherits; carries a SecurityScheme model and a scheme name.",
+      "detail": "SecurityBase is intentionally minimal: it declares class-level annotations model (typed as SecurityBaseModel, the base OpenAPI security model) and scheme_name (str) but provides no implementation. Concrete subclasses assign self.model in their __init__ and self.scheme_name defaults to the class name. The openapi utils layer detects instances of this class via _is_security_scheme and reads .model to build the OpenAPI securitySchemes section.",
+      "paths": ["fastapi/security/base.py:4-6"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class SecurityBase",
+      "code": "from fastapi.openapi.models import SecurityBase as SecurityBaseModel\n\n\nclass SecurityBase:\n    model: SecurityBaseModel\n    scheme_name: str"
+    },
+
+    {
+      "id": "f:fastapi/security/utils.py",
+      "parent": "security.pkg",
+      "name": "Header parsing utility",
+      "kind": "module",
+      "summary": "One utility function that splits an HTTP Authorization header value into scheme and parameter.",
+      "detail": "get_authorization_scheme_param takes the raw Authorization header string and returns a (scheme, param) tuple by splitting on the first space using str.partition. Returns ('', '') when the input is None or empty. Used by OAuth2PasswordBearer, OAuth2AuthorizationCodeBearer, HTTPBase, HTTPBearer, HTTPBasic, and HTTPDigest to avoid repeating the same two lines of parsing.",
+      "paths": ["fastapi/security/utils.py:1-7"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": ["Returns ('', '') for a None or empty header"]
+    },
+
+    {
+      "id": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+      "parent": "f:fastapi/security/utils.py",
+      "name": "get_authorization_scheme_param()",
+      "kind": "function",
+      "summary": "Splits an Authorization header value on the first space and returns (scheme, param).",
+      "detail": "Uses str.partition(' ') so only the first space is the delimiter; everything after is the credential parameter (stripped). Returns empty strings when the header is absent. Called by all HTTP Authorization header-based scheme classes to extract the scheme token before comparing it to 'bearer', 'basic', or 'digest'.",
+      "paths": ["fastapi/security/utils.py:1-7"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def get_authorization_scheme_param(authorization_header_value: str | None) -> tuple[str, str]",
+      "code": "def get_authorization_scheme_param(\n    authorization_header_value: str | None,\n) -> tuple[str, str]:\n    if not authorization_header_value:\n        return \"\", \"\"\n    scheme, _, param = authorization_header_value.partition(\" \")\n    return scheme, param.strip()"
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py",
+      "parent": "security.pkg",
+      "name": "OAuth2 schemes",
+      "kind": "module",
+      "summary": "OAuth 2.0 scheme classes, password-flow request form dependencies, and SecurityScopes.",
+      "detail": "Defines six public classes. OAuth2 is the base callable dependency. OAuth2PasswordBearer and OAuth2AuthorizationCodeBearer are the two Bearer-token scheme subclasses used most often. OAuth2PasswordRequestForm and OAuth2PasswordRequestFormStrict are plain dependency classes (not SecurityBase subclasses) that collect form fields for the password endpoint. SecurityScopes is a special injectable that aggregates the OAuth2 scopes required by the dependency chain. All imports from starlette.status use HTTP_401_UNAUTHORIZED (status 401).",
+      "paths": ["fastapi/security/oauth2.py"],
+      "status": "live",
+      "tech": ["Python", "FastAPI"],
+      "facts": [
+        "OAuth2 __call__ returns the raw Authorization header value, not the parsed token",
+        "OAuth2PasswordBearer __call__ returns only the param part after 'Bearer'",
+        "auto_error=True raises 401; auto_error=False returns None for missing credentials",
+        "OAuth2PasswordRequestFormStrict enforces grant_type='password' via Form(pattern='^password$')",
+        "OAuth2PasswordRequestForm treats grant_type as optional (None allowed)"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py#OAuth2",
+      "parent": "f:fastapi/security/oauth2.py",
+      "name": "OAuth2",
+      "kind": "class",
+      "summary": "Base OAuth 2.0 callable dependency; extracts the Authorization header and raises 401 when absent.",
+      "detail": "Stores an OAuth2Model (the Pydantic OpenAPI model) and auto_error flag. __call__ reads request.headers.get('Authorization'); if the header is absent and auto_error is True it calls make_not_authenticated_error() and raises; otherwise returns None. Returns the raw header string when present. Subclasses override __call__ to additionally parse and validate the scheme token.",
+      "paths": ["fastapi/security/oauth2.py:330-430"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class OAuth2(SecurityBase)",
+      "code": "    async def __call__(self, request: HTTPConnection) -> str | None:\n        authorization = request.headers.get(\"Authorization\")\n        if not authorization:\n            if self.auto_error:\n                raise self.make_not_authenticated_error()\n            else:\n                return None\n        return authorization"
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py#OAuth2.make_not_authenticated_error",
+      "parent": "f:fastapi/security/oauth2.py#OAuth2",
+      "name": "OAuth2.make_not_authenticated_error()",
+      "kind": "function",
+      "summary": "Builds and returns a 401 HTTPException with WWW-Authenticate: Bearer header.",
+      "detail": "Returns HTTPException(status_code=401, detail='Not authenticated', headers={'WWW-Authenticate': 'Bearer'}). The docstring notes that RFC 6749 does not define the challenge for OAuth 2.0 and that Bearer is used as a practical default; subclasses may override this method to supply a different challenge.",
+      "paths": ["fastapi/security/oauth2.py:401-421"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "def make_not_authenticated_error(self) -> HTTPException"
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py#OAuth2PasswordBearer",
+      "parent": "f:fastapi/security/oauth2.py",
+      "name": "OAuth2PasswordBearer",
+      "kind": "class",
+      "summary": "OAuth2 password-flow Bearer scheme: reads Authorization header and returns the token string.",
+      "detail": "Builds an OAuthFlowsModel with a password sub-object containing tokenUrl, optional refreshUrl and scopes. __call__ calls get_authorization_scheme_param to split the Authorization header; if the scheme is not 'bearer' it raises 401 (or returns None when auto_error is False); otherwise it returns the credential parameter (the raw token string). This is the most commonly used scheme in FastAPI tutorials.",
+      "paths": ["fastapi/security/oauth2.py:433-544"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class OAuth2PasswordBearer(OAuth2)",
+      "code": "    async def __call__(self, request: HTTPConnection) -> str | None:\n        authorization = request.headers.get(\"Authorization\")\n        scheme, param = get_authorization_scheme_param(authorization)\n        if not authorization or scheme.lower() != \"bearer\":\n            if self.auto_error:\n                raise self.make_not_authenticated_error()\n            else:\n                return None\n        return param"
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py#OAuth2AuthorizationCodeBearer",
+      "parent": "f:fastapi/security/oauth2.py",
+      "name": "OAuth2AuthorizationCodeBearer",
+      "kind": "class",
+      "summary": "OAuth2 authorization-code-flow Bearer scheme: reads Authorization header and returns the token.",
+      "detail": "Builds an OAuthFlowsModel with an authorizationCode sub-object (authorizationUrl, tokenUrl, optional refreshUrl and scopes). __call__ is structurally identical to OAuth2PasswordBearer.__call__: splits the Authorization header, checks for 'bearer' scheme, raises 401 or returns None on failure, returns the credential parameter on success. The only difference from OAuth2PasswordBearer is the flow description embedded in the OpenAPI model.",
+      "paths": ["fastapi/security/oauth2.py:547-650"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class OAuth2AuthorizationCodeBearer(OAuth2)",
+      "code": "    async def __call__(self, request: HTTPConnection) -> str | None:\n        authorization = request.headers.get(\"Authorization\")\n        scheme, param = get_authorization_scheme_param(authorization)\n        if not authorization or scheme.lower() != \"bearer\":\n            if self.auto_error:\n                raise self.make_not_authenticated_error()\n            else:\n                return None  # pragma: nocover\n        return param"
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py#OAuth2PasswordRequestForm",
+      "parent": "f:fastapi/security/oauth2.py",
+      "name": "OAuth2PasswordRequestForm",
+      "kind": "class",
+      "summary": "Dependency class that collects username, password and scope as form fields for a password-flow token endpoint.",
+      "detail": "Not a SecurityBase subclass; it is used as a Depends() on the token-issuing POST endpoint, not on guarded endpoints. Collects grant_type (optional, pattern '^password$'), username (required), password (required, format: password), scope (space-separated string, default ''), client_id and client_secret (both optional). The __init__ splits scope on spaces into self.scopes (list).",
+      "paths": ["fastapi/security/oauth2.py:14-159"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class OAuth2PasswordRequestForm",
+      "code": "        self.grant_type = grant_type\n        self.username = username\n        self.password = password\n        self.scopes = scope.split()\n        self.client_id = client_id\n        self.client_secret = client_secret"
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py#OAuth2PasswordRequestFormStrict",
+      "parent": "f:fastapi/security/oauth2.py",
+      "name": "OAuth2PasswordRequestFormStrict",
+      "kind": "class",
+      "summary": "Stricter variant of OAuth2PasswordRequestForm that requires grant_type='password'.",
+      "detail": "Subclasses OAuth2PasswordRequestForm with grant_type typed as str (non-optional) and annotated Form(pattern='^password$'). The __init__ simply calls super().__init__ forwarding all arguments. Any form submission that omits grant_type or sends a different value will fail Pydantic validation before reaching the endpoint.",
+      "paths": ["fastapi/security/oauth2.py:162-327"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class OAuth2PasswordRequestFormStrict(OAuth2PasswordRequestForm)"
+    },
+
+    {
+      "id": "f:fastapi/security/oauth2.py#SecurityScopes",
+      "parent": "f:fastapi/security/oauth2.py",
+      "name": "SecurityScopes",
+      "kind": "class",
+      "summary": "Injectable that holds all OAuth2 scopes required by the current dependency chain.",
+      "detail": "Not a SecurityBase subclass. When declared as a parameter of a dependency function, FastAPI injects an instance populated with the union of scopes from all Security() markers in the chain. Exposes self.scopes (list[str]) and self.scope_str (space-joined string). The injection is handled by the DI solver in fastapi/dependencies/utils.py.",
+      "paths": ["fastapi/security/oauth2.py:653-693"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class SecurityScopes"
+    },
+
+    {
+      "id": "f:fastapi/security/http.py",
+      "parent": "security.pkg",
+      "name": "HTTP auth schemes",
+      "kind": "module",
+      "summary": "HTTP Basic, Bearer, and Digest authentication scheme classes and their credential Pydantic models.",
+      "detail": "Defines HTTPBase (shared logic), HTTPBasic, HTTPBearer, HTTPDigest (all concrete schemes), and two Pydantic credential models: HTTPBasicCredentials and HTTPAuthorizationCredentials. All concrete classes call get_authorization_scheme_param from utils.py to parse the Authorization header. HTTPBasic additionally base64-decodes the credential and splits on ':'. HTTPDigest is documented as a stub that only wires up the OpenAPI model without implementing the full RFC 7616 Digest scheme.",
+      "paths": ["fastapi/security/http.py"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": [
+        "HTTPBasic raises 401 on b64decode failure (ValueError, UnicodeDecodeError, binascii.Error)",
+        "HTTPBasic raises 401 when the decoded credential has no ':' separator",
+        "HTTPDigest is a stub; does not implement the full RFC 7616 Digest challenge-response",
+        "WWW-Authenticate header is set to scheme.title() by default in HTTPBase"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/security/http.py#HTTPBasicCredentials",
+      "parent": "f:fastapi/security/http.py",
+      "name": "HTTPBasicCredentials",
+      "kind": "class",
+      "summary": "Pydantic model returned by HTTPBasic with username and password fields.",
+      "detail": "A Pydantic BaseModel with two Annotated string fields: username and password. HTTPBasic.__call__ populates it after successfully decoding and splitting the base64 Basic credential.",
+      "paths": ["fastapi/security/http.py:16-27"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class HTTPBasicCredentials(BaseModel)"
+    },
+
+    {
+      "id": "f:fastapi/security/http.py#HTTPAuthorizationCredentials",
+      "parent": "f:fastapi/security/http.py",
+      "name": "HTTPAuthorizationCredentials",
+      "kind": "class",
+      "summary": "Pydantic model returned by HTTPBearer and HTTPDigest with scheme and credentials fields.",
+      "detail": "A Pydantic BaseModel with two Annotated string fields: scheme (the first token of the Authorization header, e.g. 'Bearer') and credentials (everything after the first space). Returned by HTTPBase.__call__, HTTPBearer.__call__, and HTTPDigest.__call__.",
+      "paths": ["fastapi/security/http.py:29-66"],
+      "status": "live",
+      "tech": ["Python", "Pydantic"],
+      "signature": "class HTTPAuthorizationCredentials(BaseModel)"
+    },
+
+    {
+      "id": "f:fastapi/security/http.py#HTTPBase",
+      "parent": "f:fastapi/security/http.py",
+      "name": "HTTPBase",
+      "kind": "class",
+      "summary": "Shared base for all HTTP Authorization header schemes; parses the header and builds 401 errors.",
+      "detail": "Stores an HTTPBaseModel and auto_error flag. make_authenticate_headers returns {'WWW-Authenticate': scheme.title()}. make_not_authenticated_error uses that header. __call__ calls get_authorization_scheme_param and returns an HTTPAuthorizationCredentials if scheme and credentials are both non-empty, otherwise raises 401 or returns None. Concrete subclasses override __call__ to additionally check the specific scheme token.",
+      "paths": ["fastapi/security/http.py:69-104"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class HTTPBase(SecurityBase)",
+      "code": "    async def __call__(\n        self, request: HTTPConnection\n    ) -> HTTPAuthorizationCredentials | None:\n        authorization = request.headers.get(\"Authorization\")\n        scheme, credentials = get_authorization_scheme_param(authorization)\n        if not (authorization and scheme and credentials):\n            if self.auto_error:\n                raise self.make_not_authenticated_error()\n            else:\n                return None\n        return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)"
+    },
+
+    {
+      "id": "f:fastapi/security/http.py#HTTPBasic",
+      "parent": "f:fastapi/security/http.py",
+      "name": "HTTPBasic",
+      "kind": "class",
+      "summary": "HTTP Basic auth scheme: decodes base64 credentials and returns an HTTPBasicCredentials model.",
+      "detail": "__init__ stores scheme='basic' in the model and optionally a realm string. make_authenticate_headers returns 'Basic realm=\"{realm}\"' when realm is set. __call__ checks the Authorization header scheme is 'basic', base64-decodes the param, splits on ':', raises 401 on any decoding error or missing separator, and returns HTTPBasicCredentials(username, password).",
+      "paths": ["fastapi/security/http.py:107-221"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class HTTPBasic(HTTPBase)",
+      "code": "        try:\n            data = b64decode(param).decode(\"ascii\")\n        except (ValueError, UnicodeDecodeError, binascii.Error) as e:\n            raise self.make_not_authenticated_error() from e\n        username, separator, password = data.partition(\":\")\n        if not separator:\n            raise self.make_not_authenticated_error()\n        return HTTPBasicCredentials(username=username, password=password)"
+    },
+
+    {
+      "id": "f:fastapi/security/http.py#HTTPBearer",
+      "parent": "f:fastapi/security/http.py",
+      "name": "HTTPBearer",
+      "kind": "class",
+      "summary": "HTTP Bearer token scheme: validates the Authorization header and returns scheme plus credentials.",
+      "detail": "Stores an HTTPBearerModel (which adds optional bearerFormat to the OpenAPI model). __call__ calls get_authorization_scheme_param and checks first that both scheme and credentials are non-empty (raises 401 otherwise), then checks scheme.lower() == 'bearer' (raises 401 otherwise). Returns HTTPAuthorizationCredentials on success.",
+      "paths": ["fastapi/security/http.py:224-320"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class HTTPBearer(HTTPBase)"
+    },
+
+    {
+      "id": "f:fastapi/security/http.py#HTTPDigest",
+      "parent": "f:fastapi/security/http.py",
+      "name": "HTTPDigest",
+      "kind": "class",
+      "summary": "HTTP Digest auth stub: documents the scheme in OpenAPI but does not implement the RFC 7616 challenge-response.",
+      "detail": "Stores scheme='digest'. __call__ follows the same pattern as HTTPBearer but checks scheme.lower() == 'digest'. The docstring warns explicitly that this is only a stub for OpenAPI documentation; callers who need Digest auth must subclass it. The FastAPI docs also state this limitation.",
+      "paths": ["fastapi/security/http.py:323-423"],
+      "status": "stub",
+      "tech": ["Python"],
+      "signature": "class HTTPDigest(HTTPBase)"
+    },
+
+    {
+      "id": "f:fastapi/security/api_key.py",
+      "parent": "security.pkg",
+      "name": "API key schemes",
+      "kind": "module",
+      "summary": "API key authentication schemes for header, query parameter, and cookie transports.",
+      "detail": "Defines APIKeyBase plus three concrete classes. APIKeyBase.__init__ stores an APIKey OpenAPI model with the location enum (header, query, cookie), name and description. The shared check_api_key method returns the key string or raises 401 (or returns None when auto_error=False). Each subclass __call__ reads from the appropriate request attribute (headers, query_params, cookies) and delegates to check_api_key.",
+      "paths": ["fastapi/security/api_key.py"],
+      "status": "live",
+      "tech": ["Python"],
+      "facts": [
+        "WWW-Authenticate: APIKey is sent with 401 responses (non-standard; required by RFC 9110)",
+        "APIKeyIn enum values are: header, query, cookie"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/security/api_key.py#APIKeyBase",
+      "parent": "f:fastapi/security/api_key.py",
+      "name": "APIKeyBase",
+      "kind": "class",
+      "summary": "Shared base for all API key schemes; holds the OpenAPI model and validates key presence.",
+      "detail": "Stores APIKey(in=location, name=name, description=description) in self.model and sets scheme_name. make_not_authenticated_error returns a 401 HTTPException with WWW-Authenticate: APIKey (a custom non-standard challenge). check_api_key returns the key string if non-empty, raises 401 if auto_error is True, or returns None if auto_error is False.",
+      "paths": ["fastapi/security/api_key.py:11-52"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class APIKeyBase(SecurityBase)",
+      "code": "    def check_api_key(self, api_key: str | None) -> str | None:\n        if not api_key:\n            if self.auto_error:\n                raise self.make_not_authenticated_error()\n            return None\n        return api_key"
+    },
+
+    {
+      "id": "f:fastapi/security/api_key.py#APIKeyQuery",
+      "parent": "f:fastapi/security/api_key.py",
+      "name": "APIKeyQuery",
+      "kind": "class",
+      "summary": "API key scheme that reads the key from a named query parameter.",
+      "detail": "__init__ calls APIKeyBase with location=APIKeyIn.query. __call__ reads request.query_params.get(self.model.name) and delegates to check_api_key.",
+      "paths": ["fastapi/security/api_key.py:55-144"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class APIKeyQuery(APIKeyBase)"
+    },
+
+    {
+      "id": "f:fastapi/security/api_key.py#APIKeyHeader",
+      "parent": "f:fastapi/security/api_key.py",
+      "name": "APIKeyHeader",
+      "kind": "class",
+      "summary": "API key scheme that reads the key from a named request header.",
+      "detail": "__init__ calls APIKeyBase with location=APIKeyIn.header. __call__ reads request.headers.get(self.model.name) and delegates to check_api_key.",
+      "paths": ["fastapi/security/api_key.py:147-232"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class APIKeyHeader(APIKeyBase)"
+    },
+
+    {
+      "id": "f:fastapi/security/api_key.py#APIKeyCookie",
+      "parent": "f:fastapi/security/api_key.py",
+      "name": "APIKeyCookie",
+      "kind": "class",
+      "summary": "API key scheme that reads the key from a named cookie.",
+      "detail": "__init__ calls APIKeyBase with location=APIKeyIn.cookie. __call__ reads request.cookies.get(self.model.name) and delegates to check_api_key.",
+      "paths": ["fastapi/security/api_key.py:235-320"],
+      "status": "live",
+      "tech": ["Python"],
+      "signature": "class APIKeyCookie(APIKeyBase)"
+    },
+
+    {
+      "id": "f:fastapi/security/open_id_connect_url.py",
+      "parent": "security.pkg",
+      "name": "OpenID Connect scheme",
+      "kind": "module",
+      "summary": "OpenID Connect authentication stub: documents the discovery URL in OpenAPI and checks the Authorization header.",
+      "detail": "Defines OpenIdConnect which extends SecurityBase directly. Stores an OpenIdConnectModel with the openIdConnectUrl. make_not_authenticated_error returns 401 with WWW-Authenticate: Bearer (same as OAuth2). __call__ checks request.headers.get('Authorization'); if absent and auto_error is True it raises 401. The class docstring warns that it does not implement the full OpenID Connect specification: it does not fetch or validate the discovery document or verify tokens. Callers must subclass it.",
+      "paths": ["fastapi/security/open_id_connect_url.py"],
+      "status": "stub",
+      "tech": ["Python"],
+      "facts": [
+        "Does not fetch the openIdConnectUrl or validate tokens",
+        "Returns the raw Authorization header value on success, not a parsed token"
+      ]
+    },
+
+    {
+      "id": "f:fastapi/security/open_id_connect_url.py#OpenIdConnect",
+      "parent": "f:fastapi/security/open_id_connect_url.py",
+      "name": "OpenIdConnect",
+      "kind": "class",
+      "summary": "Stub OpenID Connect scheme that documents the discovery URL in OpenAPI and enforces the Authorization header.",
+      "detail": "Takes openIdConnectUrl (required), optional scheme_name, description, and auto_error. Stores OpenIdConnectModel in self.model. __call__ reads the Authorization header; returns it raw if present. If absent and auto_error is True, raises 401 with WWW-Authenticate: Bearer. The discovery URL is never fetched; token validation is left entirely to the application.",
+      "paths": ["fastapi/security/open_id_connect_url.py:11-94"],
+      "status": "stub",
+      "tech": ["Python"],
+      "signature": "class OpenIdConnect(SecurityBase)",
+      "code": "    async def __call__(self, request: HTTPConnection) -> str | None:\n        authorization = request.headers.get(\"Authorization\")\n        if not authorization:\n            if self.auto_error:\n                raise self.make_not_authenticated_error()\n            else:\n                return None\n        return authorization"
+    },
+
+    {
+      "id": "security.tests.oauth2",
+      "parent": "fastapi.security",
+      "name": "OAuth2 tests",
+      "kind": "test",
+      "summary": "Integration tests for OAuth2 password bearer, authorization code bearer, optional flows and SecurityScopes.",
+      "detail": "Multiple test files exercise OAuth2PasswordBearer, OAuth2AuthorizationCodeBearer, SecurityScopes scope propagation, optional modes and OpenAPI output. Key files: test_security_oauth2.py, test_security_oauth2_password_bearer_optional.py, test_security_scopes.py, test_security_scopes_dont_propagate.py, test_security_scopes_sub_dependency.py, test_security_oauth2_authorization_code_bearer.py and several _description variants.",
+      "paths": [
+        "tests/test_security_oauth2.py",
+        "tests/test_security_oauth2_password_bearer_optional.py",
+        "tests/test_security_scopes.py",
+        "tests/test_security_scopes_dont_propagate.py",
+        "tests/test_security_scopes_sub_dependency.py",
+        "tests/test_security_oauth2_authorization_code_bearer.py",
+        "tests/test_security_oauth2_optional.py"
+      ],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+
+    {
+      "id": "security.tests.http",
+      "parent": "fastapi.security",
+      "name": "HTTP scheme tests",
+      "kind": "test",
+      "summary": "Tests for HTTPBasic, HTTPBearer, HTTPDigest and HTTPBase across normal, optional and realm variants.",
+      "detail": "Covers HTTPBasic realm/optional, HTTPBearer optional/description, HTTPDigest optional/description, and HTTPBase description/optional. Each variant has its own test file.",
+      "paths": [
+        "tests/test_security_http_bearer.py",
+        "tests/test_security_http_basic_optional.py",
+        "tests/test_security_http_basic_realm.py",
+        "tests/test_security_http_digest.py",
+        "tests/test_security_http_base.py"
+      ],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+
+    {
+      "id": "security.tests.api_key",
+      "parent": "fastapi.security",
+      "name": "API key tests",
+      "kind": "test",
+      "summary": "Tests for APIKeyHeader, APIKeyQuery and APIKeyCookie across normal, optional and description variants.",
+      "detail": "Covers all three transports (header, query, cookie) in normal and optional modes plus description-only OpenAPI variants.",
+      "paths": [
+        "tests/test_security_api_key_header.py",
+        "tests/test_security_api_key_query.py",
+        "tests/test_security_api_key_cookie.py",
+        "tests/test_security_api_key_header_optional.py",
+        "tests/test_security_api_key_query_optional.py",
+        "tests/test_security_api_key_cookie_optional.py"
+      ],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    },
+
+    {
+      "id": "security.tests.openid",
+      "parent": "fastapi.security",
+      "name": "OpenID Connect tests",
+      "kind": "test",
+      "summary": "Tests for OpenIdConnect normal, optional and description variants.",
+      "detail": "Three test files: test_security_openid_connect.py, test_security_openid_connect_optional.py, and test_security_openid_connect_description.py.",
+      "paths": [
+        "tests/test_security_openid_connect.py",
+        "tests/test_security_openid_connect_optional.py",
+        "tests/test_security_openid_connect_description.py"
+      ],
+      "status": "live",
+      "tech": ["Python", "pytest"]
+    }
+
+  ],
+  "edges": [
+
+    {
+      "from": "f:fastapi/security/base.py#SecurityBase",
+      "to": "f:fastapi/security/oauth2.py#OAuth2",
+      "kind": "calls",
+      "label": "OAuth2 extends SecurityBase",
+      "evidence": "fastapi/security/oauth2.py:330"
+    },
+    {
+      "from": "f:fastapi/security/base.py#SecurityBase",
+      "to": "f:fastapi/security/http.py#HTTPBase",
+      "kind": "calls",
+      "label": "HTTPBase extends SecurityBase",
+      "evidence": "fastapi/security/http.py:69"
+    },
+    {
+      "from": "f:fastapi/security/base.py#SecurityBase",
+      "to": "f:fastapi/security/api_key.py#APIKeyBase",
+      "kind": "calls",
+      "label": "APIKeyBase extends SecurityBase",
+      "evidence": "fastapi/security/api_key.py:11"
+    },
+    {
+      "from": "f:fastapi/security/base.py#SecurityBase",
+      "to": "f:fastapi/security/open_id_connect_url.py#OpenIdConnect",
+      "kind": "calls",
+      "label": "OpenIdConnect extends SecurityBase",
+      "evidence": "fastapi/security/open_id_connect_url.py:11"
+    },
+
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2PasswordBearer",
+      "to": "f:fastapi/security/oauth2.py#OAuth2",
+      "kind": "calls",
+      "label": "subclasses OAuth2",
+      "evidence": "fastapi/security/oauth2.py:433"
+    },
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2AuthorizationCodeBearer",
+      "to": "f:fastapi/security/oauth2.py#OAuth2",
+      "kind": "calls",
+      "label": "subclasses OAuth2",
+      "evidence": "fastapi/security/oauth2.py:547"
+    },
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2PasswordRequestFormStrict",
+      "to": "f:fastapi/security/oauth2.py#OAuth2PasswordRequestForm",
+      "kind": "calls",
+      "label": "subclasses OAuth2PasswordRequestForm",
+      "evidence": "fastapi/security/oauth2.py:162"
+    },
+
+    {
+      "from": "f:fastapi/security/http.py#HTTPBasic",
+      "to": "f:fastapi/security/http.py#HTTPBase",
+      "kind": "calls",
+      "label": "subclasses HTTPBase",
+      "evidence": "fastapi/security/http.py:107"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPBearer",
+      "to": "f:fastapi/security/http.py#HTTPBase",
+      "kind": "calls",
+      "label": "subclasses HTTPBase",
+      "evidence": "fastapi/security/http.py:224"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPDigest",
+      "to": "f:fastapi/security/http.py#HTTPBase",
+      "kind": "calls",
+      "label": "subclasses HTTPBase",
+      "evidence": "fastapi/security/http.py:323"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py#APIKeyQuery",
+      "to": "f:fastapi/security/api_key.py#APIKeyBase",
+      "kind": "calls",
+      "label": "subclasses APIKeyBase",
+      "evidence": "fastapi/security/api_key.py:55"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py#APIKeyHeader",
+      "to": "f:fastapi/security/api_key.py#APIKeyBase",
+      "kind": "calls",
+      "label": "subclasses APIKeyBase",
+      "evidence": "fastapi/security/api_key.py:147"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py#APIKeyCookie",
+      "to": "f:fastapi/security/api_key.py#APIKeyBase",
+      "kind": "calls",
+      "label": "subclasses APIKeyBase",
+      "evidence": "fastapi/security/api_key.py:235"
+    },
+
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2PasswordBearer",
+      "to": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+      "kind": "calls",
+      "label": "parses Authorization header",
+      "evidence": "fastapi/security/oauth2.py:538"
+    },
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2AuthorizationCodeBearer",
+      "to": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+      "kind": "calls",
+      "label": "parses Authorization header",
+      "evidence": "fastapi/security/oauth2.py:644"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPBase",
+      "to": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+      "kind": "calls",
+      "label": "parses Authorization header",
+      "evidence": "fastapi/security/http.py:98"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPBasic",
+      "to": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+      "kind": "calls",
+      "label": "parses Authorization header",
+      "evidence": "fastapi/security/http.py:208"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPBearer",
+      "to": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+      "kind": "calls",
+      "label": "parses Authorization header",
+      "evidence": "fastapi/security/http.py:309"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPDigest",
+      "to": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+      "kind": "calls",
+      "label": "parses Authorization header",
+      "evidence": "fastapi/security/http.py:412"
+    },
+
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "reads Authorization from request.headers",
+      "evidence": "fastapi/security/oauth2.py:424"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPBase",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "reads Authorization from request.headers",
+      "evidence": "fastapi/security/http.py:97"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py#APIKeyQuery",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "reads key from request.query_params",
+      "evidence": "fastapi/security/api_key.py:143"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py#APIKeyHeader",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "reads key from request.headers",
+      "evidence": "fastapi/security/api_key.py:231"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py#APIKeyCookie",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "reads key from request.cookies",
+      "evidence": "fastapi/security/api_key.py:319"
+    },
+    {
+      "from": "f:fastapi/security/open_id_connect_url.py#OpenIdConnect",
+      "to": "x:starlette",
+      "kind": "reads",
+      "label": "reads Authorization from request.headers",
+      "evidence": "fastapi/security/open_id_connect_url.py:88"
+    },
+
+    {
+      "from": "f:fastapi/security/http.py#HTTPBasicCredentials",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "extends Pydantic BaseModel",
+      "evidence": "fastapi/security/http.py:16"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPAuthorizationCredentials",
+      "to": "x:pydantic",
+      "kind": "calls",
+      "label": "extends Pydantic BaseModel",
+      "evidence": "fastapi/security/http.py:29"
+    },
+
+    {
+      "from": "f:fastapi/security/base.py#SecurityBase",
+      "to": "f:fastapi/openapi/models.py#SecurityBase",
+      "kind": "reads",
+      "label": "imports SecurityBase model from openapi.models",
+      "evidence": "fastapi/security/base.py:1"
+    },
+    {
+      "from": "f:fastapi/security/oauth2.py",
+      "to": "f:fastapi/openapi/models.py#OAuth2",
+      "kind": "reads",
+      "label": "imports OAuth2Model and OAuthFlowsModel",
+      "evidence": "fastapi/security/oauth2.py:5-6"
+    },
+    {
+      "from": "f:fastapi/security/http.py",
+      "to": "f:fastapi/openapi/models.py#HTTPBearer",
+      "kind": "reads",
+      "label": "imports HTTPBaseModel and HTTPBearerModel",
+      "evidence": "fastapi/security/http.py:7-8"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py",
+      "to": "f:fastapi/openapi/models.py#APIKey",
+      "kind": "reads",
+      "label": "imports APIKey and APIKeyIn models",
+      "evidence": "fastapi/security/api_key.py:4"
+    },
+    {
+      "from": "f:fastapi/security/open_id_connect_url.py",
+      "to": "f:fastapi/openapi/models.py#OpenIdConnect",
+      "kind": "reads",
+      "label": "imports OpenIdConnectModel",
+      "evidence": "fastapi/security/open_id_connect_url.py:4"
+    },
+
+    {
+      "from": "f:fastapi/security/base.py#SecurityBase",
+      "to": "f:fastapi/dependencies/models.py",
+      "kind": "reads",
+      "label": "DI detects instances via isinstance(obj, SecurityBase)",
+      "evidence": "fastapi/dependencies/models.py:132"
+    },
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2",
+      "to": "f:fastapi/exceptions.py",
+      "kind": "calls",
+      "label": "raises HTTPException on missing credentials",
+      "evidence": "fastapi/security/oauth2.py:417"
+    },
+    {
+      "from": "f:fastapi/security/http.py#HTTPBase",
+      "to": "f:fastapi/exceptions.py",
+      "kind": "calls",
+      "label": "raises HTTPException on missing credentials",
+      "evidence": "fastapi/security/http.py:88"
+    },
+    {
+      "from": "f:fastapi/security/api_key.py#APIKeyBase",
+      "to": "f:fastapi/exceptions.py",
+      "kind": "calls",
+      "label": "raises HTTPException on missing API key",
+      "evidence": "fastapi/security/api_key.py:41"
+    },
+    {
+      "from": "f:fastapi/security/open_id_connect_url.py#OpenIdConnect",
+      "to": "f:fastapi/exceptions.py",
+      "kind": "calls",
+      "label": "raises HTTPException on missing Authorization header",
+      "evidence": "fastapi/security/open_id_connect_url.py:80"
+    },
+
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2PasswordRequestForm",
+      "to": "f:fastapi/param_functions.py",
+      "kind": "reads",
+      "label": "uses Form() annotations to declare form fields",
+      "evidence": "fastapi/security/oauth2.py:7"
+    },
+
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2",
+      "to": "f:fastapi/security/oauth2.py#OAuth2.make_not_authenticated_error",
+      "kind": "calls",
+      "label": "raises make_not_authenticated_error() on missing header",
+      "evidence": "fastapi/security/oauth2.py:427"
+    },
+    {
+      "from": "f:fastapi/security/oauth2.py#OAuth2PasswordBearer",
+      "to": "f:fastapi/security/oauth2.py#OAuth2.make_not_authenticated_error",
+      "kind": "calls",
+      "label": "raises make_not_authenticated_error() on bad scheme",
+      "evidence": "fastapi/security/oauth2.py:541"
+    },
+
+    {
+      "from": "f:fastapi/security/oauth2.py#SecurityScopes",
+      "to": "f:fastapi/dependencies/utils.py",
+      "kind": "reads",
+      "label": "DI solver detects and injects SecurityScopes instance",
+      "evidence": "fastapi/dependencies/utils.py:404"
+    },
+
+    {
+      "from": "security.tests.oauth2",
+      "to": "f:fastapi/security/oauth2.py",
+      "kind": "tests",
+      "label": "tests OAuth2 schemes and SecurityScopes",
+      "evidence": "tests/test_security_oauth2.py:1"
+    },
+    {
+      "from": "security.tests.http",
+      "to": "f:fastapi/security/http.py",
+      "kind": "tests",
+      "label": "tests HTTP Basic, Bearer and Digest schemes",
+      "evidence": "tests/test_security_http_bearer.py:1"
+    },
+    {
+      "from": "security.tests.api_key",
+      "to": "f:fastapi/security/api_key.py",
+      "kind": "tests",
+      "label": "tests API key header, query and cookie schemes",
+      "evidence": "tests/test_security_api_key_header.py:1"
+    },
+    {
+      "from": "security.tests.openid",
+      "to": "f:fastapi/security/open_id_connect_url.py",
+      "kind": "tests",
+      "label": "tests OpenIdConnect scheme and OpenAPI output",
+      "evidence": "tests/test_security_openid_connect.py:1"
+    }
+
+  ],
+  "flows": [
+    {
+      "id": "flow.security.guard-endpoint",
+      "name": "Guarding an endpoint with OAuth2PasswordBearer",
+      "summary": "How a Security(OAuth2PasswordBearer) dependency extracts the Bearer token from the Authorization header or raises 401.",
+      "steps": [
+        {
+          "node": "f:fastapi/security/oauth2.py#OAuth2PasswordBearer",
+          "text": "An endpoint declares Security(oauth2_scheme) in its signature. At startup FastAPI wraps this in a Dependant whose .call is the OAuth2PasswordBearer instance. The dependency injection engine in fastapi/dependencies/models.py detects it as a SecurityBase subclass via isinstance check."
+        },
+        {
+          "node": "f:fastapi/security/oauth2.py#OAuth2PasswordBearer",
+          "text": "On each request the DI solver calls oauth2_scheme(request). __call__ reads request.headers.get('Authorization') and passes the value to get_authorization_scheme_param, which splits on the first space to yield (scheme, param)."
+        },
+        {
+          "node": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+          "text": "If the Authorization header is absent or the scheme is not 'bearer', and auto_error is True, the scheme calls make_not_authenticated_error() and raises a 401 HTTPException with WWW-Authenticate: Bearer. If auto_error is False it returns None instead."
+        },
+        {
+          "node": "f:fastapi/security/oauth2.py#OAuth2",
+          "text": "On success, the dependency returns param (the token string). The endpoint receives this as its annotated parameter. The application code then validates the token (e.g. decodes a JSON Web Token) and either proceeds or raises its own 401/403."
+        }
+      ]
+    },
+    {
+      "id": "flow.security.openapi-scheme",
+      "name": "Documenting the security scheme in OpenAPI",
+      "summary": "How get_openapi reads each scheme's model attribute and adds it to the OpenAPI securitySchemes section.",
+      "steps": [
+        {
+          "node": "f:fastapi/security/base.py#SecurityBase",
+          "text": "Every scheme class stores a Pydantic model (OAuth2Model, HTTPBaseModel, APIKey, OpenIdConnectModel) in self.model and a human-readable name in self.scheme_name, both set during __init__."
+        },
+        {
+          "node": "f:fastapi/security/oauth2.py#OAuth2",
+          "text": "When get_openapi in fastapi/openapi/utils.py processes a route's Dependant tree it calls _is_security_scheme() for each sub-dependency. For any that are SecurityBase instances it calls _get_security_scheme() to retrieve the scheme object, then jsonable_encoder(security_scheme.model) to get a serializable dict."
+        },
+        {
+          "node": "f:fastapi/security/base.py#SecurityBase",
+          "text": "The serialized model is stored under security_scheme.scheme_name in the components.securitySchemes map. The operation also gets a security requirement entry referencing that name. Because the model is a typed Pydantic object (OAuth2, HTTPBase, APIKey, or OpenIdConnect union member) the resulting JSON matches the OpenAPI 3.x SecurityScheme object schema exactly."
+        }
+      ]
+    },
+    {
+      "id": "flow.security.http-basic",
+      "name": "HTTP Basic auth credential extraction",
+      "summary": "How HTTPBasic decodes base64 credentials from the Authorization header and returns a typed credential model.",
+      "steps": [
+        {
+          "node": "f:fastapi/security/http.py#HTTPBasic",
+          "text": "An endpoint declares Depends(HTTPBasic()). On each request __call__ reads the Authorization header and passes it to get_authorization_scheme_param to split scheme from the base64-encoded credential string."
+        },
+        {
+          "node": "f:fastapi/security/utils.py#get_authorization_scheme_param",
+          "text": "If the Authorization header is absent or the scheme is not 'basic', the method raises 401 or returns None depending on auto_error. When a realm is configured, the WWW-Authenticate challenge includes realm=\"<realm>\"."
+        },
+        {
+          "node": "f:fastapi/security/http.py#HTTPBasicCredentials",
+          "text": "The base64 param is decoded, then str.partition(':') splits it into username and password. Any decoding exception (ValueError, UnicodeDecodeError, binascii.Error) or a missing ':' separator raises 401. On success HTTPBasicCredentials(username=..., password=...) is returned as the dependency value."
+        }
+      ]
+    }
+  ]
+}

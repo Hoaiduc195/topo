@@ -29,6 +29,9 @@ about 30 minutes by eleven agents. 2,120 boxes, 2,763 connections and four guide
 three applications, with every one of its 835 function-level boxes citing a line that matches. Its
 analysis is in [`maps/saleor/ANALYSIS.md`](maps/saleor/ANALYSIS.md).
 
+The same website link opens the **gallery**: FastAPI, the MCP Python SDK and Hono, each mapped with
+Topo at standard depth for 26 to 36 US dollars, with their sources in [`gallery/`](gallery/).
+
 ![The Saleor example map at its top level: three applications, the outside services they use, and the connections between them](docs/saleor-overview.jpg)
 
 ## Map your own repository
