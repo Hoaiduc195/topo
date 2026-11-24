@@ -1,0 +1,23 @@
+{
+  "name": "topo",
+  "displayName": "Topo",
+  "description": "Zoomable maps of software systems, read from their code: point it at one or more repositories and get one HTML page that zooms from the whole system to single functions, with every connection and every claim checked against the code it cites.",
+  "license": "Apache-2.0",
+  "keywords": [
+    "architecture",
+    "codebase map",
+    "visualization",
+    "documentation",
+    "onboarding"
+  ],
+  "skills": "./.claude/skills/",
+  "mcpServers": {
+    "topo": {
+      "command": "python3",
+      "args": [
+        "-I",
+        "${CLAUDE_PLUGIN_ROOT}/pipeline/mcp_server.py"
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "topo": {
+      "command": "python3",
+      "args": [
+        "-I",
+        "pipeline/mcp_server.py"
+      ],
+      "cwd": "."
+    }
+  }
+}

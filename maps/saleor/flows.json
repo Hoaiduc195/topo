@@ -1,0 +1,128 @@
+{
+ "flows": [
+  {
+   "id": "flow.x.fulfil-to-email",
+   "name": "From the dashboard to the shopper’s inbox",
+   "summary": "A staff member fulfils an order in the dashboard; the API moves stock, and the SMTP app emails the shopper.",
+   "steps": [
+    {
+     "node": "x:staff",
+     "text": "A staff member opens an order in the dashboard and clicks Fulfill on its unfulfilled lines."
+    },
+    {
+     "node": "f:saleor-dashboard/src/orders/views/OrderFulfill/OrderFulfill.tsx",
+     "text": "The fulfil view loads the lines, their stock per warehouse and the shop’s auto-approve setting."
+    },
+    {
+     "node": "f:saleor-dashboard/src/orders/components/OrderFulfillPage/OrderFulfillPage.tsx",
+     "text": "Staff choose quantities and warehouses and add a tracking number."
+    },
+    {
+     "node": "f:saleor-dashboard/src/orders/mutations.ts#fulfillOrder",
+     "text": "The dashboard sends the FulfillOrder mutation to the API."
+    },
+    {
+     "node": "ep:api POST /graphql/",
+     "text": "Every dashboard request goes through the API’s single GraphQL endpoint."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill",
+     "text": "The API checks the lines and stock and creates the fulfilments, which wait for approval unless the shop approves them automatically."
+    },
+    {
+     "node": "f:saleor/saleor/order/actions.py#create_fulfillments",
+     "text": "One fulfilment is created per warehouse, and stock is decreased when the fulfilment is approved straight away."
+    },
+    {
+     "node": "f:saleor/saleor/order/actions.py#order_fulfilled",
+     "text": "When every line is fulfilled the order status becomes fulfilled, and ORDER_FULFILLED joins ORDER_UPDATED in the events sent to apps."
+    },
+    {
+     "node": "f:saleor/saleor/webhook/transport/asynchronous/transport.py#send_webhook_request_async",
+     "text": "The event is delivered to every subscribed app in the background, with retries."
+    },
+    {
+     "node": "ep:smtp POST /api/webhooks/order-fulfilled",
+     "text": "The SMTP app receives ORDER_FULFILLED."
+    },
+    {
+     "node": "f:saleor-apps/apps/smtp/src/modules/smtp/services/email-compiler.ts#EmailCompiler.compile",
+     "text": "The store’s template for the event is rendered with Handlebars and compiled from MJML to HTML."
+    },
+    {
+     "node": "f:saleor-apps/apps/smtp/src/modules/smtp/services/smtp-email-sender.ts#SmtpEmailSender.sendEmailWithSmtp",
+     "text": "The email is sent through the store’s own mail server."
+    },
+    {
+     "node": "x:smtp",
+     "text": "The mail server delivers it to the shopper."
+    }
+   ]
+  },
+  {
+   "id": "flow.x.edit-to-search",
+   "name": "A product edit reaches search",
+   "summary": "A product saved in the dashboard is re-indexed in Algolia by the search app.",
+   "steps": [
+    {
+     "node": "x:staff",
+     "text": "A staff member edits a product in the dashboard."
+    },
+    {
+     "node": "f:saleor-dashboard/src/products/components/ProductUpdatePage/ProductUpdatePage.tsx",
+     "text": "The product page holds the edits: names, attributes, media, variants and channel availability."
+    },
+    {
+     "node": "f:saleor-dashboard/src/products/views/ProductUpdate/handlers/useProductUpdateHandler.ts#useProductUpdateHandler",
+     "text": "On save the handler splits the changes into the mutations they need."
+    },
+    {
+     "node": "f:saleor-dashboard/src/products/mutations.ts#productUpdateMutation",
+     "text": "The ProductUpdate mutation goes to the API."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/product/mutations/product/product_update.py#ProductUpdate",
+     "text": "The API saves the product and queues PRODUCT_UPDATED for subscribed apps."
+    },
+    {
+     "node": "f:saleor/saleor/webhook/transport/asynchronous/transport.py#send_webhook_request_async",
+     "text": "The product, its variants, channel listings and media are posted to the search app in the background."
+    },
+    {
+     "node": "ep:search POST /api/webhooks/saleor/product_updated",
+     "text": "The search app receives the event and reads its Algolia settings."
+    },
+    {
+     "node": "f:saleor-apps/apps/search/src/lib/algolia/algoliaSearchProvider.ts#AlgoliaSearchProvider.updateProduct",
+     "text": "It fetches stock per channel, since the event does not carry it."
+    },
+    {
+     "node": "f:saleor-apps/apps/search/src/lib/algolia/algoliaUtils.ts#productAndVariantToAlgolia",
+     "text": "Each variant becomes one search record per channel."
+    },
+    {
+     "node": "x:algolia",
+     "text": "The records are saved, and the variant is removed from channels where it is no longer listed."
+    }
+   ]
+  }
+ ],
+ "feature": [
+  [
+   "flow.apps-stripe.shopper-pays",
+   "Pay with Stripe"
+  ],
+  [
+   "flow.x.fulfil-to-email",
+   "Fulfil, then email"
+  ],
+  [
+   "flow.x.edit-to-search",
+   "Edit to search"
+  ],
+  [
+   "flow.apps-others.checkout-taxes",
+   "Taxes from AvaTax"
+  ]
+ ]
+}

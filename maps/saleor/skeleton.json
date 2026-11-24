@@ -1,0 +1,280 @@
+{
+ "nodes": [
+  {
+   "id": "app:core",
+   "parent": null,
+   "name": "Saleor API",
+   "kind": "app",
+   "summary": "The commerce engine: a Django application that serves one GraphQL API for products, checkout, payments, orders and fulfilment, and calls out to installed apps through webhooks.",
+   "repo": "saleor/saleor"
+  },
+  {
+   "id": "core.api",
+   "parent": "app:core",
+   "name": "GraphQL API and platform",
+   "kind": "group",
+   "summary": "The GraphQL endpoint, schema assembly, permissions, query cost limits, dataloaders, settings, background tasks and the shared core utilities."
+  },
+  {
+   "id": "core.accounts",
+   "parent": "app:core",
+   "name": "Accounts and authentication",
+   "kind": "group",
+   "summary": "Customers and staff, addresses, JSON Web Token (JWT) sign-in, OpenID Connect and the permission groups behind every resolver."
+  },
+  {
+   "id": "core.catalog",
+   "parent": "app:core",
+   "name": "Catalog, channels and pricing",
+   "kind": "group",
+   "summary": "Products, variants, attributes, categories, collections, channels, promotions and vouchers, pages and menus."
+  },
+  {
+   "id": "core.checkout",
+   "parent": "app:core",
+   "name": "Checkout, payments and tax",
+   "kind": "group",
+   "summary": "Carts, delivery options, price calculation, taxes, gift cards, payment transactions and checkout completion into an order."
+  },
+  {
+   "id": "core.orders",
+   "parent": "app:core",
+   "name": "Orders and fulfilment",
+   "kind": "group",
+   "summary": "Orders and their lines, stock allocation across warehouses, shipping methods, fulfilments, refunds and invoices."
+  },
+  {
+   "id": "core.webhooks",
+   "parent": "app:core",
+   "name": "Apps, webhooks and plugins",
+   "kind": "group",
+   "summary": "Installed apps and their tokens, webhook subscriptions, event payloads and delivery, synchronous webhooks, and the plugin manager."
+  },
+  {
+   "id": "app:dashboard",
+   "parent": null,
+   "name": "Saleor Dashboard",
+   "kind": "app",
+   "summary": "The staff back office: a React single-page app that runs every store operation through the GraphQL API and hosts installed apps inside its pages.",
+   "repo": "saleor/saleor-dashboard"
+  },
+  {
+   "id": "dash.shell",
+   "parent": "app:dashboard",
+   "name": "App shell and GraphQL client",
+   "kind": "group",
+   "summary": "Start-up, sign-in, routing, the Apollo GraphQL client, the shared components, hooks and the navigation."
+  },
+  {
+   "id": "dash.extensions",
+   "parent": "app:dashboard",
+   "name": "Apps and extensions",
+   "kind": "group",
+   "summary": "Installing apps, their permissions and webhooks, and the extension points where apps render inside the dashboard."
+  },
+  {
+   "id": "dash.orders",
+   "parent": "app:dashboard",
+   "name": "Orders, customers and promotions",
+   "kind": "group",
+   "summary": "Order lists and details, drafts, fulfilment, refunds and returns, customers, gift cards, discounts and vouchers."
+  },
+  {
+   "id": "dash.catalog",
+   "parent": "app:dashboard",
+   "name": "Catalog and configuration",
+   "kind": "group",
+   "summary": "Products, variants, categories, collections, attributes and product types, translations, and the store configuration: channels, shipping, warehouses, taxes, staff and permissions."
+  },
+  {
+   "id": "app:apps",
+   "parent": null,
+   "name": "Saleor Apps",
+   "kind": "app",
+   "summary": "Separately deployed Next.js apps that extend Saleor through webhooks and the GraphQL API: payments, tax, transactional email and search.",
+   "repo": "saleor/apps"
+  },
+  {
+   "id": "apps.stripe",
+   "parent": "app:apps",
+   "name": "Stripe payments app",
+   "kind": "group",
+   "summary": "Turns Saleor payment transaction webhooks into Stripe payment intents and reports Stripe events back as transaction events."
+  },
+  {
+   "id": "apps.avatax",
+   "parent": "app:apps",
+   "name": "AvaTax tax app",
+   "kind": "group",
+   "summary": "Answers Saleor’s synchronous tax webhooks with AvaTax calculations and commits transactions when orders are confirmed."
+  },
+  {
+   "id": "apps.smtp",
+   "parent": "app:apps",
+   "name": "SMTP email app",
+   "kind": "group",
+   "summary": "Renders MJML and Handlebars templates for Saleor events and sends them over the store’s own SMTP server."
+  },
+  {
+   "id": "apps.search",
+   "parent": "app:apps",
+   "name": "Search app",
+   "kind": "group",
+   "summary": "Keeps an Algolia index in step with product and variant webhooks."
+  },
+  {
+   "id": "apps.shared",
+   "parent": "app:apps",
+   "name": "Shared packages",
+   "kind": "group",
+   "summary": "Code the apps share: the app SDK wiring, webhook utilities, the DynamoDB configuration store, logging, errors and the user interface kit."
+  },
+  {
+   "id": "ext",
+   "parent": null,
+   "name": "Outside services and people",
+   "kind": "group",
+   "summary": "Databases, queues, storage, payment and tax providers, email, hosting and monitoring, and the people who use the store."
+  },
+  {
+   "id": "ext.data",
+   "parent": "ext",
+   "name": "Data and queues",
+   "kind": "group",
+   "summary": "Where state and background work live."
+  },
+  {
+   "id": "ext.commerce",
+   "parent": "ext",
+   "name": "Payment, tax and search providers",
+   "kind": "group",
+   "summary": "Third parties the apps call on the store’s behalf."
+  },
+  {
+   "id": "ext.hosting",
+   "parent": "ext",
+   "name": "Hosting, storage and monitoring",
+   "kind": "group",
+   "summary": "Where the code runs, where files live and what watches it."
+  },
+  {
+   "id": "ext.people",
+   "parent": "ext",
+   "name": "People and storefronts",
+   "kind": "group",
+   "summary": "Who uses the store and what calls its API from outside."
+  },
+  {
+   "id": "x:postgres",
+   "parent": "ext.data",
+   "name": "PostgreSQL",
+   "kind": "external",
+   "summary": "The API’s database, with replicas for reads."
+  },
+  {
+   "id": "x:redis",
+   "parent": "ext.data",
+   "name": "Redis",
+   "kind": "external",
+   "summary": "Cache and Celery broker or result store."
+  },
+  {
+   "id": "x:celery-broker",
+   "parent": "ext.data",
+   "name": "Celery broker",
+   "kind": "external",
+   "summary": "The message queue Celery workers take tasks from (Redis or RabbitMQ)."
+  },
+  {
+   "id": "x:dynamodb",
+   "parent": "ext.data",
+   "name": "Amazon DynamoDB",
+   "kind": "external",
+   "summary": "Where the apps keep their configuration and installation records."
+  },
+  {
+   "id": "x:stripe",
+   "parent": "ext.commerce",
+   "name": "Stripe",
+   "kind": "external",
+   "summary": "Payment intents, refunds and the events Stripe sends back."
+  },
+  {
+   "id": "x:avatax",
+   "parent": "ext.commerce",
+   "name": "Avalara AvaTax",
+   "kind": "external",
+   "summary": "Tax calculation and committed tax transactions."
+  },
+  {
+   "id": "x:algolia",
+   "parent": "ext.commerce",
+   "name": "Algolia",
+   "kind": "external",
+   "summary": "Hosted product search index."
+  },
+  {
+   "id": "x:smtp",
+   "parent": "ext.commerce",
+   "name": "SMTP server",
+   "kind": "external",
+   "summary": "The mail server transactional email is sent through."
+  },
+  {
+   "id": "x:openid-provider",
+   "parent": "ext.commerce",
+   "name": "OpenID Connect provider",
+   "kind": "external",
+   "summary": "An outside identity provider staff or customers can sign in with."
+  },
+  {
+   "id": "x:object-storage",
+   "parent": "ext.hosting",
+   "name": "Object storage",
+   "kind": "external",
+   "summary": "Media and export files on Amazon S3, Google Cloud Storage or Azure Blob Storage."
+  },
+  {
+   "id": "x:vercel",
+   "parent": "ext.hosting",
+   "name": "Vercel",
+   "kind": "external",
+   "summary": "Where the apps are deployed."
+  },
+  {
+   "id": "x:sentry",
+   "parent": "ext.hosting",
+   "name": "Sentry",
+   "kind": "external",
+   "summary": "Error reporting for the API and the apps."
+  },
+  {
+   "id": "x:otel-collector",
+   "parent": "ext.hosting",
+   "name": "OpenTelemetry collector",
+   "kind": "external",
+   "summary": "Receives traces and metrics."
+  },
+  {
+   "id": "x:storefront",
+   "parent": "ext.people",
+   "name": "Storefronts",
+   "kind": "external",
+   "summary": "Shops and mobile apps that call the GraphQL API as customers."
+  },
+  {
+   "id": "x:shopper",
+   "parent": "ext.people",
+   "name": "Shoppers",
+   "kind": "external",
+   "summary": "Customers who browse, check out and receive email."
+  },
+  {
+   "id": "x:staff",
+   "parent": "ext.people",
+   "name": "Store staff",
+   "kind": "external",
+   "summary": "People who run the store from the dashboard."
+  }
+ ]
+}

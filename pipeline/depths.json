@@ -1,0 +1,30 @@
+{
+ "_about": "The depths a Topo map can be made at. Each sets the floors the depth check holds a map to; depths.py documents every field. A machine adds its own under \"depths\" in Topo's config file, and a map's config can carry one inline. No depth can turn off the precision checks: every box cites real files and lines, and cited lines must match their symbols.",
+ "overview": {
+  "about": "applications, subsystems, modules and files, with symbol boxes only for the entry points and the main mechanisms",
+  "symbols": 0.0,
+  "cap": 0,
+  "every_definition": "never",
+  "connect": "files",
+  "excerpts": 3,
+  "agents": ["code_files", 600]
+ },
+ "standard": {
+  "about": "down to the functions and classes that carry the logic",
+  "symbols": 0.65,
+  "cap": 75,
+  "every_definition": "when_it_fits",
+  "connect": "symbols",
+  "excerpts": 10,
+  "agents": ["boxes"]
+ },
+ "deep": {
+  "about": "every public class, function and method gets a symbol box",
+  "symbols": 0.65,
+  "cap": null,
+  "every_definition": "always",
+  "connect": "symbols",
+  "excerpts": 15,
+  "agents": ["public_definitions", 100]
+ }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "topo",
+  "owner": {"name": "Topo"},
+  "description": "Topo: zoomable maps of software systems, read from their code.",
+  "plugins": [
+    {
+      "name": "topo",
+      "source": "./",
+      "description": "Map repositories into one zoomable page checked against their code (/topo:map), keep it current (/topo:refresh), and share an anonymized copy of a private map (/topo:share).",
+      "category": "development"
+    }
+  ]
+}

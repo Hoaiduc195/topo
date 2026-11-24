@@ -1,0 +1,37 @@
+# Every Topo check on each push to main and each pull request: unit tests, the leak scan (file checks
+# only: the private name rules never leave their owner's machine), a rebuild of the example map that
+# must match what is committed, and the browser smoke test.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04   # pinned: Playwright installs its browser only on the Ubuntu releases it supports
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]   # the oldest supported, and the one the example map is built with
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Playwright for the smoke test
+        run: |
+          npm install --prefix ~/.topo-tools playwright@1.60.0
+          ~/.topo-tools/node_modules/.bin/playwright install --with-deps chromium-headless-shell
+      - name: Run every check
+        env:
+          TOPO_FPS_FLOOR: "0"   # a runner has no screen, so the frame rate is logged, not judged
+        run: sh test/run.sh

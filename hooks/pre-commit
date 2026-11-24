@@ -1,0 +1,4 @@
+#!/bin/sh
+# Topo leak guard: blocks private files and client names from commits (see CLAUDE.md).
+# Bypass only for a false positive you have checked: git commit --no-verify
+exec python3 -I "$(cd "$(dirname "$0")/.." && pwd)/pipeline/leakscan.py" --staged

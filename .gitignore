@@ -1,0 +1,7 @@
+maps/*/topo-data.json
+__pycache__/
+node_modules/
+.DS_Store
+
+# logo drafts and AI concepts, kept local (brand/contour_logo.py and final_logo.py write here)
+brand/explorations/

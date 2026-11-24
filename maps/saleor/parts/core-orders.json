@@ -1,0 +1,4027 @@
+{
+ "area": "core-orders",
+ "nodes": [
+  {
+   "id": "core.ord.orders",
+   "parent": "core.orders",
+   "name": "Order domain",
+   "kind": "group",
+   "summary": "The order model, its status machine, the actions that move an order through its life, price and tax calculation, events and background tasks.",
+   "detail": "Everything below the GraphQL layer that knows what an order is. Orders are Django models in PostgreSQL with a status field (draft, unconfirmed, unfulfilled, partially fulfilled, fulfilled, partially returned, returned, canceled, expired). Mutations never write status directly: they call functions in order/actions.py, which change stock through warehouse/management.py, recompute status from fulfilment quantities, write an OrderEvent audit row and fire webhook events through the plugin manager. Prices of draft and unconfirmed orders are recalculated lazily by order/calculations.py, which may call a tax app over a synchronous webhook.",
+   "paths": [
+    "saleor/saleor/order/"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.ord.model",
+   "parent": "core.ord.orders",
+   "name": "Order model and status machine",
+   "kind": "group",
+   "summary": "Order, OrderLine, Fulfillment, OrderEvent and granted-refund models, the status and event constants, and row locks.",
+   "detail": "order/__init__.py holds the string constants: OrderStatus (nine statuses), FulfillmentStatus (seven), OrderEvents (about sixty audit event types), charge and authorize statuses, StockUpdatePolicy and OrderGrantedRefundStatus. order/models.py stores them: an Order has many OrderLines, Fulfillments (each with FulfillmentLines pointing back at an OrderLine and the Stock it came from), OrderEvents and OrderGrantedRefunds. Order numbers come from a PostgreSQL sequence. lock_objects.py gives SELECT ... FOR UPDATE querysets used by fulfilment to avoid races.",
+   "paths": [
+    "saleor/saleor/order/__init__.py",
+    "saleor/saleor/order/models.py",
+    "saleor/saleor/order/lock_objects.py",
+    "saleor/saleor/order/interface.py",
+    "saleor/saleor/order/error_codes.py"
+   ],
+   "tech": [
+    "Django",
+    "PostgreSQL"
+   ]
+  },
+  {
+   "id": "core.ord.lifecycle",
+   "parent": "core.ord.orders",
+   "name": "Order actions, events and tasks",
+   "kind": "group",
+   "summary": "The functions that create, confirm, fulfil, cancel, refund and return orders, the audit events they write and the periodic tasks that expire orders.",
+   "detail": "actions.py is the orchestration layer: each business action wraps its writes in a database transaction, adjusts stock (allocate, deallocate, decrease), recomputes the order status via utils.update_order_status, writes an OrderEvent through events.py and fires order webhooks through call_order_events, which maps event names to PluginsManager methods. notifications.py builds customer and staff email payloads sent through PluginsManager.notify (the NOTIFY_USER webhook). tasks.py holds Celery jobs that expire unpaid unconfirmed orders and delete old expired ones.",
+   "paths": [
+    "saleor/saleor/order/actions.py",
+    "saleor/saleor/order/events.py",
+    "saleor/saleor/order/notifications.py",
+    "saleor/saleor/order/utils.py",
+    "saleor/saleor/order/tasks.py",
+    "saleor/saleor/order/search.py",
+    "saleor/saleor/order/fetch.py"
+   ],
+   "tech": [
+    "Python",
+    "Celery"
+   ]
+  },
+  {
+   "id": "core.ord.pricing",
+   "parent": "core.ord.orders",
+   "name": "Order prices and taxes",
+   "kind": "group",
+   "summary": "Lazy price, discount and tax recalculation for draft and unconfirmed orders, through a flat-rate path, a tax plugin or a tax app webhook.",
+   "detail": "Only orders in an editable status (draft, unconfirmed) are recalculated. A flag on the order (should_refresh_prices) or expired line prices trigger fetch_order_prices_if_expired, which refreshes base prices and discounts, applies order promotions, then calculates taxes. Taxes come from the channel's tax configuration: a flat rate, a legacy plugin (identifier prefixed plugin:) or a tax app reached over the ORDER_CALCULATE_TAXES synchronous webhook, for example the AvaTax app. base_calculations.py holds the undiscounted and discounted arithmetic without taxes.",
+   "paths": [
+    "saleor/saleor/order/calculations.py",
+    "saleor/saleor/order/base_calculations.py",
+    "saleor/saleor/order/webhooks/order_calculate_taxes.py"
+   ],
+   "tech": [
+    "Python"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/__init__.py",
+   "parent": "core.ord.model",
+   "name": "Order status and event constants",
+   "kind": "module",
+   "summary": "String constants for order, fulfilment, charge, authorize and granted-refund statuses, order origins and every OrderEvents type.",
+   "detail": "OrderStatus lists nine statuses; ORDER_EDITABLE_STATUS is draft plus unconfirmed, the only statuses whose lines and prices may change. OrderOrigin records whether an order came from checkout, a draft, a reissue or bulk create. FulfillmentStatus covers fulfilled, refunded, returned, refunded and returned, replaced, canceled and waiting for approval. StockUpdatePolicy (skip, update, force) controls stock handling in bulk order import.",
+   "paths": [
+    "saleor/saleor/order/__init__.py"
+   ],
+   "tech": [
+    "Python"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/__init__.py#OrderStatus",
+   "parent": "f:saleor/saleor/order/__init__.py",
+   "name": "OrderStatus",
+   "kind": "class",
+   "summary": "The order status machine: draft, unconfirmed, unfulfilled, partially fulfilled, fulfilled, partially returned, returned, canceled, expired.",
+   "detail": "Draft orders are created by staff and fully editable. Unconfirmed orders come from checkout when the channel does not confirm automatically. Unfulfilled, partially fulfilled and fulfilled are derived from fulfilled quantities by utils.determine_order_status; returned states are derived from return fulfilments. Canceled is set by actions.cancel_order and expired by the expire_orders_task.",
+   "paths": [
+    "saleor/saleor/order/__init__.py:9",
+    "saleor/saleor/order/__init__.py:9-23"
+   ],
+   "code": "class OrderStatus:\n    DRAFT = \"draft\"  # fully editable, not finalized order created by staff users\n    UNCONFIRMED = (\n        \"unconfirmed\"  # order created by customers when confirmation is required\n    )\n    UNFULFILLED = \"unfulfilled\"  # order with no items marked as fulfilled\n    PARTIALLY_FULFILLED = (\n        \"partially fulfilled\"  # order with some items marked as fulfilled\n    )\n    FULFILLED = \"fulfilled\"  # order with all items marked as fulfilled\n\n    PARTIALLY_RETURNED = (\n        \"partially_returned\"  # order with some items marked as returned\n    )\n    RETURNED = \"returned\"  # order with all items marked as returned"
+  },
+  {
+   "id": "f:saleor/saleor/order/models.py",
+   "parent": "core.ord.model",
+   "name": "Order data model",
+   "kind": "data",
+   "summary": "Django models for orders, order lines, fulfilments and fulfilment lines, order events and granted refunds, stored in PostgreSQL.",
+   "detail": "Order uses a UUID primary key and a separate integer number drawn from the order_order_number_seq sequence. It denormalizes prices (base, undiscounted, total, shipping), shipping method name and metadata, voucher code, charge and authorize amounts, and a search_vector for full-text search with GIN indexes. OrderLine keeps product and variant names so lines survive catalog deletion. Fulfillment groups FulfillmentLines; each FulfillmentLine records the Stock it was taken from so a cancel can restock it. OrderGrantedRefund and its lines record refunds staff have approved, optionally tied to a payment TransactionItem.",
+   "paths": [
+    "saleor/saleor/order/models.py"
+   ],
+   "tech": [
+    "Django",
+    "PostgreSQL"
+   ],
+   "facts": [
+    "Order number default comes from SELECT nextval('order_order_number_seq')",
+    "Default status of a new Order row is unfulfilled",
+    "Meta defines MANAGE_ORDERS and MANAGE_ORDERS_IMPORT permissions"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/models.py#Order",
+   "parent": "f:saleor/saleor/order/models.py",
+   "name": "Order",
+   "kind": "class",
+   "summary": "One order: status, channel, customer, addresses, delivery method, denormalized prices, charge and authorize status, voucher and search vector.",
+   "detail": "Helper methods answer business questions used by mutations: is_fully_paid compares total_charged with total gross; can_cancel allows cancel only when every fulfilment is canceled, refunded, replaced or returned and the order is not already canceled, draft or expired; can_capture, can_void and can_refund delegate to the last legacy Payment; can_mark_as_paid requires no payments.",
+   "paths": [
+    "saleor/saleor/order/models.py:109",
+    "saleor/saleor/order/models.py:513-527"
+   ],
+   "signature": "class Order(ModelWithMetadata, ModelWithExternalReference)",
+   "code": "def can_cancel(self):\n    statuses_allowed_to_cancel = [\n        FulfillmentStatus.CANCELED,\n        FulfillmentStatus.REFUNDED,\n        FulfillmentStatus.REPLACED,\n        FulfillmentStatus.REFUNDED_AND_RETURNED,\n        FulfillmentStatus.RETURNED,\n    ]\n    return (\n        not self.fulfillments.exclude(\n            status__in=statuses_allowed_to_cancel\n        ).exists()\n    ) and self.status not in {\n        OrderStatus.CANCELED,\n        OrderStatus.DRAFT,"
+  },
+  {
+   "id": "f:saleor/saleor/order/models.py#OrderLine",
+   "parent": "f:saleor/saleor/order/models.py",
+   "name": "OrderLine",
+   "kind": "class",
+   "summary": "A line of an order: variant, quantity, quantity fulfilled, unit and total prices, tax rate and denormalized product data.",
+   "paths": [
+    "saleor/saleor/order/models.py:567"
+   ],
+   "signature": "class OrderLine(ModelWithMetadata)"
+  },
+  {
+   "id": "f:saleor/saleor/order/models.py#Fulfillment",
+   "parent": "f:saleor/saleor/order/models.py",
+   "name": "Fulfillment",
+   "kind": "class",
+   "summary": "A group of fulfilled, refunded, returned, replaced or canceled order lines with a tracking number and refund amounts.",
+   "detail": "Each Fulfillment gets a per-order fulfillment_order counter on save, so its composed id reads like 12-3. FulfillmentLine rows link an OrderLine, a quantity and the Stock used, which is how cancellation knows where to return items.",
+   "paths": [
+    "saleor/saleor/order/models.py:776",
+    "saleor/saleor/order/models.py:856"
+   ],
+   "signature": "class Fulfillment(ModelWithMetadata)"
+  },
+  {
+   "id": "f:saleor/saleor/order/models.py#OrderEvent",
+   "parent": "f:saleor/saleor/order/models.py",
+   "name": "OrderEvent",
+   "kind": "class",
+   "summary": "An audit row on the order timeline: type from OrderEvents, the user or app that acted, a JSON parameters blob and an optional related event.",
+   "paths": [
+    "saleor/saleor/order/models.py:893"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/models.py#OrderGrantedRefund",
+   "parent": "f:saleor/saleor/order/models.py",
+   "name": "OrderGrantedRefund",
+   "kind": "class",
+   "summary": "A refund staff have granted: amount, reason, shipping flag, lines, the transaction it should be paid from and a status (none, pending, success, failure).",
+   "paths": [
+    "saleor/saleor/order/models.py:940",
+    "saleor/saleor/order/models.py:992"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py",
+   "parent": "core.ord.lifecycle",
+   "name": "Order actions",
+   "kind": "module",
+   "summary": "Business actions on orders: created, confirmed, fully paid, canceled, fulfilled, approved, refunded, returned and replaced, each with stock, events and webhooks.",
+   "detail": "Every action follows the same shape: open traced_atomic_transaction, change stock through warehouse.management, update quantities and status, write OrderEvent rows, then fire webhooks with call_order_event or call_order_events, which look up subscribed webhooks once and call the matching PluginsManager method (for example ORDER_CANCELLED maps to order_cancelled). Customer emails go through notifications.py. Refunds of legacy payments go through payment.gateway.refund; transaction-based refunds are handled by granted refunds instead.",
+   "paths": [
+    "saleor/saleor/order/actions.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ],
+   "facts": [
+    "ORDER_WEBHOOK_EVENT_MAP maps 14 order webhook events to PluginsManager methods",
+    "Mark-as-paid transactions are named 'Mark-as-paid transaction'"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#call_order_events",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "call_order_events()",
+   "kind": "function",
+   "summary": "Fires several order webhook events at once: resolves subscribed webhooks, maps each event to its PluginsManager method and calls it through call_event.",
+   "paths": [
+    "saleor/saleor/order/actions.py:245"
+   ],
+   "signature": "def call_order_events(manager, event_names, order, webhook_event_map=None)"
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#order_created",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "order_created()",
+   "kind": "function",
+   "summary": "Runs after an order is created from checkout or a draft: counts the customer's orders, logs the event, fires ORDER_CREATED and, if the channel says so, confirms it.",
+   "detail": "Also fires the authorized and charged follow-ups when the order already has a pre-authorized or fully charged payment, and logs a warning when lines have negative prices. Webhook subscriptions for created, charged and confirmed events are fetched once and reused.",
+   "paths": [
+    "saleor/saleor/order/actions.py:287"
+   ],
+   "signature": "def order_created(order_info, user, app, manager, from_draft=False, site_settings=None, automatic=False)"
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#order_confirmed",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "order_confirmed()",
+   "kind": "function",
+   "summary": "Logs the confirmation event, fires ORDER_CONFIRMED, optionally emails the customer and charges gift card transactions.",
+   "paths": [
+    "saleor/saleor/order/actions.py:356"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#cancel_order",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "cancel_order()",
+   "kind": "function",
+   "summary": "Cancels an order in one transaction: logs the event, releases all stock allocations, sets status canceled and fires ORDER_CANCELLED and ORDER_UPDATED.",
+   "detail": "Allocated stock goes back to availability through deallocate_stock_for_orders; fulfilled items are not touched because can_cancel only allows cancel when no active fulfilment remains. The cancel confirmation email is sent through call_event so it runs after commit.",
+   "paths": [
+    "saleor/saleor/order/actions.py:422",
+    "saleor/saleor/order/actions.py:435-449"
+   ],
+   "signature": "def cancel_order(order, user, app, manager, site_settings, webhook_event_map=None)",
+   "code": "with traced_atomic_transaction():\n    events.order_canceled_event(order=order, user=user, app=app)\n    deallocate_stock_for_orders([order.id], site_settings, app or user)\n    order.status = OrderStatus.CANCELED\n    order.save(update_fields=[\"status\", \"updated_at\"])\n    if not webhook_event_map:\n        webhook_event_map = get_webhooks_for_multiple_events(\n            WEBHOOK_EVENTS_FOR_ORDER_CANCELED\n        )\n    call_order_events(\n        manager,\n        [\n            WebhookEventAsyncType.ORDER_CANCELLED,\n            WebhookEventAsyncType.ORDER_UPDATED,\n        ],"
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#create_fulfillments",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "create_fulfillments()",
+   "kind": "function",
+   "summary": "Creates one fulfilment per warehouse, takes the stock, bumps fulfilled quantities and either completes the order or leaves it waiting for approval.",
+   "detail": "Order lines are re-read with SELECT FOR UPDATE and their remaining quantity checked again to stop double fulfilment. For each warehouse a Fulfillment row is created with status fulfilled (auto-approve on) or waiting_for_approval, and _create_fulfillment_lines builds the lines and decreases stock only when auto-approved. Then order_fulfilled runs (status, gift cards, webhooks, email) or order_awaits_fulfillment_approval fires ORDER_UPDATED only.",
+   "paths": [
+    "saleor/saleor/order/actions.py:1223",
+    "saleor/saleor/order/actions.py:1302-1316"
+   ],
+   "signature": "def create_fulfillments(user, app, order, fulfillment_lines_for_warehouses, manager, site_settings, *, notify_customer=True, auto=False, auto_approved=True, allow_stock_to_be_exceeded=False, tracking_number='') -> list[Fulfillment]",
+   "code": "for warehouse_pk in fulfillment_lines_for_warehouses:\n    fulfillment = Fulfillment.objects.create(\n        order=order, status=status, tracking_number=tracking_number\n    )\n    fulfillments.append(fulfillment)\n    fulfillment_lines.extend(\n        _create_fulfillment_lines(\n            fulfillment,\n            warehouse_pk,\n            fulfillment_lines_for_warehouses[warehouse_pk],\n            order.channel.slug,\n            gift_card_lines_info,\n            site_settings,\n            app or user,\n            should_decrease_stock=auto_approved,"
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#_create_fulfillment_lines",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "_create_fulfillment_lines()",
+   "kind": "function",
+   "summary": "Finds the variant's stock in the chosen warehouse for the channel, builds unsaved FulfillmentLines and decreases stock, raising InsufficientStock if missing.",
+   "paths": [
+    "saleor/saleor/order/actions.py:1095"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "order_fulfilled()",
+   "kind": "function",
+   "summary": "After fulfilment: recomputes status, creates gift cards, logs the event, fires FULFILLMENT_CREATED, ORDER_UPDATED, ORDER_FULFILLED and emails the customer.",
+   "detail": "FULFILLMENT_APPROVED is also fired when the order became fully fulfilled or the fulfilment was approved manually. All webhook calls happen inside the transaction so they are only queued if the status update succeeds; the customer email is sent after it.",
+   "paths": [
+    "saleor/saleor/order/actions.py:547"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#approve_fulfillment",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "approve_fulfillment()",
+   "kind": "function",
+   "summary": "Turns a waiting_for_approval fulfilment into fulfilled: decreases the stock recorded on each line, then runs order_fulfilled.",
+   "paths": [
+    "saleor/saleor/order/actions.py:864"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#cancel_fulfillment",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "cancel_fulfillment()",
+   "kind": "function",
+   "summary": "Cancels a fulfilment: restocks its lines into a chosen warehouse (or just lowers fulfilled quantities), sets status canceled and fires FULFILLMENT_CANCELED.",
+   "paths": [
+    "saleor/saleor/order/actions.py:808"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#create_refund_fulfillment",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "create_refund_fulfillment()",
+   "kind": "function",
+   "summary": "Legacy-payment refund of products: refunds through the payment gateway, then moves the lines into a refunded fulfilment and releases unfulfilled stock.",
+   "paths": [
+    "saleor/saleor/order/actions.py:1525"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#create_fulfillments_for_returned_products",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "create_fulfillments_for_returned_products()",
+   "kind": "function",
+   "summary": "Returns or replaces products: optional refund, a replace fulfilment plus a new draft order for replaced lines, and a returned fulfilment for the rest.",
+   "paths": [
+    "saleor/saleor/order/actions.py:1909"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#_process_refund",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "_process_refund()",
+   "kind": "function",
+   "summary": "Computes the refund amount from lines (plus shipping if asked), caps it at the captured amount and refunds the legacy Payment through the gateway.",
+   "detail": "When no amount is given the amount is the sum of unit gross price times quantity for returned order lines and not-yet-refunded fulfilment lines. The gateway call is followed by order_refunded (without ORDER_UPDATED, which the calling mutation sends) and, on commit, a fulfillment_refunded event.",
+   "paths": [
+    "saleor/saleor/order/actions.py:2048",
+    "saleor/saleor/order/actions.py:2074-2085"
+   ],
+   "code": "if amount and payment:\n    amount = min(payment.captured_amount, amount)\n    # Circular imports\n    from ..payment.gateway import refund\n\n    refund(\n        payment,\n        manager,\n        amount=amount,\n        channel_slug=order.channel.slug,\n        refund_data=refund_data,\n    )"
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#order_refunded",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "order_refunded()",
+   "kind": "function",
+   "summary": "Logs a payment refund, emails the customer and fires ORDER_REFUNDED, plus ORDER_FULLY_REFUNDED when refunds across payments and transactions reach the total.",
+   "paths": [
+    "saleor/saleor/order/actions.py:457"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/actions.py#mark_order_as_paid_with_transaction",
+   "parent": "f:saleor/saleor/order/actions.py",
+   "name": "mark_order_as_paid_with_transaction()",
+   "kind": "function",
+   "summary": "Creates a manual TransactionItem charged for the full order total, recomputes amounts, logs the event and fires ORDER_FULLY_PAID and ORDER_UPDATED.",
+   "paths": [
+    "saleor/saleor/order/actions.py:945",
+    "saleor/saleor/order/actions.py:986"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/events.py",
+   "parent": "core.ord.lifecycle",
+   "name": "Order event log",
+   "kind": "module",
+   "summary": "One function per OrderEvents type that writes an OrderEvent row with the acting user or app and a parameters payload.",
+   "detail": "Used by actions and mutations to build the order timeline shown in the dashboard: placed, confirmed, fulfilled items, canceled, refunds, notes, invoices, discounts, transaction events and more. Rows are plain inserts; nothing is sent from here.",
+   "paths": [
+    "saleor/saleor/order/events.py"
+   ],
+   "tech": [
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/notifications.py",
+   "parent": "core.ord.lifecycle",
+   "name": "Order email notifications",
+   "kind": "module",
+   "summary": "Builds order, line, fulfilment and address payloads and sends customer and staff notifications through PluginsManager.notify.",
+   "detail": "Each send_* function wraps a payload builder in a NotifyHandler and calls manager.notify with a NotifyEventType (ORDER_CONFIRMATION, ORDER_FULFILLMENT_CONFIRMATION, ORDER_CANCELED, ORDER_REFUND_CONFIRMATION and others). The webhook plugin turns notify into the NOTIFY_USER asynchronous webhook, which email apps such as the SMTP app render.",
+   "paths": [
+    "saleor/saleor/order/notifications.py"
+   ],
+   "tech": [
+    "Python"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/notifications.py#send_order_confirmation",
+   "parent": "f:saleor/saleor/order/notifications.py",
+   "name": "send_order_confirmation()",
+   "kind": "function",
+   "summary": "Sends ORDER_CONFIRMATION to the customer and STAFF_ORDER_CONFIRMATION to configured staff recipients after an order is placed.",
+   "paths": [
+    "saleor/saleor/order/notifications.py:408"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/notifications.py#send_fulfillment_confirmation_to_customer",
+   "parent": "f:saleor/saleor/order/notifications.py",
+   "name": "send_fulfillment_confirmation_to_customer()",
+   "kind": "function",
+   "summary": "Sends ORDER_FULFILLMENT_CONFIRMATION with the fulfilment lines and tracking number to the customer.",
+   "paths": [
+    "saleor/saleor/order/notifications.py:471"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/utils.py",
+   "parent": "core.ord.lifecycle",
+   "name": "Order helpers",
+   "kind": "module",
+   "summary": "Status derivation, line creation and quantity changes with allocation updates, discounts, charge and authorize status, and granted-refund status.",
+   "detail": "Holds the rules other code relies on: update_order_status locks the order row and recomputes status from line and fulfilment quantities; change_order_line_quantity and add_variant_to_order keep allocations in step for editable orders; updates_amounts_for_order sums charged and authorized amounts over legacy payments and transaction items and derives charge_status and authorize_status, subtracting granted refunds from the total.",
+   "paths": [
+    "saleor/saleor/order/utils.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/utils.py#update_order_status",
+   "parent": "f:saleor/saleor/order/utils.py",
+   "name": "update_order_status()",
+   "kind": "function",
+   "summary": "Locks the order row, recomputes its status from fulfilment quantities and saves only when the status changed.",
+   "paths": [
+    "saleor/saleor/order/utils.py:192",
+    "saleor/saleor/order/utils.py:159"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/utils.py#determine_order_status",
+   "parent": "f:saleor/saleor/order/utils.py",
+   "name": "determine_order_status()",
+   "kind": "function",
+   "summary": "Pure status rule: unfulfilled, partially returned, returned, partially fulfilled or fulfilled from total, fulfilled, returned and awaiting-approval quantities.",
+   "detail": "Replaced quantities are subtracted beforehand by _calculate_quantity_including_returns, and items in fulfilments waiting for approval do not count as fulfilled.",
+   "paths": [
+    "saleor/saleor/order/utils.py:210",
+    "saleor/saleor/order/utils.py:216-226"
+   ],
+   "code": "if quantity_fulfilled - quantity_awaiting_approval <= 0:\n    status = OrderStatus.UNFULFILLED\nelif 0 < quantity_returned < total_quantity:\n    status = OrderStatus.PARTIALLY_RETURNED\nelif quantity_returned == total_quantity:\n    status = OrderStatus.RETURNED\nelif quantity_fulfilled - quantity_awaiting_approval < total_quantity:\n    status = OrderStatus.PARTIALLY_FULFILLED\nelse:\n    status = OrderStatus.FULFILLED\nreturn status"
+  },
+  {
+   "id": "f:saleor/saleor/order/utils.py#update_order_charge_status",
+   "parent": "f:saleor/saleor/order/utils.py",
+   "name": "update_order_charge_status()",
+   "kind": "function",
+   "summary": "Sets charge_status to none, partial, full or overcharged by comparing the charged amount with the order total minus granted refunds.",
+   "paths": [
+    "saleor/saleor/order/utils.py:954",
+    "saleor/saleor/order/utils.py:993",
+    "saleor/saleor/order/utils.py:965-978"
+   ],
+   "code": "total_charged = order.total_charged_amount or Decimal(0)\ntotal_charged = quantize_price(total_charged, order.currency)\n\ncurrent_total_gross = order.total_gross_amount - granted_refund_amount\ncurrent_total_gross = max(current_total_gross, Decimal(0))\ncurrent_total_gross = quantize_price(current_total_gross, order.currency)\n\nif total_charged == current_total_gross:\n    order.charge_status = OrderChargeStatus.FULL\nelif total_charged <= Decimal(0):\n    order.charge_status = OrderChargeStatus.NONE\nelif total_charged < current_total_gross:\n    order.charge_status = OrderChargeStatus.PARTIAL\nelse:"
+  },
+  {
+   "id": "f:saleor/saleor/order/utils.py#calculate_order_granted_refund_status",
+   "parent": "f:saleor/saleor/order/utils.py",
+   "name": "calculate_order_granted_refund_status()",
+   "kind": "function",
+   "summary": "Derives a granted refund's status (pending, success, failure, none) from the latest refund transaction event linked to it.",
+   "paths": [
+    "saleor/saleor/order/utils.py:1138"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/utils.py#change_order_line_quantity",
+   "parent": "f:saleor/saleor/order/utils.py",
+   "name": "change_order_line_quantity()",
+   "kind": "function",
+   "summary": "Changes a line's quantity on an editable order, updates its totals, adjusts allocations for unconfirmed orders and logs added or removed products.",
+   "paths": [
+    "saleor/saleor/order/utils.py:559",
+    "saleor/saleor/order/utils.py:529"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/tasks.py",
+   "parent": "core.ord.lifecycle",
+   "name": "Order background tasks",
+   "kind": "job",
+   "summary": "Celery tasks: expire unpaid unconfirmed orders, delete long-expired orders, mark orders for price recalculation and re-send ORDER_UPDATED for given orders.",
+   "detail": "expire_orders_task picks up to 100 unconfirmed orders per run that have no payment or transaction and are older than the channel's expire_orders_after minutes, marks them expired, releases voucher usage and stock allocations and fires ORDER_EXPIRED. delete_expired_orders_task deletes up to 5000 expired orders per run after the channel's delete_expired_orders_after period and re-queues itself. Both are scheduled by Celery beat in settings.py.",
+   "paths": [
+    "saleor/saleor/order/tasks.py"
+   ],
+   "tech": [
+    "Celery"
+   ],
+   "facts": [
+    "EXPIRE_ORDER_BATCH_SIZE = 100",
+    "DELETE_EXPIRED_ORDER_BATCH_SIZE = 5000"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/tasks.py#_expire_orders",
+   "parent": "f:saleor/saleor/order/tasks.py",
+   "name": "_expire_orders()",
+   "kind": "function",
+   "summary": "Selects old unpaid unconfirmed orders on the read replica and, in one transaction, expires them, frees vouchers and stock and fires events.",
+   "detail": "The age in minutes is computed in SQL with DATE_PART. The expression multiplies the day part by 24 and the hour part by 60, so whole days count as 24 minutes instead of 1440 (see findings); orders older than a day are expired later than configured when the threshold exceeds 1439 minutes.",
+   "paths": [
+    "saleor/saleor/order/tasks.py:144",
+    "saleor/saleor/order/tasks.py:145-155"
+   ],
+   "code": "time_diff_func_in_minutes = (\n    Func(Value(\"day\"), now - OuterRef(\"created_at\"), function=\"DATE_PART\") * 24\n    + Func(Value(\"hour\"), now - OuterRef(\"created_at\"), function=\"DATE_PART\") * 60\n) + Func(Value(\"minute\"), now - OuterRef(\"created_at\"), function=\"DATE_PART\")\nchannels = Channel.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME).filter(\n    id=OuterRef(\"channel\"),\n    expire_orders_after__isnull=False,\n    expire_orders_after__gt=0,\n    expire_orders_after__lte=time_diff_func_in_minutes,\n)\n"
+  },
+  {
+   "id": "f:saleor/saleor/order/search.py",
+   "parent": "core.ord.lifecycle",
+   "name": "Order search vector",
+   "kind": "module",
+   "summary": "Builds the PostgreSQL full-text search vector for an order from its number, customer, addresses, lines, payments, transactions, discounts, invoices and notes.",
+   "paths": [
+    "saleor/saleor/order/search.py"
+   ],
+   "tech": [
+    "PostgreSQL"
+   ],
+   "detail": "update_order_search_vector prefetches the order's user, addresses, payments, discounts, lines, transactions with events, invoices and events, then concatenates weighted search vectors (order number with weight A first) into order.search_vector. Mutations call it after edits so the orders search finds the order by any of these values."
+  },
+  {
+   "id": "f:saleor/saleor/order/fetch.py",
+   "parent": "core.ord.lifecycle",
+   "name": "Order info loaders",
+   "kind": "module",
+   "summary": "OrderInfo and OrderLineInfo dataclasses plus fetchers that load an order's lines, variants, listings and voucher data for actions and price refresh.",
+   "paths": [
+    "saleor/saleor/order/fetch.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "fetch_order_info builds an OrderInfo with the order, customer email, channel, last legacy payment and an OrderLineInfo per line (line, quantity, variant). Stock functions take OrderLineInfo lists, which is how actions pass quantities and target warehouses to warehouse.management. fetch_draft_order_lines_info builds richer EditableOrderLineInfo objects with channel listings, promotion rules and voucher data for price refresh."
+  },
+  {
+   "id": "f:saleor/saleor/order/calculations.py",
+   "parent": "core.ord.pricing",
+   "name": "Order price and tax calculation",
+   "kind": "module",
+   "summary": "Refreshes prices, discounts and taxes of editable orders on read or on demand and exposes order_total, order_shipping and per-line price getters.",
+   "detail": "Each public getter (order_total, order_line_unit, order_shipping and so on) first calls fetch_order_prices_if_expired. Recalculation is skipped for non-editable statuses, when nothing changed, or when the tax strategy is a tax app and synchronous webhooks are not allowed (for example the orders list query). Tax calculation picks the channel's tax app identifier: an identifier starting with plugin: runs the legacy plugin, anything else asks tax apps over the ORDER_CALCULATE_TAXES synchronous webhook; failures set order.tax_error.",
+   "paths": [
+    "saleor/saleor/order/calculations.py"
+   ],
+   "tech": [
+    "Python"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/calculations.py#fetch_order_prices_if_expired",
+   "parent": "f:saleor/saleor/order/calculations.py",
+   "name": "fetch_order_prices_if_expired()",
+   "kind": "function",
+   "summary": "Entry point for lazy recalculation: checks should_refresh_prices, refreshes base prices and promotions, then calculates taxes; returns a Promise of order and lines.",
+   "paths": [
+    "saleor/saleor/order/calculations.py:214",
+    "saleor/saleor/order/calculations.py:71"
+   ],
+   "signature": "def fetch_order_prices_if_expired(order, manager, requestor, lines=None, force_update=False, database_connection_name=..., allow_sync_webhooks=True) -> Promise[tuple[Order, Iterable[OrderLine]]]"
+  },
+  {
+   "id": "f:saleor/saleor/order/calculations.py#_call_plugin_or_tax_app",
+   "parent": "f:saleor/saleor/order/calculations.py",
+   "name": "_call_plugin_or_tax_app()",
+   "kind": "function",
+   "summary": "Routes tax calculation either to a legacy tax plugin or to the tax app webhook and applies the returned TaxData to the order and lines.",
+   "paths": [
+    "saleor/saleor/order/calculations.py:411",
+    "saleor/saleor/order/calculations.py:448"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/base_calculations.py",
+   "parent": "core.ord.pricing",
+   "name": "Order base price arithmetic",
+   "kind": "module",
+   "summary": "Untaxed subtotal, shipping and total calculation, and spreading order-level discounts across lines and shipping.",
+   "paths": [
+    "saleor/saleor/order/base_calculations.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "Works on Money without taxes: base_order_subtotal sums line base totals, base_order_total adds shipping and subtracts order-level discounts, and propagate_order_discount_on_order_prices spreads an order discount proportionally across lines and shipping so each line carries its share. calculations.py uses these results as input to tax calculation."
+  },
+  {
+   "id": "f:saleor/saleor/order/webhooks/order_calculate_taxes.py",
+   "parent": "core.ord.pricing",
+   "name": "Order tax webhook payload",
+   "kind": "module",
+   "summary": "Builds the ORDER_CALCULATE_TAXES payload (lines, prices, discounts, addresses, tax flags) and asks tax apps through the shared tax webhook helper.",
+   "paths": [
+    "saleor/saleor/order/webhooks/order_calculate_taxes.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "generate_order_payload_for_tax_calculation serializes the order with base and undiscounted prices, discounts, addresses, tax class data and whether prices are entered with taxes, quantizing every amount. get_taxes hands it to the shared tax webhook helper with lines_count, which returns a Promise of TaxData or None."
+  },
+  {
+   "id": "f:saleor/saleor/order/webhooks/order_calculate_taxes.py#get_taxes",
+   "parent": "f:saleor/saleor/order/webhooks/order_calculate_taxes.py",
+   "name": "get_taxes()",
+   "kind": "function",
+   "summary": "Calls tax.webhooks.shared.get_taxes with the order payload and the ORDER_CALCULATE_TAXES synchronous event type.",
+   "paths": [
+    "saleor/saleor/order/webhooks/order_calculate_taxes.py:144"
+   ]
+  },
+  {
+   "id": "core.ord.stock",
+   "parent": "core.orders",
+   "name": "Stock and warehouses",
+   "kind": "group",
+   "summary": "Warehouses, stock levels, allocations for orders, reservations for checkouts, the per-channel allocation strategy and the stock webhooks.",
+   "detail": "Stock is one row per warehouse and variant with quantity and quantity_allocated. When an order is placed, allocate_stocks creates Allocation rows against stocks the channel can sell from, ordered by the channel's allocation strategy. Fulfilment calls decrease_stock, which first releases the allocation and then lowers quantity in the chosen warehouse; cancel releases allocations; cancelling a fulfilment restocks a warehouse. Checkouts hold short-lived Reservation rows when reservation is enabled in site settings. Running out of or coming back into stock fires PRODUCT_VARIANT_OUT_OF_STOCK and BACK_IN_STOCK webhooks, plus channel-scoped variants unless legacy shipping-zone availability is on.",
+   "paths": [
+    "saleor/saleor/warehouse/"
+   ],
+   "tech": [
+    "Python",
+    "Django",
+    "PostgreSQL"
+   ]
+  },
+  {
+   "id": "core.ord.stock.domain",
+   "parent": "core.ord.stock",
+   "name": "Stock domain",
+   "kind": "group",
+   "summary": "Warehouse, Stock, Allocation and Reservation models with the allocation, deallocation, reservation and availability logic.",
+   "detail": "management.py changes stock for orders, reservations.py reserves for checkouts, availability.py answers whether a quantity can be sold, channel_stock_availability.py decides which channels lost or regained availability, and tasks.py cleans up allocations and reservations and repairs quantity_allocated drift.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py",
+    "saleor/saleor/warehouse/models.py",
+    "saleor/saleor/warehouse/reservations.py",
+    "saleor/saleor/warehouse/availability.py",
+    "saleor/saleor/warehouse/channel_stock_availability.py",
+    "saleor/saleor/warehouse/tasks.py",
+    "saleor/saleor/warehouse/validation.py",
+    "saleor/saleor/warehouse/lock_objects.py",
+    "saleor/saleor/warehouse/interface.py",
+    "saleor/saleor/warehouse/error_codes.py",
+    "saleor/saleor/warehouse/__init__.py"
+   ],
+   "tech": [
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/models.py",
+   "parent": "core.ord.stock.domain",
+   "name": "Warehouse and stock models",
+   "kind": "data",
+   "summary": "Warehouse (address, channels, shipping zones, click-and-collect option), Stock, Allocation, Reservation and the deprecated preorder tables.",
+   "detail": "Stock is unique per warehouse and variant. StockQuerySet.for_channel_or_country decides which stocks a channel may sell: with legacy shipping-zone availability on, a stock counts only if its warehouse shares a shipping zone with the channel that covers the country; otherwise any warehouse linked to the channel counts. ChannelWarehouse is a sortable through table whose order drives the prioritize-sorting-order strategy. Allocation ties an OrderLine to a Stock; Reservation ties a CheckoutLine to a Stock with reserved_until.",
+   "paths": [
+    "saleor/saleor/warehouse/models.py"
+   ],
+   "tech": [
+    "Django",
+    "PostgreSQL"
+   ],
+   "facts": [
+    "Stock has unique_together (warehouse, product_variant)",
+    "Warehouse click_and_collect_option defaults to disabled",
+    "PreorderAllocation is marked 'TODO remove after 3.24'"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/models.py#Warehouse",
+   "parent": "f:saleor/saleor/warehouse/models.py",
+   "name": "Warehouse",
+   "kind": "class",
+   "summary": "A stock location with an address, linked channels and shipping zones, a privacy flag and a click-and-collect option.",
+   "paths": [
+    "saleor/saleor/warehouse/models.py:284"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/models.py#Stock",
+   "parent": "f:saleor/saleor/warehouse/models.py",
+   "name": "Stock",
+   "kind": "class",
+   "summary": "Quantity on hand and quantity allocated of one variant in one warehouse.",
+   "paths": [
+    "saleor/saleor/warehouse/models.py:527",
+    "saleor/saleor/warehouse/models.py:454"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/models.py#Allocation",
+   "parent": "f:saleor/saleor/warehouse/models.py",
+   "name": "Allocation",
+   "kind": "class",
+   "summary": "Quantity of a stock held for an order line until it is fulfilled or released.",
+   "paths": [
+    "saleor/saleor/warehouse/models.py:573"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/models.py#Reservation",
+   "parent": "f:saleor/saleor/warehouse/models.py",
+   "name": "Reservation",
+   "kind": "class",
+   "summary": "Quantity of a stock held for a checkout line until reserved_until passes.",
+   "paths": [
+    "saleor/saleor/warehouse/models.py:668"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py",
+   "parent": "core.ord.stock.domain",
+   "name": "Stock management",
+   "kind": "module",
+   "summary": "Allocates, deallocates, decreases and increases stock for order lines under row locks, and triggers out-of-stock and back-in-stock webhooks.",
+   "detail": "All writers lock stocks or allocations with SELECT FOR UPDATE and use F() expressions for counters. Only variants with track_inventory and no active preorder are touched. Webhooks are deferred with transaction.on_commit so they fire only if the transaction commits.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "allocate_stocks()",
+   "kind": "function",
+   "summary": "Allocates order line quantities across the channel's stocks, after existing allocations and optionally checkout reservations, in the channel's strategy order.",
+   "detail": "Locks candidate stocks (click-and-collect warehouses when a collection point is set), sums current allocations and, with check_reservations, other checkouts' live reservations, sorts stocks with sort_stocks, then greedily fills each line with _create_allocations. Any short line raises InsufficientStock and nothing is written. On success it bulk-creates Allocations, raises stock.quantity_allocated and queues out-of-stock webhooks for stocks that hit zero.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:91"
+   ],
+   "signature": "def allocate_stocks(order_lines_info, country_code, channel, site_settings, requestor, *, calculate_stocks_with_shipping_zones, collection_point_pk=None, additional_filter_lookup=None, check_reservations=False, checkout_lines=None)"
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#sort_stocks",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "sort_stocks()",
+   "kind": "function",
+   "summary": "Orders candidate stocks by the channel allocation strategy: highest available quantity first, or the channel's warehouse sort order; collection point always first.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:268",
+    "saleor/saleor/warehouse/management.py:302-313"
+   ],
+   "code": "allocation_strategy_to_sort_method_and_reverse_option = {\n    AllocationStrategy.PRIORITIZE_HIGH_STOCK: (sort_stocks_by_highest_stocks, True),\n    AllocationStrategy.PRIORITIZE_SORTING_ORDER: (\n        sort_stocks_by_warehouse_sorting_order,\n        False,\n    ),\n}\nsort_method, reverse = allocation_strategy_to_sort_method_and_reverse_option[\n    allocation_strategy\n]\nstocks.sort(key=sort_method, reverse=reverse)\nreturn stocks"
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#_create_allocations",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "_create_allocations()",
+   "kind": "function",
+   "summary": "Fills one line from sorted stocks: takes what each stock has free after allocations and reservations until the line quantity is covered.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:316",
+    "saleor/saleor/warehouse/management.py:326-340"
+   ],
+   "code": "for stock_data in stocks:\n    quantity_available_in_stock = stock_data.quantity\n    quantity_available_in_stock -= stocks_allocations.get(stock_data.pk, 0)\n    quantity_available_in_stock -= stocks_reservations.get(stock_data.pk, 0)\n\n    quantity_to_allocate = min(\n        (quantity - quantity_allocated), quantity_available_in_stock\n    )\n    if quantity_to_allocate > 0:\n        allocations.append(\n            Allocation(\n                order_line=line_info.line,\n                stock_id=stock_data.pk,\n                quantity_allocated=quantity_to_allocate,\n            )"
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#deallocate_stock",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "deallocate_stock()",
+   "kind": "function",
+   "summary": "Releases a given quantity of allocations per order line, lowers quantity_allocated and queues back-in-stock webhooks; raises AllocationError if short.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:359"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#deallocate_stock_for_orders",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "deallocate_stock_for_orders()",
+   "kind": "function",
+   "summary": "Releases every allocation of whole orders (cancel, expiry): zeroes allocations and lowers stock quantity_allocated in one locked pass.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:763"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#decrease_stock",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "decrease_stock()",
+   "kind": "function",
+   "summary": "On fulfilment: releases the lines' allocations, then lowers stock quantity in each line's warehouse, refusing if free stock is short unless exceeding is allowed.",
+   "detail": "decrease_allocations runs first so the line's own allocation does not count against it. _decrease_stocks_quantity then checks quantity minus other allocations against the requested quantity per warehouse and bulk-updates quantity. Stocks whose available quantity drops to zero or below get an out-of-stock webhook on commit.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:586",
+    "saleor/saleor/warehouse/management.py:651",
+    "saleor/saleor/warehouse/management.py:683-697"
+   ],
+   "code": "quantity_allocated = quantity_allocation_for_stocks.get(stock.pk, 0)\n\nis_stock_exceeded = stock.quantity - quantity_allocated < line_info.quantity\nif is_stock_exceeded and not allow_stock_to_be_exceeded:\n    insufficient_stocks.append(\n        InsufficientStockData(\n            variant=variant,\n            order_line=line_info.line,\n            warehouse_pk=warehouse_pk,\n            available_quantity=0,\n        )\n    )\n    continue\nstock.quantity = stock.quantity - line_info.quantity\nstocks_to_update.append(stock)"
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#increase_stock",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "increase_stock()",
+   "kind": "function",
+   "summary": "Puts quantity back into a warehouse stock (creating the row if needed) and optionally re-allocates it to the order line.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:456"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/management.py#increase_allocations",
+   "parent": "f:saleor/saleor/warehouse/management.py",
+   "name": "increase_allocations()",
+   "kind": "function",
+   "summary": "Grows allocations for edited order lines by deleting the old allocations and re-running allocate_stocks for the new total.",
+   "paths": [
+    "saleor/saleor/warehouse/management.py:520"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/reservations.py",
+   "parent": "core.ord.stock.domain",
+   "name": "Checkout stock reservations",
+   "kind": "module",
+   "summary": "Reserves stock for checkout lines for a configured number of minutes, after allocations and other live reservations, using the same strategy sort.",
+   "detail": "Reservation is enabled when site settings give a reservation length for authenticated or anonymous users. reserve_stocks locks the variant stocks, subtracts allocations and other checkouts' live reservations, sorts with sort_stocks and creates Reservation rows, replacing the checkout's previous ones. Expired rows are deleted by delete_expired_reservations_task.",
+   "paths": [
+    "saleor/saleor/warehouse/reservations.py"
+   ],
+   "tech": [
+    "Python"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/availability.py",
+   "parent": "core.ord.stock.domain",
+   "name": "Stock availability checks",
+   "kind": "module",
+   "summary": "Validates that requested quantities are available in a channel and country (after allocations and optional reservations) and checks per-variant purchase limits.",
+   "paths": [
+    "saleor/saleor/warehouse/availability.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "_get_available_quantity sums quantity minus allocations over the given stocks and, when reservations are checked, also subtracts other checkouts' live reservations. check_stock_quantity and its bulk variant raise InsufficientStock when a requested quantity exceeds that, and enforce per-variant quantity limits. Preorder threshold checks remain for the deprecated preorder feature."
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/channel_stock_availability.py",
+   "parent": "core.ord.stock.domain",
+   "name": "Channel stock availability events",
+   "kind": "module",
+   "summary": "Works out which channels lost or regained all availability of a variant and fires channel-scoped and click-and-collect stock webhooks.",
+   "paths": [
+    "saleor/saleor/warehouse/channel_stock_availability.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "For each stock that hit zero or came back, it splits stocks into click-and-collect and regular warehouses, finds the channels of each warehouse and fires the channel event only where no other warehouse of the same kind in that channel still has availability. A pre-delete snapshot (SourceWarehouseData) lets warehouse deletion fire these events after the rows are gone."
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/tasks.py",
+   "parent": "core.ord.stock.domain",
+   "name": "Stock background tasks",
+   "kind": "job",
+   "summary": "Celery tasks that delete empty allocations, delete expired reservations and fix stocks whose quantity_allocated disagrees with their allocations.",
+   "paths": [
+    "saleor/saleor/warehouse/tasks.py"
+   ],
+   "tech": [
+    "Celery"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/validation.py",
+   "parent": "core.ord.stock.domain",
+   "name": "Warehouse shipping zone validation",
+   "kind": "function",
+   "summary": "Allows assigning shipping zones to a warehouse only if they are not already served by a different warehouse.",
+   "paths": [
+    "saleor/saleor/warehouse/validation.py"
+   ]
+  },
+  {
+   "id": "d:saleor/saleor/warehouse/webhooks",
+   "parent": "core.ord.stock",
+   "name": "Stock webhooks",
+   "kind": "module",
+   "summary": "Trigger functions and payloads for PRODUCT_VARIANT_OUT_OF_STOCK, BACK_IN_STOCK, STOCK_UPDATED and their channel and click-and-collect variants.",
+   "detail": "stock_events.py sends one asynchronous webhook per stock with a legacy payload generated from the variant and stock. channel_stock_events.py groups VariantChannelStockInfo by channel, filters webhooks to those subscribed for the channel and sends them in batches; it does nothing when legacy shipping-zone stock availability is on.",
+   "paths": [
+    "saleor/saleor/warehouse/webhooks/"
+   ],
+   "tech": [
+    "Python"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/webhooks/stock_events.py#trigger_product_variant_out_of_stock",
+   "parent": "d:saleor/saleor/warehouse/webhooks",
+   "name": "trigger_product_variant_out_of_stock()",
+   "kind": "function",
+   "summary": "Sends PRODUCT_VARIANT_OUT_OF_STOCK for one stock to every subscribed webhook through the asynchronous transport.",
+   "paths": [
+    "saleor/saleor/warehouse/webhooks/stock_events.py:26"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/warehouse/webhooks/channel_stock_events.py#_trigger",
+   "parent": "d:saleor/saleor/warehouse/webhooks",
+   "name": "Channel stock webhook trigger",
+   "kind": "function",
+   "summary": "Groups channel stock changes by channel and sends them to the webhooks subscribed for that channel; skipped under legacy availability.",
+   "paths": [
+    "saleor/saleor/warehouse/webhooks/channel_stock_events.py:39"
+   ]
+  },
+  {
+   "id": "core.ord.shipping",
+   "parent": "core.orders",
+   "name": "Shipping zones and methods",
+   "kind": "group",
+   "summary": "Shipping zones by country, price- and weight-based shipping methods with per-channel prices, postal code rules and app-driven filtering of methods.",
+   "detail": "A ShippingZone covers countries and channels and is served by warehouses. Its ShippingMethods are either price based (order subtotal between per-channel minimum and maximum) or weight based (order weight between limits); the price comes from the method's ShippingMethodChannelListing for the channel. Postal code rules include or exclude address ranges, and methods can exclude specific products. For orders, installed apps can hide methods through the ORDER_FILTER_SHIPPING_METHODS synchronous webhook; responses are cached for 3 minutes. External methods offered by apps through SHIPPING_LIST_METHODS_FOR_CHECKOUT are fetched by the checkout area.",
+   "paths": [
+    "saleor/saleor/shipping/",
+    "saleor/saleor/order/delivery_context.py",
+    "saleor/saleor/order/webhooks/exclude_shipping.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/shipping/models.py",
+   "parent": "core.ord.shipping",
+   "name": "Shipping data model",
+   "kind": "data",
+   "summary": "ShippingZone, ShippingMethod, per-channel ShippingMethodChannelListing prices and limits, postal code rules and translations.",
+   "paths": [
+    "saleor/saleor/shipping/models.py"
+   ],
+   "tech": [
+    "Django",
+    "PostgreSQL"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/shipping/models.py#ShippingMethodQueryset.applicable_shipping_methods",
+   "parent": "f:saleor/saleor/shipping/models.py",
+   "name": "applicable_shipping_methods()",
+   "kind": "function",
+   "summary": "Methods usable for a country, channel, currency, total and weight: zone covers the country, product exclusions respected, price or weight limits met, cheapest first.",
+   "detail": "Price-based methods are matched against the channel listing's minimum and maximum order price; weight-based ones against the method's minimum and maximum weight. Results are annotated with the channel price and ordered by it. applicable_shipping_methods_for_instance then removes methods failing postal code rules for the shipping address.",
+   "paths": [
+    "saleor/saleor/shipping/models.py:140",
+    "saleor/saleor/shipping/models.py:45"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/shipping/postal_codes.py",
+   "parent": "core.ord.shipping",
+   "name": "Postal code rules",
+   "kind": "module",
+   "summary": "Checks a shipping address postal code against a method's include or exclude ranges, with special handling for UK and Irish codes.",
+   "paths": [
+    "saleor/saleor/shipping/postal_codes.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "check_postal_code_in_range compares a code against a rule's start and end, using UK-specific and Irish-specific parsers for those countries and plain comparison elsewhere. filter_shipping_methods_by_postal_code_rules evaluates every method against the shipping address and excludes those that fail."
+  },
+  {
+   "id": "f:saleor/saleor/shipping/postal_codes.py#is_shipping_method_applicable_for_postal_code",
+   "parent": "f:saleor/saleor/shipping/postal_codes.py",
+   "name": "is_shipping_method_applicable_for_postal_code()",
+   "kind": "function",
+   "summary": "All-include rules need a match, all-exclude rules need no match; a mix of include and exclude rules makes the method unavailable.",
+   "paths": [
+    "saleor/saleor/shipping/postal_codes.py:96",
+    "saleor/saleor/shipping/postal_codes.py:100-114"
+   ],
+   "code": "results = check_shipping_method_for_postal_code(customer_shipping_address, method)\nif not results:\n    return True\nif all(\n    rule.inclusion_type == PostalCodeRuleInclusionType.INCLUDE\n    for rule in results.keys()\n):\n    return any(results.values())\nif all(\n    rule.inclusion_type == PostalCodeRuleInclusionType.EXCLUDE\n    for rule in results.keys()\n):\n    return not any(results.values())\n# Shipping methods with complex rules are not supported for now\nreturn False"
+  },
+  {
+   "id": "f:saleor/saleor/shipping/interface.py",
+   "parent": "core.ord.shipping",
+   "name": "Shipping method data",
+   "kind": "module",
+   "summary": "ShippingMethodData, the common shape for built-in and app-provided shipping methods, and ExcludedShippingMethod.",
+   "detail": "is_external is true when the id decodes as a global id with the app prefix, which is how app-provided methods are told apart from database ShippingMethods.",
+   "paths": [
+    "saleor/saleor/shipping/interface.py",
+    "saleor/saleor/shipping/utils.py",
+    "saleor/saleor/shipping/__init__.py",
+    "saleor/saleor/shipping/error_codes.py"
+   ],
+   "tech": [
+    "Python"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/shipping/webhooks/shared.py",
+   "parent": "core.ord.shipping",
+   "name": "Shipping filter webhooks",
+   "kind": "module",
+   "summary": "Calls every app subscribed to a filter-shipping-methods event in parallel and merges the methods they exclude, with reasons.",
+   "detail": "For orders, each webhook call goes through trigger_webhook_sync_promise_if_not_cached with a 3-minute cache keyed on a payload stripped of tax-dependent fields; checkouts call without cache. Responses are validated with the FilterShippingMethodsSchema pydantic model and invalid ones are logged and skipped. Reasons for the same method from several apps are joined with spaces.",
+   "paths": [
+    "saleor/saleor/shipping/webhooks/shared.py",
+    "saleor/saleor/shipping/webhooks/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Pydantic"
+   ],
+   "facts": [
+    "CACHE_EXCLUDED_SHIPPING_TIME = 60 * 3 seconds",
+    "Request timeout is settings.WEBHOOK_SYNC_TIMEOUT"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/shipping/webhooks/shared.py#get_excluded_shipping_data",
+   "parent": "f:saleor/saleor/shipping/webhooks/shared.py",
+   "name": "get_excluded_shipping_data()",
+   "kind": "function",
+   "summary": "Returns a Promise of excluded shipping methods gathered from all subscribed apps, using the response cache when cache data is given.",
+   "paths": [
+    "saleor/saleor/shipping/webhooks/shared.py:143"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/delivery_context.py",
+   "parent": "core.ord.shipping",
+   "name": "Order delivery options",
+   "kind": "module",
+   "summary": "Lists the shipping methods and collection points valid for an order and asks apps which to hide while the order is still editable.",
+   "paths": [
+    "saleor/saleor/order/delivery_context.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "get_all_shipping_methods_for_order returns nothing when no line needs shipping or there is no shipping address; otherwise it takes applicable methods for the address, subtotal and weight and keeps those with a channel listing, converted to ShippingMethodData with the channel price. get_valid_shipping_methods_for_order then marks app-excluded methods inactive, calling apps only for draft and unconfirmed orders. Collection points come from warehouses offering click and collect for the order's lines."
+  },
+  {
+   "id": "f:saleor/saleor/order/delivery_context.py#get_valid_shipping_methods_for_order",
+   "parent": "f:saleor/saleor/order/delivery_context.py",
+   "name": "get_valid_shipping_methods_for_order()",
+   "kind": "function",
+   "summary": "Builds ShippingMethodData for applicable methods with channel prices and marks app-excluded ones inactive; webhooks only for draft or unconfirmed orders.",
+   "paths": [
+    "saleor/saleor/order/delivery_context.py:71",
+    "saleor/saleor/order/delivery_context.py:30"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/order/webhooks/exclude_shipping.py",
+   "parent": "core.ord.shipping",
+   "name": "Order shipping filter webhook",
+   "kind": "module",
+   "summary": "Builds the ORDER_FILTER_SHIPPING_METHODS payload and cache key and asks subscribed apps which shipping methods to exclude for an order.",
+   "paths": [
+    "saleor/saleor/order/webhooks/exclude_shipping.py",
+    "saleor/saleor/order/webhooks/__init__.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "The payload is the regular order payload plus the candidate methods. For the cache key, fields a tax app can change (totals, shipping price, line prices, tax rates) and volatile fields (last change, metadata, chosen shipping method) are removed and base prices added, so recalculating taxes does not bust the 3-minute cache of app answers."
+  },
+  {
+   "id": "f:saleor/saleor/order/webhooks/exclude_shipping.py#excluded_shipping_methods_for_order",
+   "parent": "f:saleor/saleor/order/webhooks/exclude_shipping.py",
+   "name": "excluded_shipping_methods_for_order()",
+   "kind": "function",
+   "summary": "Skips work when there are no methods or no subscribed webhooks; otherwise generates the payload and cache data and calls get_excluded_shipping_data.",
+   "paths": [
+    "saleor/saleor/order/webhooks/exclude_shipping.py:48",
+    "saleor/saleor/order/webhooks/exclude_shipping.py:63-76"
+   ],
+   "code": "static_payload = generate_excluded_shipping_methods_for_order_payload(\n    order,\n    available_shipping_methods,\n)\ncache_data = _get_cache_data_for_exclude_shipping_methods(order, static_payload)\nreturn get_excluded_shipping_data(\n    webhooks=webhooks,\n    event_type=WebhookEventSyncType.ORDER_FILTER_SHIPPING_METHODS,\n    static_payload=static_payload,\n    subscribable_object=(order, available_shipping_methods),\n    allow_replica=allow_replica,\n    requestor=requestor,\n    cache_data=cache_data,\n)"
+  },
+  {
+   "id": "f:saleor/saleor/shipping/tasks.py",
+   "parent": "core.ord.shipping",
+   "name": "Shipping relation cleanup task",
+   "kind": "job",
+   "summary": "Celery task that unlinks a shipping method from checkouts and editable orders in channels where it is no longer available.",
+   "paths": [
+    "saleor/saleor/shipping/tasks.py"
+   ],
+   "tech": [
+    "Celery"
+   ]
+  },
+  {
+   "id": "core.ord.invoice",
+   "parent": "core.orders",
+   "name": "Invoices",
+   "kind": "group",
+   "summary": "Invoice records for orders, requested from an invoicing app or plugin, created or updated directly, and sent to the customer through webhooks.",
+   "detail": "Saleor does not render invoices itself. invoiceRequest creates an empty Invoice job and calls PluginsManager.invoice_request, which fires the INVOICE_REQUESTED webhook so an invoicing app can generate the file and report back with invoiceUpdate. invoiceCreate stores a ready invoice (number and URL) from outside. invoiceSendNotification sends the INVOICE_READY notify event and the INVOICE_SENT webhook, which the SMTP app turns into an email. Every step writes InvoiceEvent and OrderEvent rows.",
+   "paths": [
+    "saleor/saleor/invoice/",
+    "saleor/saleor/graphql/invoice/"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/invoice/models.py",
+   "parent": "core.ord.invoice",
+   "name": "Invoice data model",
+   "kind": "data",
+   "summary": "Invoice (a Job with status, number, external URL or stored file, metadata) and InvoiceEvent audit rows, linked to an order.",
+   "paths": [
+    "saleor/saleor/invoice/models.py",
+    "saleor/saleor/invoice/__init__.py",
+    "saleor/saleor/invoice/error_codes.py"
+   ],
+   "tech": [
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/invoice/events.py",
+   "parent": "core.ord.invoice",
+   "name": "Invoice event log",
+   "kind": "module",
+   "summary": "Writes InvoiceEvent rows for requested, requested deletion, created, deleted and sent invoices.",
+   "paths": [
+    "saleor/saleor/invoice/events.py"
+   ],
+   "detail": "Each function inserts one InvoiceEvent with the invoice, order, acting user or app and parameters such as the number or URL. order/events.py keeps the matching order timeline entries (invoice requested, generated, updated, sent)."
+  },
+  {
+   "id": "f:saleor/saleor/invoice/notifications.py",
+   "parent": "core.ord.invoice",
+   "name": "Invoice notification",
+   "kind": "module",
+   "summary": "Sends an invoice to the order's customer: INVOICE_READY through notify and the INVOICE_SENT webhook.",
+   "paths": [
+    "saleor/saleor/invoice/notifications.py"
+   ],
+   "detail": "get_invoice_payload exposes the invoice id, number, download URL and order id. send_invoice wraps the payload with recipient email and requester ids in a NotifyHandler, calls manager.notify with INVOICE_READY for the order's channel and then manager.invoice_sent, which fires the INVOICE_SENT webhook."
+  },
+  {
+   "id": "f:saleor/saleor/invoice/notifications.py#send_invoice",
+   "parent": "f:saleor/saleor/invoice/notifications.py",
+   "name": "send_invoice()",
+   "kind": "function",
+   "summary": "Builds the invoice payload (number, download URL, recipient, requester) and calls manager.notify and manager.invoice_sent.",
+   "paths": [
+    "saleor/saleor/invoice/notifications.py:23",
+    "saleor/saleor/invoice/notifications.py:41-50"
+   ],
+   "code": "channel_slug = None\nif invoice.order and invoice.order.channel:\n    channel_slug = invoice.order.channel.slug\nhandler = NotifyHandler(_generate_payload)\nmanager.notify(\n    NotifyEventType.INVOICE_READY,\n    payload_func=handler.payload,\n    channel_slug=channel_slug,\n)\nif invoice.order:"
+  },
+  {
+   "id": "core.ord.api",
+   "parent": "core.orders",
+   "name": "Order GraphQL API",
+   "kind": "group",
+   "summary": "The orders, order and draftOrders queries, the Order type with lazy price and shipping resolvers, and every order mutation.",
+   "detail": "Order mutations are Graphene classes behind the single GraphQL endpoint. Almost all require the MANAGE_ORDERS permission and call check_channel_permissions so staff limited to some channels cannot touch orders in others. Mutations validate input, then delegate to order/actions.py or order/utils.py and return the order wrapped in SyncWebhookControlContext, which tells resolvers whether they may call synchronous webhooks (tax apps, shipping filters) while resolving prices.",
+   "paths": [
+    "saleor/saleor/graphql/order/"
+   ],
+   "tech": [
+    "Graphene",
+    "GraphQL"
+   ]
+  },
+  {
+   "id": "core.ord.api.read",
+   "parent": "core.ord.api",
+   "name": "Order queries and types",
+   "kind": "group",
+   "summary": "Query fields, resolvers, the Order, OrderLine, Fulfillment and OrderEvent types, dataloaders, filters, sorting and enums.",
+   "detail": "resolve_orders restricts results to channels the staff user can access (apps see all). Order prices are resolved through dataloaders that batch the lazy recalculation; the orders list passes allow_sync_webhooks=False so listing never calls tax apps or shipping filter webhooks. Filtering offers the deprecated filter input and the newer where input, plus PostgreSQL full-text search.",
+   "paths": [
+    "saleor/saleor/graphql/order/schema.py",
+    "saleor/saleor/graphql/order/types.py",
+    "saleor/saleor/graphql/order/resolvers.py",
+    "saleor/saleor/graphql/order/dataloaders.py",
+    "saleor/saleor/graphql/order/filters.py",
+    "saleor/saleor/graphql/order/sorters.py",
+    "saleor/saleor/graphql/order/enums.py",
+    "saleor/saleor/graphql/order/__init__.py"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "core.ord.api.drafts",
+   "parent": "core.ord.api",
+   "name": "Draft order mutations",
+   "kind": "group",
+   "summary": "Create, update, delete and complete staff-made draft orders, with validation of lines, addresses, shipping and vouchers.",
+   "detail": "Drafts are editable orders (status draft). Create and update share DraftOrderInput and the voucher and redirect URL cleaners; every edit invalidates prices so they are recalculated on next read. Completion recalculates prices and taxes, validates the draft, switches status to unconfirmed or unfulfilled, allocates stock line by line and then runs order_created after commit.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/draft_order_create.py",
+    "saleor/saleor/graphql/order/mutations/draft_order_update.py",
+    "saleor/saleor/graphql/order/mutations/draft_order_complete.py",
+    "saleor/saleor/graphql/order/mutations/draft_order_delete.py",
+    "saleor/saleor/graphql/order/mutations/draft_order_cleaner.py",
+    "saleor/saleor/graphql/order/utils.py"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "core.ord.api.fulfil",
+   "parent": "core.ord.api",
+   "name": "Fulfilment and return mutations",
+   "kind": "group",
+   "summary": "Fulfil order lines from warehouses, approve or cancel fulfilments, update tracking, and refund or return products.",
+   "detail": "orderFulfill takes per-line quantities per warehouse and calls create_fulfillments. When the site setting fulfillment_auto_approve is off, fulfilments wait for orderFulfillmentApprove, which is when stock is decreased. Refund and return mutations share a base class that validates lines and the legacy payment, then call the refund and return actions.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_fulfill.py",
+    "saleor/saleor/graphql/order/mutations/fulfillment_approve.py",
+    "saleor/saleor/graphql/order/mutations/fulfillment_cancel.py",
+    "saleor/saleor/graphql/order/mutations/fulfillment_update_tracking.py",
+    "saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py",
+    "saleor/saleor/graphql/order/mutations/fulfillment_return_products.py",
+    "saleor/saleor/graphql/order/mutations/fulfillment_refund_and_return_product_base.py"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "core.ord.api.payments",
+   "parent": "core.ord.api",
+   "name": "Order payment and refund mutations",
+   "kind": "group",
+   "summary": "Confirm, cancel, mark as paid, grant refunds, and the deprecated legacy-payment capture, refund and void mutations.",
+   "detail": "Two payment models coexist. The legacy Payment flow (orderCapture, orderRefund, orderVoid) calls payment.gateway directly and is deprecated. The transaction flow records money in TransactionItems: staff grant a refund with orderGrantRefundCreate, which only records the intent and recomputes charge status, and the refund itself is requested later through the payment area's transactionRequestRefundForGrantedRefund. orderMarkAsPaid follows the channel's mark-as-paid strategy, creating either a Payment or a TransactionItem.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_confirm.py",
+    "saleor/saleor/graphql/order/mutations/order_cancel.py",
+    "saleor/saleor/graphql/order/mutations/order_mark_as_paid.py",
+    "saleor/saleor/graphql/order/mutations/order_grant_refund_create.py",
+    "saleor/saleor/graphql/order/mutations/order_grant_refund_update.py",
+    "saleor/saleor/graphql/order/mutations/order_grant_refund_utils.py",
+    "saleor/saleor/graphql/order/mutations/order_refund.py",
+    "saleor/saleor/graphql/order/mutations/order_capture.py",
+    "saleor/saleor/graphql/order/mutations/order_void.py"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "core.ord.api.edit",
+   "parent": "core.ord.api",
+   "name": "Order editing mutations",
+   "kind": "group",
+   "summary": "Add, change and remove lines, manual order and line discounts, notes, addresses and the shipping method of draft and unconfirmed orders.",
+   "detail": "EditableOrderValidationMixin rejects changes unless the order is draft or unconfirmed. Line changes adjust stock allocations for unconfirmed orders, invalidate prices, recompute weight and the search vector, then fire DRAFT_ORDER_UPDATED or ORDER_UPDATED depending on status through call_event_by_order_status.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_lines_create.py",
+    "saleor/saleor/graphql/order/mutations/order_line_update.py",
+    "saleor/saleor/graphql/order/mutations/order_line_delete.py",
+    "saleor/saleor/graphql/order/mutations/order_discount_add.py",
+    "saleor/saleor/graphql/order/mutations/order_discount_update.py",
+    "saleor/saleor/graphql/order/mutations/order_discount_delete.py",
+    "saleor/saleor/graphql/order/mutations/order_discount_common.py",
+    "saleor/saleor/graphql/order/mutations/order_line_discount_update.py",
+    "saleor/saleor/graphql/order/mutations/order_line_discount_remove.py",
+    "saleor/saleor/graphql/order/mutations/order_note_add.py",
+    "saleor/saleor/graphql/order/mutations/order_note_update.py",
+    "saleor/saleor/graphql/order/mutations/order_note_common.py",
+    "saleor/saleor/graphql/order/mutations/order_update.py",
+    "saleor/saleor/graphql/order/mutations/order_update_shipping.py",
+    "saleor/saleor/graphql/order/mutations/utils.py",
+    "saleor/saleor/graphql/order/mutations/__init__.py"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "core.ord.api.bulk",
+   "parent": "core.ord.api",
+   "name": "Bulk order mutations",
+   "kind": "group",
+   "summary": "Import many orders at once, cancel several orders, and delete draft orders or draft lines in bulk.",
+   "paths": [
+    "saleor/saleor/graphql/order/bulk_mutations/"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "orderBulkCreate is the import path for orders created elsewhere and is the largest file in the area. orderBulkCancel and the draft bulk deletes loop over existing single-order logic (cancel_order, draft deletion) and fire the same webhooks per order."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/schema.py#OrderQueries.resolve_orders",
+   "parent": "core.ord.api.read",
+   "name": "orders query resolver",
+   "kind": "function",
+   "summary": "Resolves the orders query: channel-restricted queryset, optional search and filters, paginated without synchronous webhooks.",
+   "paths": [
+    "saleor/saleor/graphql/order/schema.py:239",
+    "saleor/saleor/graphql/order/schema.py:137"
+   ],
+   "signature": "def resolve_orders(_root, info, *, channel=None, **kwargs)"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/resolvers.py",
+   "parent": "core.ord.api.read",
+   "name": "Order resolvers",
+   "kind": "module",
+   "summary": "Querysets for orders, draft orders, a single order, homepage events, order by token and order totals, limited to the user's accessible channels.",
+   "paths": [
+    "saleor/saleor/graphql/order/resolvers.py"
+   ],
+   "tech": [
+    "Django"
+   ],
+   "detail": "Every list resolver reads from the replica connection chosen for the request. Staff users get only orders in channels they can access; requesting a channel they cannot access raises PermissionDenied. resolve_order_by_token looks up a non-draft order by its UUID for customers without an account."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/resolvers.py#resolve_orders",
+   "parent": "f:saleor/saleor/graphql/order/resolvers.py",
+   "name": "resolve_orders()",
+   "kind": "function",
+   "summary": "Non-draft orders on the read connection, filtered by channel slug and by the channels the requesting staff user may access; apps see every channel.",
+   "paths": [
+    "saleor/saleor/graphql/order/resolvers.py:20"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/types.py",
+   "parent": "core.ord.api.read",
+   "name": "Order GraphQL types",
+   "kind": "module",
+   "summary": "Order, OrderLine, Fulfillment, FulfillmentLine, OrderEvent, OrderDiscount and OrderGrantedRefund object types with permission-aware resolvers.",
+   "detail": "Price fields (total, subtotal, shipping price, line prices) load through OrderPriceCalculationByOrderIdAndWebhookSyncLoader so several fields share one recalculation. shippingMethods resolves through OrderShippingMethodsByOrderIdAndWebhookSyncLoader. Fields that would trigger synchronous webhooks are guarded by prevent_sync_event_circular_query so an app answering a webhook cannot recurse.",
+   "paths": [
+    "saleor/saleor/graphql/order/types.py"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/types.py#Order",
+   "parent": "f:saleor/saleor/graphql/order/types.py",
+   "name": "Order type",
+   "kind": "class",
+   "summary": "The GraphQL Order object: status, lines, fulfilments, events, prices, payments, transactions, granted refunds, invoices and delivery options.",
+   "paths": [
+    "saleor/saleor/graphql/order/types.py:1609"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/dataloaders.py",
+   "parent": "core.ord.api.read",
+   "name": "Order dataloaders",
+   "kind": "module",
+   "summary": "Batch loaders for orders, lines, events, fulfilments, granted refunds and allocations, plus loaders that run price recalculation and shipping method lookup.",
+   "paths": [
+    "saleor/saleor/graphql/order/dataloaders.py"
+   ],
+   "tech": [
+    "Promise"
+   ],
+   "detail": "Simple loaders fetch rows by id or order id in one query per batch. The webhook-aware loaders take (order id, allow_sync_webhooks) keys: the promotion loader refreshes base prices and promotions, the price loader then runs tax calculation for orders that need it, and the shipping loader resolves valid methods using channel listings loaded per channel."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/dataloaders.py#OrderPriceCalculationByOrderIdAndWebhookSyncLoader",
+   "parent": "f:saleor/saleor/graphql/order/dataloaders.py",
+   "name": "Order price calculation loader",
+   "kind": "class",
+   "summary": "Batches price refresh for many orders: applies promotions, then recalculates taxes for orders that need it, honouring allow_sync_webhooks.",
+   "paths": [
+    "saleor/saleor/graphql/order/dataloaders.py:382"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/dataloaders.py#OrderShippingMethodsByOrderIdAndWebhookSyncLoader",
+   "parent": "f:saleor/saleor/graphql/order/dataloaders.py",
+   "name": "Order shipping methods loader",
+   "kind": "class",
+   "summary": "Batches shipping method lookup: loads channel listings per channel and calls get_valid_shipping_methods_for_order for each order.",
+   "paths": [
+    "saleor/saleor/graphql/order/dataloaders.py:430"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/filters.py",
+   "parent": "core.ord.api.read",
+   "name": "Order filters",
+   "kind": "module",
+   "summary": "OrderFilter and DraftOrderFilter (deprecated filter input) and OrderWhere, DraftOrderWhere and CustomerOrderWhere (where input) on status, payments, lines, fulfilments and more.",
+   "paths": [
+    "saleor/saleor/graphql/order/filters.py",
+    "saleor/saleor/graphql/order/sorters.py",
+    "saleor/saleor/graphql/order/enums.py"
+   ],
+   "tech": [
+    "django-filter"
+   ],
+   "detail": "The filter input classes are django-filter FilterSets; the where inputs use explicit filter functions per field (status, numbers, dates, user, totals, lines, events, transactions, fulfilments by warehouse, invoices, addresses). Search uses the order search vector, and sorters.py adds sorting including rank for search results."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/utils.py",
+   "parent": "core.ord.api.drafts",
+   "name": "Draft order validation",
+   "kind": "module",
+   "summary": "validate_draft_order checks addresses, shipping method, lines, variant availability and channel listings, stock and vouchers before a draft can be completed.",
+   "paths": [
+    "saleor/saleor/graphql/order/utils.py"
+   ],
+   "tech": [
+    "Python"
+   ],
+   "detail": "validate_draft_order collects errors instead of failing on the first: billing and shipping addresses, a valid and still active shipping method (re-checked through get_valid_shipping_methods_for_order), at least one line, variants published and available in the channel, an active channel, stock for each line and the voucher. prepare_insufficient_stock_order_validation_errors turns InsufficientStock into per-line GraphQL errors."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/draft_order_create.py#DraftOrderCreate",
+   "parent": "core.ord.api.drafts",
+   "name": "DraftOrderCreate (draftOrderCreate)",
+   "kind": "class",
+   "summary": "Creates a draft order in a channel with customer, addresses, lines, shipping method, voucher and discounts; needs MANAGE_ORDERS.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/draft_order_create.py:181"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "The channel id is required and checked against the staff user's channels before anything else. Variants are checked against their channel listings and lines are created with create_order_line; the draft is saved with prices invalidated, an added-products and draft-created event are written and DRAFT_ORDER_CREATED fires. Voucher usage is increased when the channel counts drafts in voucher usage."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/draft_order_update.py#DraftOrderUpdate",
+   "parent": "core.ord.api.drafts",
+   "name": "DraftOrderUpdate (draftOrderUpdate)",
+   "kind": "class",
+   "summary": "Updates a draft order's customer, addresses, shipping, voucher and metadata, invalidates prices and fires DRAFT_ORDER_UPDATED.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/draft_order_update.py:50"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+   "parent": "core.ord.api.drafts",
+   "name": "DraftOrderComplete (draftOrderComplete)",
+   "kind": "class",
+   "summary": "Turns a draft into a real order: recalculates taxes, validates, sets status unconfirmed or unfulfilled, allocates stock and runs order_created.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/draft_order_complete.py:48"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "It refuses to complete when the tax app returned an error or when the order changed during recalculation (should_refresh_prices still set), because completed orders are no longer recalculated. Inside a transaction it copies the user email, drops shipping data for orders that need no shipping, denormalizes shipping method metadata, rebuilds the search vector, handles single-use vouchers and allocates stock per line, turning InsufficientStock into a lines error. order_created, saving the customer's addresses and the staff notification run on commit.",
+   "signature": "def perform_mutation(cls, _root, info, /, *, id: str)"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/draft_order_delete.py#DraftOrderDelete",
+   "parent": "core.ord.api.drafts",
+   "name": "DraftOrderDelete (draftOrderDelete)",
+   "kind": "class",
+   "summary": "Deletes a draft order (only status draft) and fires DRAFT_ORDER_DELETED.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/draft_order_delete.py:27"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill",
+   "parent": "core.ord.api.fulfil",
+   "name": "OrderFulfill (orderFulfill)",
+   "kind": "class",
+   "summary": "Creates fulfilments for chosen quantities of order lines from chosen warehouses; needs MANAGE_ORDERS and access to the order's channel.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_fulfill.py:90"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "clean_input refuses unpaid orders when auto-approve is on and unpaid fulfilment is not allowed, rejects duplicate warehouses per line and duplicate lines, checks each line's remaining quantity, rejects preorder variants under auto-approve and requires a positive total. It groups quantities per warehouse and calls create_fulfillments; InsufficientStock becomes a stocks error. Webhooks: FULFILLMENT_CREATED, ORDER_FULFILLED, FULFILLMENT_TRACKING_NUMBER_UPDATED, FULFILLMENT_APPROVED.",
+   "signature": "def perform_mutation(cls, _root, info, /, *, input, order: str | None = None)"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill.clean_input",
+   "parent": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill",
+   "name": "OrderFulfill.clean_input()",
+   "kind": "function",
+   "summary": "Validates payment state, duplicates, remaining quantities and preorders, and builds the warehouse-to-lines map for create_fulfillments.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_fulfill.py:191"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/fulfillment_approve.py#FulfillmentApprove",
+   "parent": "core.ord.api.fulfil",
+   "name": "FulfillmentApprove (orderFulfillmentApprove)",
+   "kind": "class",
+   "summary": "Approves a fulfilment waiting for approval, decreasing stock and completing it; optional customer notification and stock overrun.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/fulfillment_approve.py:27"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/fulfillment_cancel.py#FulfillmentCancel",
+   "parent": "core.ord.api.fulfil",
+   "name": "FulfillmentCancel (orderFulfillmentCancel)",
+   "kind": "class",
+   "summary": "Cancels a fulfilment and, when a warehouse is given, puts its items back into that warehouse's stock.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/fulfillment_cancel.py:35"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/fulfillment_update_tracking.py#FulfillmentUpdateTracking",
+   "parent": "core.ord.api.fulfil",
+   "name": "FulfillmentUpdateTracking (orderFulfillmentUpdat",
+   "kind": "class",
+   "summary": "Sets a fulfilment's tracking number, logs the event, fires FULFILLMENT_TRACKING_NUMBER_UPDATED and optionally emails the customer.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/fulfillment_update_tracking.py:22"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py#FulfillmentRefundProducts",
+   "parent": "core.ord.api.fulfil",
+   "name": "FulfillmentRefundProducts (orderFulfillmentRefun",
+   "kind": "class",
+   "summary": "Refunds chosen order or fulfilment lines (and optionally shipping) through the order's legacy payment into a refunded fulfilment.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py:79"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/fulfillment_return_products.py#FulfillmentReturnProducts",
+   "parent": "core.ord.api.fulfil",
+   "name": "FulfillmentReturnProducts (orderFulfillmentRetur",
+   "kind": "class",
+   "summary": "Returns or replaces chosen lines with an optional refund and reasons; replaced lines go to a new draft order.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/fulfillment_return_products.py:116"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/fulfillment_refund_and_return_product_base.py",
+   "parent": "core.ord.api.fulfil",
+   "name": "Refund and return base",
+   "kind": "class",
+   "summary": "Shared validation for refund and return mutations: no gift card lines, quantities within line and unfulfilled amounts, allowed fulfilment statuses, refundable payment.",
+   "detail": "clean_lines and clean_fulfillment_lines load the OrderLine and FulfillmentLine rows named by global id and check their quantities. clean_amount_to_refund rejects a manual amount above the charged value and raise_error_for_payment_error turns gateway failures into a validation error.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/fulfillment_refund_and_return_product_base.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_confirm.py#OrderConfirm",
+   "parent": "core.ord.api.payments",
+   "name": "OrderConfirm (orderConfirm)",
+   "kind": "class",
+   "summary": "Confirms an unconfirmed order with lines: status becomes unfulfilled, an authorized legacy payment is captured, ORDER_CONFIRMED fires and the customer is emailed.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_confirm.py:32"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "The status change goes through update_order_status, which derives unfulfilled because nothing is fulfilled yet. If the last payment is authorized and capturable it is captured through payment.gateway.capture and order_charged runs on commit. order_confirmed runs on commit with send_confirmation_email=True."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_cancel.py#OrderCancel",
+   "parent": "core.ord.api.payments",
+   "name": "OrderCancel (orderCancel)",
+   "kind": "class",
+   "summary": "Cancels an order that can_cancel allows: releases stock, sets status canceled, fires ORDER_CANCELLED and deactivates gift cards bought in it.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_cancel.py:34"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_mark_as_paid.py#OrderMarkAsPaid",
+   "parent": "core.ord.api.payments",
+   "name": "OrderMarkAsPaid (orderMarkAsPaid)",
+   "kind": "class",
+   "summary": "Marks an order paid with an optional external reference, creating a Payment or a TransactionItem according to the channel's mark-as-paid strategy.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_mark_as_paid.py:36"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "Prices are refreshed first and a billing address is required. With the payment flow strategy it creates a fully captured manual Payment; otherwise it creates a TransactionItem charged for the order total and, on failure, records a transaction_mark_as_paid_failed event."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_create.py#OrderGrantRefundCreate",
+   "parent": "core.ord.api.payments",
+   "name": "OrderGrantRefundCreate (orderGrantRefundCreate)",
+   "kind": "class",
+   "summary": "Records a granted refund (amount, reason, lines, shipping, transaction) and recomputes charge status; the money moves later through a refund request.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_grant_refund_create.py:111",
+    "saleor/saleor/graphql/order/mutations/order_grant_refund_create.py:305-319"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "The amount is either given (capped by the chosen transaction's charged value, else an error) or computed from lines and shipping. Lines are checked against quantities already granted, shipping can be granted only once and the reason reference must be a page of the configured type. The transaction id is required. The granted refund and its lines are created in one transaction and update_order_charge_data lowers the expected total, which can move charge_status to overcharged.",
+   "signature": "def perform_mutation(cls, _root, info, /, *, id, input)",
+   "code": "with transaction.atomic():\n    granted_refund = order.granted_refunds.create(\n        amount_value=amount,\n        currency=order.currency,\n        reason=reason,\n        user=info.context.user,\n        app=info.context.app,\n        shipping_costs_included=grant_refund_for_shipping or False,\n        transaction_item=transaction_item,\n        reason_reference=reason_reference_instance,\n    )\n    if cleaned_input_lines:\n        for line in cleaned_input_lines:\n            line.granted_refund = granted_refund\n        models.OrderGrantedRefundLine.objects.bulk_create(cleaned_input_lines)"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_update.py#OrderGrantRefundUpdate",
+   "parent": "core.ord.api.payments",
+   "name": "OrderGrantRefundUpdate (orderGrantRefundUpdate)",
+   "kind": "class",
+   "summary": "Updates a granted refund's amount, reason, lines, shipping flag or transaction and recomputes the order's charge status.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_grant_refund_update.py:123"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_utils.py",
+   "parent": "core.ord.api.payments",
+   "name": "Granted refund line helpers",
+   "kind": "module",
+   "summary": "Shared checks for granted refunds: shipping already granted, line quantities already refunded, reason references and input line parsing.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_grant_refund_utils.py"
+   ],
+   "detail": "handle_lines_with_quantity_already_refunded compares requested line quantities with quantities already granted in other refunds and reports lines that would exceed the ordered quantity. validate_reason_references checks that reason pages belong to the configured refund reason page type, and get_input_lines_data resolves line ids to order lines."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_refund.py#OrderRefund",
+   "parent": "core.ord.api.payments",
+   "name": "OrderRefund (orderRefund)",
+   "kind": "class",
+   "summary": "Deprecated legacy-payment refund of an amount: refunds the last Payment through the gateway, fires refund events and adds a refunded fulfilment.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_refund.py:52"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_capture.py#OrderCapture",
+   "parent": "core.ord.api.payments",
+   "name": "OrderCapture (orderCapture)",
+   "kind": "class",
+   "summary": "Deprecated: captures an amount of the order's last legacy Payment through the gateway and runs order_charged.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_capture.py:39"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_void.py#OrderVoid",
+   "parent": "core.ord.api.payments",
+   "name": "OrderVoid (orderVoid)",
+   "kind": "class",
+   "summary": "Deprecated: voids the order's last legacy Payment through the gateway and logs a payment voided event.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_void.py:37"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_lines_create.py#OrderLinesCreate",
+   "parent": "core.ord.api.edit",
+   "name": "OrderLinesCreate (orderLinesCreate)",
+   "kind": "class",
+   "summary": "Adds variants to a draft or unconfirmed order, allocating stock for unconfirmed orders, and invalidates prices.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_lines_create.py:48"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_line_update.py#OrderLineUpdate",
+   "parent": "core.ord.api.edit",
+   "name": "OrderLineUpdate (orderLineUpdate)",
+   "kind": "class",
+   "summary": "Changes a line's quantity on an editable order, adjusting allocations and logging added or removed products.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_line_update.py:27"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_line_delete.py#OrderLineDelete",
+   "parent": "core.ord.api.edit",
+   "name": "OrderLineDelete (orderLineDelete)",
+   "kind": "class",
+   "summary": "Removes a line from an editable order, releasing its allocations and invalidating prices.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_line_delete.py:30"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_discount_add.py#OrderDiscountAdd",
+   "parent": "core.ord.api.edit",
+   "name": "OrderDiscountAdd (orderDiscountAdd)",
+   "kind": "class",
+   "summary": "Adds a manual order-level discount (fixed or percentage) with a reason to an editable order.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_discount_add.py:24"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_discount_update.py#OrderDiscountUpdate",
+   "parent": "core.ord.api.edit",
+   "name": "OrderDiscountUpdate (orderDiscountUpdate)",
+   "kind": "class",
+   "summary": "Changes a manual order discount's value, type or reason and invalidates prices.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_discount_update.py:23"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_discount_delete.py#OrderDiscountDelete",
+   "parent": "core.ord.api.edit",
+   "name": "OrderDiscountDelete (orderDiscountDelete)",
+   "kind": "class",
+   "summary": "Removes an order-level discount from an editable order.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_discount_delete.py:20"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_line_discount_update.py#OrderLineDiscountUpdate",
+   "parent": "core.ord.api.edit",
+   "name": "OrderLineDiscountUpdate (orderLineDiscountUpdate",
+   "kind": "class",
+   "summary": "Sets a manual discount on one order line of an editable order.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_line_discount_update.py:18"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_line_discount_remove.py#OrderLineDiscountRemove",
+   "parent": "core.ord.api.edit",
+   "name": "OrderLineDiscountRemove (orderLineDiscountRemove",
+   "kind": "class",
+   "summary": "Removes the manual discount from one order line.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_line_discount_remove.py:18"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_note_add.py#OrderNoteAdd",
+   "parent": "core.ord.api.edit",
+   "name": "OrderNoteAdd (orderNoteAdd)",
+   "kind": "class",
+   "summary": "Adds a staff note event to an order's timeline and refreshes its search vector.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_note_add.py:32"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_note_update.py#OrderNoteUpdate",
+   "parent": "core.ord.api.edit",
+   "name": "OrderNoteUpdate (orderNoteUpdate)",
+   "kind": "class",
+   "summary": "Edits a note by writing a note-updated event linked to the original.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_note_update.py:28"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_update.py#OrderUpdate",
+   "parent": "core.ord.api.edit",
+   "name": "OrderUpdate (orderUpdate)",
+   "kind": "class",
+   "summary": "Updates an order's addresses, customer email, external reference and metadata, then fires ORDER_UPDATED or DRAFT_ORDER_UPDATED.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_update.py:68"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/order_update_shipping.py#OrderUpdateShipping",
+   "parent": "core.ord.api.edit",
+   "name": "OrderUpdateShipping (orderUpdateShipping)",
+   "kind": "class",
+   "summary": "Sets or clears the shipping method of a draft or unconfirmed order after checking it is valid for the order's address and lines.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/order_update_shipping.py:40"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/mutations/utils.py",
+   "parent": "core.ord.api.edit",
+   "name": "Order mutation helpers",
+   "kind": "module",
+   "summary": "EditableOrderValidationMixin, shipping method update mixin, event dispatch by status, legacy payment action wrapper and address and metadata helpers.",
+   "paths": [
+    "saleor/saleor/graphql/order/mutations/utils.py",
+    "saleor/saleor/graphql/order/mutations/order_discount_common.py",
+    "saleor/saleor/graphql/order/mutations/order_note_common.py"
+   ],
+   "detail": "EditableOrderValidationMixin rejects edits unless the order is draft or unconfirmed and checks addresses. ShippingMethodUpdateMixin sets or clears the shipping method and denormalized tax class data and invalidates prices. call_event_by_order_status fires DRAFT_ORDER_UPDATED for drafts and ORDER_UPDATED otherwise. try_payment_action wraps legacy gateway calls and turns PaymentError into a validation error with a payment-failed event."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py#OrderBulkCreate",
+   "parent": "core.ord.api.bulk",
+   "name": "OrderBulkCreate (orderBulkCreate)",
+   "kind": "class",
+   "summary": "Imports up to 50 finished orders from another system with lines, fulfilments, transactions, notes and invoices; needs MANAGE_ORDERS_IMPORT.",
+   "paths": [
+    "saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py:651"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "Referenced users, variants, warehouses and shipping methods are resolved once into an object store. Each order is built in memory with its own error list; the error policy decides whether one bad order rejects everything. Stock is skipped, updated (failing on shortage) or forced according to stock_update_policy. Saved orders get origin bulk_create and the ORDER_BULK_CREATED webhook fires for all of them.",
+   "facts": [
+    "MAX_ORDERS = 50 per call",
+    "Default stock_update_policy is update"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_cancel.py#OrderBulkCancel",
+   "parent": "core.ord.api.bulk",
+   "name": "OrderBulkCancel (orderBulkCancel)",
+   "kind": "class",
+   "summary": "Cancels several orders, checking each can be canceled and calling cancel_order for each.",
+   "paths": [
+    "saleor/saleor/graphql/order/bulk_mutations/order_bulk_cancel.py:20"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/bulk_mutations/draft_orders.py#DraftOrderBulkDelete",
+   "parent": "core.ord.api.bulk",
+   "name": "DraftOrderBulkDelete (draftOrderBulkDelete)",
+   "kind": "class",
+   "summary": "Deletes several draft orders and fires DRAFT_ORDER_DELETED for each.",
+   "paths": [
+    "saleor/saleor/graphql/order/bulk_mutations/draft_orders.py:24"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/order/bulk_mutations/draft_orders.py#DraftOrderLinesBulkDelete",
+   "parent": "core.ord.api.bulk",
+   "name": "DraftOrderLinesBulkDelete (draftOrderLinesBulkDe",
+   "kind": "class",
+   "summary": "Deprecated: deletes several lines from draft orders.",
+   "paths": [
+    "saleor/saleor/graphql/order/bulk_mutations/draft_orders.py:161"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "core.ord.invoice.api",
+   "parent": "core.ord.invoice",
+   "name": "Invoice GraphQL API",
+   "kind": "group",
+   "summary": "invoiceRequest, invoiceCreate, invoiceUpdate, invoiceDelete, invoiceRequestDelete and invoiceSendNotification mutations and the Invoice type.",
+   "detail": "All six mutations require MANAGE_ORDERS and check access to the order's channel. Requests are refused for draft, unconfirmed and expired orders and for orders without a billing address, and when no app or plugin handles invoice requests in the channel.",
+   "paths": [
+    "saleor/saleor/graphql/invoice/"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/invoice/mutations/invoice_request.py#InvoiceRequest",
+   "parent": "core.ord.invoice.api",
+   "name": "InvoiceRequest (invoiceRequest)",
+   "kind": "class",
+   "summary": "Creates an empty invoice job for the order and asks invoicing apps or plugins to generate it through PluginsManager.invoice_request (INVOICE_REQUESTED).",
+   "paths": [
+    "saleor/saleor/graphql/invoice/mutations/invoice_request.py:22"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/invoice/mutations/invoice_create.py#InvoiceCreate",
+   "parent": "core.ord.invoice.api",
+   "name": "InvoiceCreate (invoiceCreate)",
+   "kind": "class",
+   "summary": "Stores a ready invoice (number, URL, metadata) generated elsewhere and logs invoice-created and invoice-generated events.",
+   "paths": [
+    "saleor/saleor/graphql/invoice/mutations/invoice_create.py:40"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/invoice/mutations/invoice_update.py#InvoiceUpdate",
+   "parent": "core.ord.invoice.api",
+   "name": "InvoiceUpdate (invoiceUpdate)",
+   "kind": "class",
+   "summary": "Sets an invoice's number, URL and metadata, which is how an invoicing app reports a generated invoice back.",
+   "paths": [
+    "saleor/saleor/graphql/invoice/mutations/invoice_update.py:38"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/invoice/mutations/invoice_delete.py#InvoiceDelete",
+   "parent": "core.ord.invoice.api",
+   "name": "InvoiceDelete (invoiceDelete)",
+   "kind": "class",
+   "summary": "Deletes an invoice and logs the deletion.",
+   "paths": [
+    "saleor/saleor/graphql/invoice/mutations/invoice_delete.py:13"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/invoice/mutations/invoice_request_delete.py#InvoiceRequestDelete",
+   "parent": "core.ord.invoice.api",
+   "name": "InvoiceRequestDelete (invoiceRequestDelete)",
+   "kind": "class",
+   "summary": "Marks an invoice pending deletion and asks plugins and apps to delete it (INVOICE_DELETED).",
+   "paths": [
+    "saleor/saleor/graphql/invoice/mutations/invoice_request_delete.py:16"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/invoice/mutations/invoice_send_notification.py#InvoiceSendNotification",
+   "parent": "core.ord.invoice.api",
+   "name": "InvoiceSendNotification (invoiceSendNotification",
+   "kind": "class",
+   "summary": "Sends a ready invoice (status success, URL, number, customer email all required) to the customer.",
+   "paths": [
+    "saleor/saleor/graphql/invoice/mutations/invoice_send_notification.py:22"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/invoice/types.py",
+   "parent": "core.ord.invoice.api",
+   "name": "Invoice type and loader",
+   "kind": "module",
+   "summary": "The Invoice GraphQL type (number, URL, status, order, metadata) and the loader of invoices by order.",
+   "paths": [
+    "saleor/saleor/graphql/invoice/types.py",
+    "saleor/saleor/graphql/invoice/dataloaders.py",
+    "saleor/saleor/graphql/invoice/schema.py",
+    "saleor/saleor/graphql/invoice/__init__.py",
+    "saleor/saleor/graphql/invoice/mutations/__init__.py"
+   ],
+   "detail": "The Invoice type exposes number, external URL, download URL, created and updated dates, message, job status (it implements the Job interface), the related order and metadata. InvoicesByOrderIdLoader batches invoice lookups for Order.invoices."
+  },
+  {
+   "id": "core.ord.shipping.api",
+   "parent": "core.ord.shipping",
+   "name": "Shipping GraphQL API",
+   "kind": "group",
+   "summary": "shippingZone and shippingZones queries, zone and price mutations, channel listings, product exclusions and the deliveryOptionsCalculate mutation.",
+   "detail": "Shipping configuration mutations require MANAGE_SHIPPING. Changing a zone's channels or a method's channel listings queues drop_invalid_shipping_methods_relations_for_given_channels so checkouts and editable orders lose methods that are no longer available. deliveryOptionsCalculate has no permission and works on a checkout id.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_create.py#ShippingZoneCreate",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingZoneCreate (shippingZoneCreate)",
+   "kind": "class",
+   "summary": "Creates a shipping zone with countries, channels and warehouses; at most one zone may be the default for countries without a zone.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_zone_create.py:42"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_update.py#ShippingZoneUpdate",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingZoneUpdate (shippingZoneUpdate)",
+   "kind": "class",
+   "summary": "Updates a zone's countries, channels and warehouses, dropping warehouse links that no longer share a channel.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_zone_update.py:30"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_delete.py#ShippingZoneDelete",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingZoneDelete (shippingZoneDelete)",
+   "kind": "class",
+   "summary": "Deletes a shipping zone and fires SHIPPING_ZONE_DELETED.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_zone_delete.py:13"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_create.py#ShippingPriceCreate",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingPriceCreate (shippingPriceCreate)",
+   "kind": "class",
+   "summary": "Creates a price- or weight-based shipping method in a zone with weight limits, delivery days, tax class and postal code rules.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_price_create.py:70"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_update.py#ShippingPriceUpdate",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingPriceUpdate (shippingPriceUpdate)",
+   "kind": "class",
+   "summary": "Updates a shipping method's limits, delivery days, postal code rules and tax class.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_price_update.py:15"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_delete.py#ShippingPriceDelete",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingPriceDelete (shippingPriceDelete)",
+   "kind": "class",
+   "summary": "Deletes a shipping method and fires SHIPPING_PRICE_DELETED.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_price_delete.py:16"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_exclude_products.py#ShippingPriceExcludeProducts",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingPriceExcludeProducts (shippingPriceExclu",
+   "kind": "class",
+   "summary": "Adds products that make this shipping method unavailable when present in the cart or order.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_price_exclude_products.py:27"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_remove_product_from_exclude.py#ShippingPriceRemoveProductFromExclude",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingPriceRemoveProductFromExclude (shippingP",
+   "kind": "class",
+   "summary": "Removes products from a shipping method's exclusion list.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_price_remove_product_from_exclude.py:17"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/shipping_method_channel_listing_update.py#ShippingMethodChannelListingUpdate",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingMethodChannelListingUpdate (shippingMeth",
+   "kind": "class",
+   "summary": "Adds or removes a shipping method's channels with price and minimum and maximum order price per channel.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/shipping_method_channel_listing_update.py:65"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/delivery_options_calculate.py#DeliveryOptionsCalculate",
+   "parent": "core.ord.shipping.api",
+   "name": "DeliveryOptionsCalculate (deliveryOptionsCalcula",
+   "kind": "class",
+   "summary": "Calculates the delivery options for a checkout, including app-provided and app-filtered shipping methods, without changing the assigned delivery.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/delivery_options_calculate.py:16"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/bulk_mutations/shipping_price_bulk_delete.py#ShippingPriceBulkDelete",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingPriceBulkDelete (shippingPriceBulkDelete",
+   "kind": "class",
+   "summary": "Deletes several shipping methods.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/bulk_mutations/shipping_price_bulk_delete.py:15"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/bulk_mutations/shipping_zone_bulk_delete.py#ShippingZoneBulkDelete",
+   "parent": "core.ord.shipping.api",
+   "name": "ShippingZoneBulkDelete (shippingZoneBulkDelete)",
+   "kind": "class",
+   "summary": "Deletes several shipping zones.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/bulk_mutations/shipping_zone_bulk_delete.py:15"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/mutations/base.py",
+   "parent": "core.ord.shipping.api",
+   "name": "Shipping mutation mixins",
+   "kind": "module",
+   "summary": "Shared validation for zones (duplicates, default zone, warehouse and channel consistency) and prices (weights, delivery days, postal code rules).",
+   "paths": [
+    "saleor/saleor/graphql/shipping/mutations/base.py",
+    "saleor/saleor/graphql/shipping/mutations/__init__.py",
+    "saleor/saleor/graphql/shipping/bulk_mutations/__init__.py",
+    "saleor/saleor/graphql/shipping/utils.py"
+   ],
+   "detail": "ShippingZoneMixin rejects duplicate add and remove ids, allows only one default zone, refuses warehouses that share no channel with the zone, and after saving removes warehouse links that lost a common channel and queues the shipping method cleanup task for removed channels. ShippingPriceMixin validates weight limits for weight-based methods, minimum and maximum delivery days and postal code rule ranges."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/shipping/types.py",
+   "parent": "core.ord.shipping.api",
+   "name": "Shipping types and loaders",
+   "kind": "module",
+   "summary": "ShippingZone, ShippingMethodType, channel listing and postal code rule types, the shipping queries, filters and dataloaders.",
+   "paths": [
+    "saleor/saleor/graphql/shipping/types.py",
+    "saleor/saleor/graphql/shipping/schema.py",
+    "saleor/saleor/graphql/shipping/resolvers.py",
+    "saleor/saleor/graphql/shipping/dataloaders.py",
+    "saleor/saleor/graphql/shipping/filters.py",
+    "saleor/saleor/graphql/shipping/enums.py",
+    "saleor/saleor/graphql/shipping/__init__.py"
+   ],
+   "detail": "ShippingZone and ShippingMethodType are channel-context types, so prices and limits shown come from the channel listing of the requested channel. Dataloaders batch zones by channel, methods by zone and channel, and listings by method and channel to avoid one query per field."
+  },
+  {
+   "id": "core.ord.stock.api",
+   "parent": "core.ord.stock",
+   "name": "Warehouse and stock GraphQL API",
+   "kind": "group",
+   "summary": "warehouse, warehouses, stock and stocks queries, warehouse create, update, delete and shipping zone assignment, and stockBulkUpdate.",
+   "detail": "Warehouse and stock mutations require MANAGE_PRODUCTS. The Stock type exposes quantity and allocation only to staff with product or order permissions, and the warehouse dataloaders compute available quantity per variant, country and channel for the storefront.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_create.py#WarehouseCreate",
+   "parent": "core.ord.stock.api",
+   "name": "WarehouseCreate (createWarehouse)",
+   "kind": "class",
+   "summary": "Creates a warehouse with an address and email and fires WAREHOUSE_CREATED.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/mutations/warehouse_create.py:13"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_update.py#WarehouseUpdate",
+   "parent": "core.ord.stock.api",
+   "name": "WarehouseUpdate (updateWarehouse)",
+   "kind": "class",
+   "summary": "Updates a warehouse's name, address, click-and-collect option and privacy, and fires WAREHOUSE_UPDATED.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/mutations/warehouse_update.py:15"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_delete.py#WarehouseDelete",
+   "parent": "core.ord.stock.api",
+   "name": "WarehouseDelete (deleteWarehouse)",
+   "kind": "class",
+   "summary": "Deletes a warehouse with its stocks and address, firing WAREHOUSE_DELETED and out-of-stock events for every removed stock.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/mutations/warehouse_delete.py:25"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_assign.py#WarehouseShippingZoneAssign",
+   "parent": "core.ord.stock.api",
+   "name": "WarehouseShippingZoneAssign (assignWarehouseShip",
+   "kind": "class",
+   "summary": "Links shipping zones to a warehouse if each zone shares a channel with it and is not served by another warehouse.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_assign.py:19"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_unassign.py#WarehouseShippingZoneUnassign",
+   "parent": "core.ord.stock.api",
+   "name": "WarehouseShippingZoneUnassign (unassignWarehouse",
+   "kind": "class",
+   "summary": "Unlinks shipping zones from a warehouse.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_unassign.py:14"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/bulk_mutations/stock_bulk_update.py#StockBulkUpdate",
+   "parent": "core.ord.stock.api",
+   "name": "StockBulkUpdate (stockBulkUpdate)",
+   "kind": "class",
+   "summary": "Sets stock quantities for many variant and warehouse pairs, by id or external reference, with an error policy, then fires PRODUCT_VARIANT_STOCK_UPDATED.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/bulk_mutations/stock_bulk_update.py:62"
+   ],
+   "tech": [
+    "Graphene"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/dataloaders.py",
+   "parent": "core.ord.stock.api",
+   "name": "Stock availability loaders",
+   "kind": "module",
+   "summary": "Batch loaders for available quantity per variant, country and channel, stocks with availability, reservations, warehouses by channel or zone.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/dataloaders.py"
+   ],
+   "tech": [
+    "Promise"
+   ],
+   "detail": "The availability loaders group requested variants by country and channel, query stocks through the same channel and shipping-zone rules used for allocation, subtract allocations and live reservations, and cap the result at the site's limit_quantity_per_checkout so storefronts cannot read exact stock levels. Other loaders fetch warehouses by channel or shipping zone and stocks by variant or warehouse."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/warehouse/types.py",
+   "parent": "core.ord.stock.api",
+   "name": "Warehouse and stock types",
+   "kind": "module",
+   "summary": "Warehouse, Stock and Allocation types, warehouse inputs, the warehouse and stock queries, filters and sorting.",
+   "paths": [
+    "saleor/saleor/graphql/warehouse/types.py",
+    "saleor/saleor/graphql/warehouse/schema.py",
+    "saleor/saleor/graphql/warehouse/resolvers.py",
+    "saleor/saleor/graphql/warehouse/filters.py",
+    "saleor/saleor/graphql/warehouse/sorters.py",
+    "saleor/saleor/graphql/warehouse/enums.py",
+    "saleor/saleor/graphql/warehouse/mutations/base.py",
+    "saleor/saleor/graphql/warehouse/__init__.py",
+    "saleor/saleor/graphql/warehouse/mutations/__init__.py",
+    "saleor/saleor/graphql/warehouse/bulk_mutations/__init__.py"
+   ],
+   "detail": "Warehouse exposes address, click-and-collect option, shipping zones and stocks. Stock exposes quantity, quantity allocated and quantity reserved only to staff with MANAGE_PRODUCTS or MANAGE_ORDERS. Queries for warehouses and stocks support search filters, channel filters and sorting."
+  }
+ ],
+ "edges": [
+  {
+   "from": "f:saleor/saleor/order/actions.py#call_order_events",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "calls the PluginsManager method for each event",
+   "evidence": "saleor/saleor/order/actions.py:263"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#call_order_events",
+   "to": "f:saleor/saleor/webhook/utils.py#get_webhooks_for_multiple_events",
+   "kind": "calls",
+   "label": "looks up subscribed webhooks once",
+   "evidence": "saleor/saleor/order/actions.py:258"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#call_order_events",
+   "to": "f:saleor/saleor/core/utils/events.py#call_event",
+   "kind": "calls",
+   "label": "defers the plugin call until commit",
+   "evidence": "saleor/saleor/order/actions.py:264"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_created",
+   "to": "f:saleor/saleor/order/actions.py#order_confirmed",
+   "kind": "calls",
+   "label": "auto-confirms when the channel says so",
+   "evidence": "saleor/saleor/order/actions.py:350"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_created",
+   "to": "f:saleor/saleor/order/events.py",
+   "kind": "writes",
+   "label": "logs the placed event",
+   "evidence": "saleor/saleor/order/actions.py:310"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_created",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires ORDER_CREATED",
+   "evidence": "saleor/saleor/order/actions.py:320"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_confirmed",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires ORDER_CONFIRMED",
+   "evidence": "saleor/saleor/order/actions.py:371"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_confirmed",
+   "to": "f:saleor/saleor/giftcard/gateway.py#charge_gift_card_transactions",
+   "kind": "calls",
+   "label": "charges gift card transactions",
+   "evidence": "saleor/saleor/order/actions.py:380"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#cancel_order",
+   "to": "f:saleor/saleor/warehouse/management.py#deallocate_stock_for_orders",
+   "kind": "calls",
+   "label": "releases all allocations of the order",
+   "evidence": "saleor/saleor/order/actions.py:437"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#cancel_order",
+   "to": "f:saleor/saleor/order/models.py#Order",
+   "kind": "writes",
+   "label": "sets status to canceled",
+   "evidence": "saleor/saleor/order/actions.py:438"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#cancel_order",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires ORDER_CANCELLED and ORDER_UPDATED",
+   "evidence": "saleor/saleor/order/actions.py:447"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#cancel_order",
+   "to": "f:saleor/saleor/order/notifications.py",
+   "kind": "calls",
+   "label": "emails the cancel confirmation",
+   "evidence": "saleor/saleor/order/actions.py:454"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#create_fulfillments",
+   "to": "f:saleor/saleor/order/actions.py#_create_fulfillment_lines",
+   "kind": "calls",
+   "label": "builds lines per warehouse",
+   "evidence": "saleor/saleor/order/actions.py:1308"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#create_fulfillments",
+   "to": "f:saleor/saleor/order/models.py#Fulfillment",
+   "kind": "writes",
+   "label": "creates a Fulfillment per warehouse",
+   "evidence": "saleor/saleor/order/actions.py:1303"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#create_fulfillments",
+   "to": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "kind": "calls",
+   "label": "completes when auto-approved",
+   "evidence": "saleor/saleor/order/actions.py:1327"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#create_fulfillments",
+   "to": "f:saleor/saleor/order/utils.py",
+   "kind": "calls",
+   "label": "re-checks remaining quantities under lock",
+   "evidence": "saleor/saleor/order/actions.py:1300"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#_create_fulfillment_lines",
+   "to": "f:saleor/saleor/warehouse/management.py#decrease_stock",
+   "kind": "calls",
+   "label": "takes the items out of stock",
+   "evidence": "saleor/saleor/order/actions.py:1211"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#_create_fulfillment_lines",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "reads",
+   "label": "finds the stock in the chosen warehouse",
+   "evidence": "saleor/saleor/order/actions.py:1145"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "to": "f:saleor/saleor/order/utils.py#update_order_status",
+   "kind": "calls",
+   "label": "recomputes the order status",
+   "evidence": "saleor/saleor/order/actions.py:570"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires ORDER_UPDATED and ORDER_FULFILLED",
+   "evidence": "saleor/saleor/order/actions.py:601"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "fires FULFILLMENT_CREATED per fulfilment",
+   "evidence": "saleor/saleor/order/actions.py:593"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "to": "f:saleor/saleor/order/notifications.py#send_fulfillment_confirmation_to_customer",
+   "kind": "calls",
+   "label": "emails the customer",
+   "evidence": "saleor/saleor/order/actions.py:59"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "to": "f:saleor/saleor/giftcard/utils.py#gift_cards_create",
+   "kind": "calls",
+   "label": "creates gift cards for gift card lines",
+   "evidence": "saleor/saleor/order/actions.py:572"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#approve_fulfillment",
+   "to": "f:saleor/saleor/warehouse/management.py#decrease_stock",
+   "kind": "calls",
+   "label": "takes the reserved items out of stock",
+   "evidence": "saleor/saleor/order/actions.py:923"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#approve_fulfillment",
+   "to": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "kind": "calls",
+   "label": "completes the fulfilment",
+   "evidence": "saleor/saleor/order/actions.py:930"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#cancel_fulfillment",
+   "to": "f:saleor/saleor/warehouse/management.py#increase_stock",
+   "kind": "calls",
+   "label": "restocks lines into the chosen warehouse",
+   "evidence": "saleor/saleor/order/utils.py:670"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#cancel_fulfillment",
+   "to": "f:saleor/saleor/order/utils.py#update_order_status",
+   "kind": "calls",
+   "label": "recomputes the order status",
+   "evidence": "saleor/saleor/order/actions.py:840"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#create_refund_fulfillment",
+   "to": "f:saleor/saleor/order/actions.py#_process_refund",
+   "kind": "calls",
+   "label": "refunds the payment",
+   "evidence": "saleor/saleor/order/actions.py:1550"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#create_fulfillments_for_returned_products",
+   "to": "f:saleor/saleor/order/actions.py#_process_refund",
+   "kind": "calls",
+   "label": "refunds when asked",
+   "evidence": "saleor/saleor/order/actions.py:1955"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#_process_refund",
+   "to": "f:saleor/saleor/payment/gateway.py#refund",
+   "kind": "calls",
+   "label": "refunds through the payment gateway",
+   "evidence": "saleor/saleor/order/actions.py:2079"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#_process_refund",
+   "to": "f:saleor/saleor/order/actions.py#order_refunded",
+   "kind": "calls",
+   "label": "logs and fires ORDER_REFUNDED",
+   "evidence": "saleor/saleor/order/actions.py:2087"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_refunded",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires refunded and fully refunded events",
+   "evidence": "saleor/saleor/order/actions.py:516"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#mark_order_as_paid_with_transaction",
+   "to": "f:saleor/saleor/payment/utils.py#create_transaction_for_order",
+   "kind": "calls",
+   "label": "creates a manual charged transaction",
+   "evidence": "saleor/saleor/order/actions.py:960"
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#mark_order_as_paid_with_transaction",
+   "to": "f:saleor/saleor/order/utils.py",
+   "kind": "calls",
+   "label": "recomputes charged amounts",
+   "evidence": "saleor/saleor/order/actions.py:969"
+  },
+  {
+   "from": "f:saleor/saleor/order/utils.py#update_order_status",
+   "to": "f:saleor/saleor/order/utils.py#determine_order_status",
+   "kind": "calls",
+   "label": "applies the status rule",
+   "evidence": "saleor/saleor/order/utils.py:183"
+  },
+  {
+   "from": "f:saleor/saleor/order/utils.py#update_order_status",
+   "to": "f:saleor/saleor/order/models.py#Order",
+   "kind": "writes",
+   "label": "saves the new status under a row lock",
+   "evidence": "saleor/saleor/order/utils.py:197"
+  },
+  {
+   "from": "f:saleor/saleor/order/utils.py#update_order_charge_status",
+   "to": "f:saleor/saleor/order/models.py#OrderGrantedRefund",
+   "kind": "reads",
+   "label": "subtracts granted refunds from the total",
+   "evidence": "saleor/saleor/order/utils.py:968"
+  },
+  {
+   "from": "f:saleor/saleor/order/utils.py#change_order_line_quantity",
+   "to": "f:saleor/saleor/warehouse/management.py#increase_allocations",
+   "kind": "calls",
+   "label": "allocates the added quantity",
+   "evidence": "saleor/saleor/order/utils.py:547"
+  },
+  {
+   "from": "f:saleor/saleor/order/utils.py#calculate_order_granted_refund_status",
+   "to": "f:saleor/saleor/order/models.py#OrderGrantedRefund",
+   "kind": "writes",
+   "label": "stores the refund status",
+   "evidence": "saleor/saleor/order/utils.py:1174"
+  },
+  {
+   "from": "f:saleor/saleor/order/notifications.py",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "sends NOTIFY_USER events through notify",
+   "evidence": "saleor/saleor/order/notifications.py:421"
+  },
+  {
+   "from": "f:saleor/saleor/order/events.py",
+   "to": "f:saleor/saleor/order/models.py#OrderEvent",
+   "kind": "writes",
+   "label": "inserts timeline rows",
+   "evidence": "saleor/saleor/order/events.py:44"
+  },
+  {
+   "from": "f:saleor/saleor/order/models.py",
+   "to": "x:postgres",
+   "kind": "writes",
+   "label": "stores orders, lines and fulfilments",
+   "evidence": "saleor/saleor/order/models.py:109"
+  },
+  {
+   "from": "f:saleor/saleor/order/tasks.py#_expire_orders",
+   "to": "f:saleor/saleor/warehouse/management.py#deallocate_stock_for_orders",
+   "kind": "calls",
+   "label": "frees stock of expired orders",
+   "evidence": "saleor/saleor/order/tasks.py:170"
+  },
+  {
+   "from": "f:saleor/saleor/order/tasks.py#_expire_orders",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires ORDER_EXPIRED and ORDER_UPDATED",
+   "evidence": "saleor/saleor/order/tasks.py:24"
+  },
+  {
+   "from": "f:saleor/saleor/settings.py",
+   "to": "f:saleor/saleor/order/tasks.py",
+   "kind": "triggers",
+   "label": "Celery beat schedules order expiry",
+   "evidence": "saleor/saleor/settings.py:739"
+  },
+  {
+   "from": "f:saleor/saleor/order/tasks.py",
+   "to": "x:celery-broker",
+   "kind": "reads",
+   "label": "runs as Celery tasks",
+   "evidence": "saleor/saleor/order/tasks.py:13"
+  },
+  {
+   "from": "f:saleor/saleor/order/calculations.py#fetch_order_prices_if_expired",
+   "to": "f:saleor/saleor/order/calculations.py#_call_plugin_or_tax_app",
+   "kind": "calls",
+   "label": "calculates taxes after price refresh",
+   "evidence": "saleor/saleor/order/calculations.py:118"
+  },
+  {
+   "from": "f:saleor/saleor/order/calculations.py#_call_plugin_or_tax_app",
+   "to": "f:saleor/saleor/order/webhooks/order_calculate_taxes.py#get_taxes",
+   "kind": "calls",
+   "label": "asks tax apps for TaxData",
+   "evidence": "saleor/saleor/order/calculations.py:476"
+  },
+  {
+   "from": "f:saleor/saleor/order/calculations.py#_call_plugin_or_tax_app",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "runs a legacy tax plugin",
+   "evidence": "saleor/saleor/order/calculations.py:421"
+  },
+  {
+   "from": "f:saleor/saleor/order/calculations.py",
+   "to": "f:saleor/saleor/order/base_calculations.py",
+   "kind": "calls",
+   "label": "uses untaxed base arithmetic",
+   "evidence": "saleor/saleor/order/calculations.py:48"
+  },
+  {
+   "from": "f:saleor/saleor/order/webhooks/order_calculate_taxes.py#get_taxes",
+   "to": "f:saleor/saleor/tax/webhooks/shared.py#get_taxes",
+   "kind": "calls",
+   "label": "sends ORDER_CALCULATE_TAXES synchronously",
+   "evidence": "saleor/saleor/order/webhooks/order_calculate_taxes.py:150"
+  },
+  {
+   "from": "f:saleor/saleor/order/webhooks/order_calculate_taxes.py#get_taxes",
+   "to": "ep:avatax POST /api/webhooks/order-calculate-taxes",
+   "kind": "http",
+   "label": "reaches the AvaTax app's order tax handler",
+   "evidence": "saleor/saleor/order/webhooks/order_calculate_taxes.py:152",
+   "detail": "The target URL comes from the installed app's webhook subscription; the AvaTax app declares this route."
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_fulfilled",
+   "to": "ep:smtp POST /api/webhooks/order-fulfilled",
+   "kind": "http",
+   "label": "ORDER_FULFILLED reaches the SMTP app",
+   "evidence": "saleor/saleor/order/actions.py:601",
+   "detail": "Delivered by the asynchronous webhook transport to any app subscribed to ORDER_FULFILLED, such as the SMTP email app."
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#cancel_order",
+   "to": "ep:avatax POST /api/webhooks/order-cancelled",
+   "kind": "http",
+   "label": "ORDER_CANCELLED reaches the AvaTax app",
+   "evidence": "saleor/saleor/order/actions.py:447",
+   "detail": "The AvaTax app voids its committed tax transaction on this event; delivery goes through the asynchronous transport."
+  },
+  {
+   "from": "f:saleor/saleor/order/actions.py#order_confirmed",
+   "to": "ep:avatax POST /api/webhooks/order-confirmed",
+   "kind": "http",
+   "label": "ORDER_CONFIRMED reaches the AvaTax app",
+   "evidence": "saleor/saleor/order/actions.py:371"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "to": "f:saleor/saleor/warehouse/management.py#sort_stocks",
+   "kind": "calls",
+   "label": "orders stocks by channel strategy",
+   "evidence": "saleor/saleor/warehouse/management.py:170"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "to": "f:saleor/saleor/warehouse/management.py#_create_allocations",
+   "kind": "calls",
+   "label": "fills each line",
+   "evidence": "saleor/saleor/warehouse/management.py:188"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "to": "f:saleor/saleor/warehouse/models.py#Allocation",
+   "kind": "writes",
+   "label": "bulk-creates allocations",
+   "evidence": "saleor/saleor/warehouse/management.py:201"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "to": "f:saleor/saleor/warehouse/models.py#Reservation",
+   "kind": "reads",
+   "label": "subtracts other checkouts' reservations",
+   "evidence": "saleor/saleor/warehouse/management.py:251"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "writes",
+   "label": "raises quantity_allocated",
+   "evidence": "saleor/saleor/warehouse/management.py:213"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "to": "f:saleor/saleor/warehouse/webhooks/stock_events.py#trigger_product_variant_out_of_stock",
+   "kind": "triggers",
+   "label": "queues out-of-stock on commit",
+   "evidence": "saleor/saleor/warehouse/management.py:228"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "to": "f:saleor/saleor/warehouse/channel_stock_availability.py",
+   "kind": "triggers",
+   "label": "queues channel out-of-stock events",
+   "evidence": "saleor/saleor/warehouse/management.py:117"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#sort_stocks",
+   "to": "f:saleor/saleor/channel/__init__.py#AllocationStrategy",
+   "kind": "reads",
+   "label": "branches on the channel allocation strategy",
+   "evidence": "saleor/saleor/warehouse/management.py:303"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#decrease_stock",
+   "to": "f:saleor/saleor/warehouse/management.py#deallocate_stock",
+   "kind": "calls",
+   "label": "releases the line allocations first",
+   "evidence": "saleor/saleor/warehouse/management.py:578"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#decrease_stock",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "writes",
+   "label": "lowers quantity on hand",
+   "evidence": "saleor/saleor/warehouse/management.py:702"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#deallocate_stock_for_orders",
+   "to": "f:saleor/saleor/warehouse/models.py#Allocation",
+   "kind": "writes",
+   "label": "zeroes the orders' allocations",
+   "evidence": "saleor/saleor/warehouse/management.py:806"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#deallocate_stock",
+   "to": "f:saleor/saleor/warehouse/webhooks/stock_events.py#trigger_product_variant_out_of_stock",
+   "kind": "triggers",
+   "label": "queues back-in-stock on commit",
+   "evidence": "saleor/saleor/warehouse/management.py:435"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#increase_allocations",
+   "to": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "kind": "calls",
+   "label": "re-allocates the new total",
+   "evidence": "saleor/saleor/warehouse/management.py:558"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/management.py#increase_stock",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "writes",
+   "label": "adds quantity back",
+   "evidence": "saleor/saleor/warehouse/management.py:479"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/reservations.py",
+   "to": "f:saleor/saleor/warehouse/management.py#sort_stocks",
+   "kind": "calls",
+   "label": "uses the same strategy order",
+   "evidence": "saleor/saleor/warehouse/reservations.py:155"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/reservations.py",
+   "to": "f:saleor/saleor/warehouse/models.py#Reservation",
+   "kind": "writes",
+   "label": "creates checkout reservations",
+   "evidence": "saleor/saleor/warehouse/reservations.py:188"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/availability.py",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "reads",
+   "label": "computes available quantity",
+   "evidence": "saleor/saleor/warehouse/availability.py:43"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/tasks.py",
+   "to": "f:saleor/saleor/warehouse/models.py#Reservation",
+   "kind": "writes",
+   "label": "deletes expired reservations",
+   "evidence": "saleor/saleor/warehouse/tasks.py:28"
+  },
+  {
+   "from": "f:saleor/saleor/settings.py",
+   "to": "f:saleor/saleor/warehouse/tasks.py",
+   "kind": "triggers",
+   "label": "Celery beat schedules stock cleanup",
+   "evidence": "saleor/saleor/settings.py:683"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/channel_stock_availability.py",
+   "to": "f:saleor/saleor/warehouse/webhooks/channel_stock_events.py#_trigger",
+   "kind": "calls",
+   "label": "sends the channel-scoped events",
+   "evidence": "saleor/saleor/warehouse/channel_stock_availability.py:15"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/webhooks/stock_events.py#trigger_product_variant_out_of_stock",
+   "to": "f:saleor/saleor/webhook/transport/asynchronous/transport.py#trigger_webhooks_async",
+   "kind": "calls",
+   "label": "queues the async webhook",
+   "evidence": "saleor/saleor/warehouse/webhooks/stock_events.py:39"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/webhooks/channel_stock_events.py#_trigger",
+   "to": "f:saleor/saleor/webhook/transport/asynchronous/transport.py#trigger_webhooks_async_for_multiple_objects",
+   "kind": "calls",
+   "label": "queues one batch per channel",
+   "evidence": "saleor/saleor/warehouse/webhooks/channel_stock_events.py:63"
+  },
+  {
+   "from": "f:saleor/saleor/checkout/complete_checkout.py",
+   "to": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "kind": "calls",
+   "label": "allocates stock when checkout becomes an order",
+   "evidence": "saleor/saleor/checkout/complete_checkout.py:841"
+  },
+  {
+   "from": "f:saleor/saleor/warehouse/models.py",
+   "to": "x:postgres",
+   "kind": "writes",
+   "label": "stores stock, allocations, reservations",
+   "evidence": "saleor/saleor/warehouse/models.py:527"
+  },
+  {
+   "from": "f:saleor/saleor/order/delivery_context.py#get_valid_shipping_methods_for_order",
+   "to": "f:saleor/saleor/shipping/models.py#ShippingMethodQueryset.applicable_shipping_methods",
+   "kind": "calls",
+   "label": "finds applicable methods",
+   "evidence": "saleor/saleor/order/delivery_context.py:48"
+  },
+  {
+   "from": "f:saleor/saleor/order/delivery_context.py#get_valid_shipping_methods_for_order",
+   "to": "f:saleor/saleor/order/webhooks/exclude_shipping.py#excluded_shipping_methods_for_order",
+   "kind": "calls",
+   "label": "asks apps to exclude methods",
+   "evidence": "saleor/saleor/order/delivery_context.py:101"
+  },
+  {
+   "from": "f:saleor/saleor/shipping/models.py#ShippingMethodQueryset.applicable_shipping_methods",
+   "to": "f:saleor/saleor/shipping/postal_codes.py#is_shipping_method_applicable_for_postal_code",
+   "kind": "calls",
+   "label": "drops methods failing postal rules",
+   "evidence": "saleor/saleor/shipping/models.py:227"
+  },
+  {
+   "from": "f:saleor/saleor/order/webhooks/exclude_shipping.py#excluded_shipping_methods_for_order",
+   "to": "f:saleor/saleor/shipping/webhooks/shared.py#get_excluded_shipping_data",
+   "kind": "calls",
+   "label": "collects exclusions from apps",
+   "evidence": "saleor/saleor/order/webhooks/exclude_shipping.py:68"
+  },
+  {
+   "from": "f:saleor/saleor/shipping/webhooks/shared.py#get_excluded_shipping_data",
+   "to": "f:saleor/saleor/webhook/transport/synchronous/transport.py#trigger_webhook_sync_promise",
+   "kind": "calls",
+   "label": "sends synchronous filter webhooks",
+   "evidence": "saleor/saleor/shipping/webhooks/shared.py:118"
+  },
+  {
+   "from": "f:saleor/saleor/shipping/webhooks/shared.py#get_excluded_shipping_data",
+   "to": "f:saleor/saleor/webhook/transport/synchronous/transport.py#trigger_webhook_sync_promise_if_not_cached",
+   "kind": "calls",
+   "label": "uses the 3-minute response cache",
+   "evidence": "saleor/saleor/shipping/webhooks/shared.py:106"
+  },
+  {
+   "from": "f:saleor/saleor/shipping/tasks.py",
+   "to": "f:saleor/saleor/order/models.py#Order",
+   "kind": "writes",
+   "label": "clears shipping method on editable orders",
+   "evidence": "saleor/saleor/shipping/tasks.py:29"
+  },
+  {
+   "from": "f:saleor/saleor/order/delivery_context.py",
+   "to": "f:saleor/saleor/warehouse/models.py#Warehouse",
+   "kind": "reads",
+   "label": "lists click-and-collect points",
+   "evidence": "saleor/saleor/order/delivery_context.py:135"
+  },
+  {
+   "from": "f:saleor/saleor/shipping/models.py",
+   "to": "x:postgres",
+   "kind": "writes",
+   "label": "stores zones, methods and listings",
+   "evidence": "saleor/saleor/shipping/models.py:87"
+  },
+  {
+   "from": "f:saleor/saleor/invoice/notifications.py#send_invoice",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "fires INVOICE_READY and INVOICE_SENT",
+   "evidence": "saleor/saleor/invoice/notifications.py:51"
+  },
+  {
+   "from": "f:saleor/saleor/invoice/notifications.py#send_invoice",
+   "to": "ep:smtp POST /api/webhooks/invoice-sent",
+   "kind": "http",
+   "label": "INVOICE_SENT reaches the SMTP app",
+   "evidence": "saleor/saleor/invoice/notifications.py:51",
+   "detail": "The SMTP app subscribes to INVOICE_SENT and emails the customer; delivery goes through the asynchronous webhook transport."
+  },
+  {
+   "from": "f:saleor/saleor/invoice/events.py",
+   "to": "f:saleor/saleor/invoice/models.py",
+   "kind": "writes",
+   "label": "inserts InvoiceEvent rows",
+   "evidence": "saleor/saleor/invoice/events.py:10"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/schema.py#OrderQueries.resolve_orders",
+   "kind": "calls",
+   "label": "routes the orders query",
+   "evidence": "saleor/saleor/graphql/order/schema.py:137"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/schema.py#OrderQueries.resolve_orders",
+   "to": "f:saleor/saleor/graphql/order/resolvers.py#resolve_orders",
+   "kind": "calls",
+   "label": "builds the channel-limited queryset",
+   "evidence": "saleor/saleor/graphql/order/schema.py:244"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/schema.py#OrderQueries.resolve_orders",
+   "to": "f:saleor/saleor/graphql/order/filters.py",
+   "kind": "calls",
+   "label": "applies filter, where and search",
+   "evidence": "saleor/saleor/graphql/order/schema.py:247"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/resolvers.py#resolve_orders",
+   "to": "f:saleor/saleor/order/models.py#Order",
+   "kind": "reads",
+   "label": "reads non-draft orders",
+   "evidence": "saleor/saleor/graphql/order/resolvers.py:24"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/resolvers.py#resolve_orders",
+   "to": "f:saleor/saleor/graphql/account/utils.py#get_user_accessible_channels",
+   "kind": "calls",
+   "label": "limits to the user's channels",
+   "evidence": "saleor/saleor/graphql/order/resolvers.py:34"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/types.py#Order",
+   "to": "f:saleor/saleor/graphql/order/dataloaders.py#OrderPriceCalculationByOrderIdAndWebhookSyncLoader",
+   "kind": "calls",
+   "label": "loads recalculated prices",
+   "evidence": "saleor/saleor/graphql/order/types.py:1348"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/types.py#Order",
+   "to": "f:saleor/saleor/graphql/order/dataloaders.py#OrderShippingMethodsByOrderIdAndWebhookSyncLoader",
+   "kind": "calls",
+   "label": "loads valid shipping methods",
+   "evidence": "saleor/saleor/graphql/order/types.py:2793"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/dataloaders.py#OrderPriceCalculationByOrderIdAndWebhookSyncLoader",
+   "to": "f:saleor/saleor/order/calculations.py#fetch_order_prices_if_expired",
+   "kind": "calls",
+   "label": "runs the lazy recalculation steps",
+   "evidence": "saleor/saleor/graphql/order/dataloaders.py:408"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/dataloaders.py#OrderShippingMethodsByOrderIdAndWebhookSyncLoader",
+   "to": "f:saleor/saleor/order/delivery_context.py#get_valid_shipping_methods_for_order",
+   "kind": "calls",
+   "label": "computes methods per order",
+   "evidence": "saleor/saleor/graphql/order/dataloaders.py:457"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/draft_order_create.py#DraftOrderCreate",
+   "kind": "calls",
+   "label": "routes the draftOrderCreate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:286"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/draft_order_update.py#DraftOrderUpdate",
+   "kind": "calls",
+   "label": "routes the draftOrderUpdate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:292"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+   "kind": "calls",
+   "label": "routes the draftOrderComplete mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:285"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/draft_order_delete.py#DraftOrderDelete",
+   "kind": "calls",
+   "label": "routes the draftOrderDelete mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:287"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_create.py#DraftOrderCreate",
+   "to": "f:saleor/saleor/order/utils.py",
+   "kind": "calls",
+   "label": "creates lines through create_order_line",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_create.py:375"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_create.py#DraftOrderCreate",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires DRAFT_ORDER_CREATED",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_create.py:446"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+   "to": "f:saleor/saleor/order/calculations.py#fetch_order_prices_if_expired",
+   "kind": "calls",
+   "label": "recalculates prices and taxes first",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_complete.py:147"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+   "to": "f:saleor/saleor/graphql/order/utils.py",
+   "kind": "calls",
+   "label": "validates the draft",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_complete.py:168"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+   "to": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+   "kind": "calls",
+   "label": "allocates stock per line",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_complete.py:236"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+   "to": "f:saleor/saleor/order/actions.py#order_created",
+   "kind": "calls",
+   "label": "runs order_created on commit",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_complete.py:277"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+   "to": "f:saleor/saleor/order/notifications.py#send_order_confirmation",
+   "kind": "calls",
+   "label": "notifies staff of the new order",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_complete.py:287"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_update.py#DraftOrderUpdate",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires DRAFT_ORDER_UPDATED",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_update.py:316"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/draft_order_delete.py#DraftOrderDelete",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires DRAFT_ORDER_DELETED",
+   "evidence": "saleor/saleor/graphql/order/mutations/draft_order_delete.py:75"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill",
+   "kind": "calls",
+   "label": "routes the orderFulfill mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:298"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/fulfillment_approve.py#FulfillmentApprove",
+   "kind": "calls",
+   "label": "routes the orderFulfillmentApprove mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:300"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/fulfillment_cancel.py#FulfillmentCancel",
+   "kind": "calls",
+   "label": "routes the orderFulfillmentCancel mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:299"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/fulfillment_update_tracking.py#FulfillmentUpdateTracking",
+   "kind": "calls",
+   "label": "routes the orderFulfillmentUpdateTracking mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:301"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py#FulfillmentRefundProducts",
+   "kind": "calls",
+   "label": "routes the orderFulfillmentRefundProducts mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:302"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/fulfillment_return_products.py#FulfillmentReturnProducts",
+   "kind": "calls",
+   "label": "routes the orderFulfillmentReturnProducts mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:303"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill.clean_input",
+   "kind": "calls",
+   "label": "validates and groups lines",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_fulfill.py:269"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill",
+   "to": "f:saleor/saleor/order/actions.py#create_fulfillments",
+   "kind": "calls",
+   "label": "creates fulfilments and takes stock",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_fulfill.py:283"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/fulfillment_approve.py#FulfillmentApprove",
+   "to": "f:saleor/saleor/order/actions.py#approve_fulfillment",
+   "kind": "calls",
+   "label": "approves and decreases stock",
+   "evidence": "saleor/saleor/graphql/order/mutations/fulfillment_approve.py:95"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/fulfillment_cancel.py#FulfillmentCancel",
+   "to": "f:saleor/saleor/order/actions.py#cancel_fulfillment",
+   "kind": "calls",
+   "label": "cancels and restocks",
+   "evidence": "saleor/saleor/graphql/order/mutations/fulfillment_cancel.py:120"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/fulfillment_update_tracking.py#FulfillmentUpdateTracking",
+   "to": "f:saleor/saleor/order/actions.py",
+   "kind": "calls",
+   "label": "logs and fires tracking update",
+   "evidence": "saleor/saleor/graphql/order/mutations/fulfillment_update_tracking.py:72"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py#FulfillmentRefundProducts",
+   "to": "f:saleor/saleor/order/actions.py#create_refund_fulfillment",
+   "kind": "calls",
+   "label": "refunds products",
+   "evidence": "saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py:150"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/fulfillment_return_products.py#FulfillmentReturnProducts",
+   "to": "f:saleor/saleor/order/actions.py#create_fulfillments_for_returned_products",
+   "kind": "calls",
+   "label": "returns or replaces products",
+   "evidence": "saleor/saleor/graphql/order/mutations/fulfillment_return_products.py:228"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py#FulfillmentRefundProducts",
+   "to": "f:saleor/saleor/graphql/order/mutations/fulfillment_refund_and_return_product_base.py",
+   "kind": "calls",
+   "label": "shares line and payment validation",
+   "evidence": "saleor/saleor/graphql/order/mutations/fulfillment_refund_products.py:79"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_confirm.py#OrderConfirm",
+   "kind": "calls",
+   "label": "routes the orderConfirm mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:296"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_cancel.py#OrderCancel",
+   "kind": "calls",
+   "label": "routes the orderCancel mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:294"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_mark_as_paid.py#OrderMarkAsPaid",
+   "kind": "calls",
+   "label": "routes the orderMarkAsPaid mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:322"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_create.py#OrderGrantRefundCreate",
+   "kind": "calls",
+   "label": "routes the orderGrantRefundCreate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:305"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_update.py#OrderGrantRefundUpdate",
+   "kind": "calls",
+   "label": "routes the orderGrantRefundUpdate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:306"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_refund.py#OrderRefund",
+   "kind": "calls",
+   "label": "routes the orderRefund mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:323"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_capture.py#OrderCapture",
+   "kind": "calls",
+   "label": "routes the orderCapture mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:295"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_void.py#OrderVoid",
+   "kind": "calls",
+   "label": "routes the orderVoid mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:326"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_confirm.py#OrderConfirm",
+   "to": "f:saleor/saleor/order/utils.py#update_order_status",
+   "kind": "calls",
+   "label": "moves unconfirmed to unfulfilled",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_confirm.py:76"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_confirm.py#OrderConfirm",
+   "to": "f:saleor/saleor/payment/gateway.py#capture",
+   "kind": "calls",
+   "label": "captures an authorized payment",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_confirm.py:88"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_confirm.py#OrderConfirm",
+   "to": "f:saleor/saleor/order/actions.py#order_confirmed",
+   "kind": "calls",
+   "label": "fires ORDER_CONFIRMED on commit",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_confirm.py:109"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_cancel.py#OrderCancel",
+   "to": "f:saleor/saleor/order/actions.py#cancel_order",
+   "kind": "calls",
+   "label": "cancels and releases stock",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_cancel.py:59"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_cancel.py#OrderCancel",
+   "to": "f:saleor/saleor/giftcard/utils.py#deactivate_order_gift_cards",
+   "kind": "calls",
+   "label": "deactivates gift cards bought in the order",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_cancel.py:66"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_mark_as_paid.py#OrderMarkAsPaid",
+   "to": "f:saleor/saleor/order/actions.py#mark_order_as_paid_with_transaction",
+   "kind": "calls",
+   "label": "creates a manual transaction",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_mark_as_paid.py:103"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_create.py#OrderGrantRefundCreate",
+   "to": "f:saleor/saleor/order/models.py#OrderGrantedRefund",
+   "kind": "writes",
+   "label": "creates the granted refund and lines",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_grant_refund_create.py:306"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_create.py#OrderGrantRefundCreate",
+   "to": "f:saleor/saleor/order/utils.py#update_order_charge_status",
+   "kind": "calls",
+   "label": "recomputes charge status",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_grant_refund_create.py:320"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_create.py#OrderGrantRefundCreate",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_utils.py",
+   "kind": "calls",
+   "label": "validates lines and shipping",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_grant_refund_create.py:241"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_update.py#OrderGrantRefundUpdate",
+   "to": "f:saleor/saleor/order/utils.py#update_order_charge_status",
+   "kind": "calls",
+   "label": "recomputes charge status",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_grant_refund_update.py:464"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_refund.py#OrderRefund",
+   "to": "f:saleor/saleor/payment/gateway.py#refund",
+   "kind": "calls",
+   "label": "refunds the legacy payment",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_refund.py:95"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_refund.py#OrderRefund",
+   "to": "f:saleor/saleor/order/actions.py#order_refunded",
+   "kind": "calls",
+   "label": "logs and fires refund webhooks",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_refund.py:105"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_capture.py#OrderCapture",
+   "to": "f:saleor/saleor/order/actions.py",
+   "kind": "calls",
+   "label": "runs order_charged after capture",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_capture.py:93"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_void.py#OrderVoid",
+   "to": "f:saleor/saleor/order/actions.py",
+   "kind": "calls",
+   "label": "runs order_voided",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_void.py:73"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/payment/mutations/transaction/transaction_request_refund_for_granted_refund.py#TransactionRequestRefundForGrantedRefund",
+   "to": "f:saleor/saleor/order/utils.py#calculate_order_granted_refund_status",
+   "kind": "calls",
+   "label": "updates the granted refund status",
+   "evidence": "saleor/saleor/graphql/payment/mutations/transaction/transaction_request_refund_for_granted_refund.py:191"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_lines_create.py#OrderLinesCreate",
+   "kind": "calls",
+   "label": "routes the orderLinesCreate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:308"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_line_update.py#OrderLineUpdate",
+   "kind": "calls",
+   "label": "routes the orderLineUpdate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:310"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_line_delete.py#OrderLineDelete",
+   "kind": "calls",
+   "label": "routes the orderLineDelete mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:309"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_discount_add.py#OrderDiscountAdd",
+   "kind": "calls",
+   "label": "routes the orderDiscountAdd mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:312"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_discount_update.py#OrderDiscountUpdate",
+   "kind": "calls",
+   "label": "routes the orderDiscountUpdate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:313"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_discount_delete.py#OrderDiscountDelete",
+   "kind": "calls",
+   "label": "routes the orderDiscountDelete mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:314"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_line_discount_update.py#OrderLineDiscountUpdate",
+   "kind": "calls",
+   "label": "routes the orderLineDiscountUpdate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:316"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_line_discount_remove.py#OrderLineDiscountRemove",
+   "kind": "calls",
+   "label": "routes the orderLineDiscountRemove mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:317"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_note_add.py#OrderNoteAdd",
+   "kind": "calls",
+   "label": "routes the orderNoteAdd mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:319"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_note_update.py#OrderNoteUpdate",
+   "kind": "calls",
+   "label": "routes the orderNoteUpdate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:320"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_update.py#OrderUpdate",
+   "kind": "calls",
+   "label": "routes the orderUpdate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:324"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/mutations/order_update_shipping.py#OrderUpdateShipping",
+   "kind": "calls",
+   "label": "routes the orderUpdateShipping mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:325"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_lines_create.py#OrderLinesCreate",
+   "to": "f:saleor/saleor/order/utils.py",
+   "kind": "calls",
+   "label": "adds variants and allocates",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_lines_create.py:161"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_line_update.py#OrderLineUpdate",
+   "to": "f:saleor/saleor/order/utils.py#change_order_line_quantity",
+   "kind": "calls",
+   "label": "changes quantity and allocations",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_line_update.py:96"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_line_delete.py#OrderLineDelete",
+   "to": "f:saleor/saleor/order/utils.py",
+   "kind": "calls",
+   "label": "deletes the line and its allocations",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_line_delete.py:80"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_lines_create.py#OrderLinesCreate",
+   "to": "f:saleor/saleor/graphql/order/mutations/utils.py",
+   "kind": "calls",
+   "label": "fires the event matching the status",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_lines_create.py:232"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_update_shipping.py#OrderUpdateShipping",
+   "to": "f:saleor/saleor/graphql/order/mutations/utils.py",
+   "kind": "calls",
+   "label": "applies the shipping method mixin",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_update_shipping.py:143"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/utils.py",
+   "to": "f:saleor/saleor/order/delivery_context.py#get_valid_shipping_methods_for_order",
+   "kind": "calls",
+   "label": "checks the method is still valid",
+   "evidence": "saleor/saleor/graphql/order/utils.py:85"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/mutations/order_update.py#OrderUpdate",
+   "to": "f:saleor/saleor/order/actions.py#call_order_events",
+   "kind": "calls",
+   "label": "fires ORDER_UPDATED",
+   "evidence": "saleor/saleor/graphql/order/mutations/order_update.py:183"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py#OrderBulkCreate",
+   "kind": "calls",
+   "label": "routes the orderBulkCreate mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:328"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_cancel.py#OrderBulkCancel",
+   "kind": "calls",
+   "label": "routes the orderBulkCancel mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:327"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/bulk_mutations/draft_orders.py#DraftOrderBulkDelete",
+   "kind": "calls",
+   "label": "routes the draftOrderBulkDelete mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:288"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/order/bulk_mutations/draft_orders.py#DraftOrderLinesBulkDelete",
+   "kind": "calls",
+   "label": "routes the draftOrderLinesBulkDelete mutation",
+   "evidence": "saleor/saleor/graphql/order/schema.py:289"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_cancel.py#OrderBulkCancel",
+   "to": "f:saleor/saleor/order/actions.py#cancel_order",
+   "kind": "calls",
+   "label": "cancels each order",
+   "evidence": "saleor/saleor/graphql/order/bulk_mutations/order_bulk_cancel.py:46"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py#OrderBulkCreate",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "writes",
+   "label": "updates stock per stock_update_policy",
+   "evidence": "saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py:2500"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py#OrderBulkCreate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "fires ORDER_BULK_CREATED",
+   "evidence": "saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py:2507"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/invoice/mutations/invoice_request.py#InvoiceRequest",
+   "kind": "calls",
+   "label": "routes the invoiceRequest mutation",
+   "evidence": "saleor/saleor/graphql/invoice/schema.py:14"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/invoice/mutations/invoice_create.py#InvoiceCreate",
+   "kind": "calls",
+   "label": "routes the invoiceCreate mutation",
+   "evidence": "saleor/saleor/graphql/invoice/schema.py:16"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/invoice/mutations/invoice_update.py#InvoiceUpdate",
+   "kind": "calls",
+   "label": "routes the invoiceUpdate mutation",
+   "evidence": "saleor/saleor/graphql/invoice/schema.py:18"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/invoice/mutations/invoice_delete.py#InvoiceDelete",
+   "kind": "calls",
+   "label": "routes the invoiceDelete mutation",
+   "evidence": "saleor/saleor/graphql/invoice/schema.py:17"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/invoice/mutations/invoice_request_delete.py#InvoiceRequestDelete",
+   "kind": "calls",
+   "label": "routes the invoiceRequestDelete mutation",
+   "evidence": "saleor/saleor/graphql/invoice/schema.py:15"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/invoice/mutations/invoice_send_notification.py#InvoiceSendNotification",
+   "kind": "calls",
+   "label": "routes the invoiceSendNotification mutation",
+   "evidence": "saleor/saleor/graphql/invoice/schema.py:19"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/invoice/mutations/invoice_request.py#InvoiceRequest",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "asks apps to generate the invoice",
+   "evidence": "saleor/saleor/graphql/invoice/mutations/invoice_request.py:97"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/invoice/mutations/invoice_request.py#InvoiceRequest",
+   "to": "f:saleor/saleor/invoice/models.py",
+   "kind": "writes",
+   "label": "creates the invoice job",
+   "evidence": "saleor/saleor/graphql/invoice/mutations/invoice_request.py:92"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/invoice/mutations/invoice_request.py#InvoiceRequest",
+   "to": "f:saleor/saleor/invoice/events.py",
+   "kind": "writes",
+   "label": "logs invoice requested",
+   "evidence": "saleor/saleor/graphql/invoice/mutations/invoice_request.py:109"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/invoice/mutations/invoice_create.py#InvoiceCreate",
+   "to": "f:saleor/saleor/invoice/models.py",
+   "kind": "writes",
+   "label": "saves a ready invoice",
+   "evidence": "saleor/saleor/graphql/invoice/mutations/invoice_create.py:122"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/invoice/mutations/invoice_send_notification.py#InvoiceSendNotification",
+   "to": "f:saleor/saleor/invoice/notifications.py#send_invoice",
+   "kind": "calls",
+   "label": "sends the invoice",
+   "evidence": "saleor/saleor/graphql/invoice/mutations/invoice_send_notification.py:82"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/invoice/mutations/invoice_request_delete.py#InvoiceRequestDelete",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager",
+   "kind": "calls",
+   "label": "asks apps to delete the invoice",
+   "evidence": "saleor/saleor/graphql/invoice/mutations/invoice_request_delete.py:45"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/invoice/mutations/invoice_update.py#InvoiceUpdate",
+   "to": "f:saleor/saleor/order/events.py",
+   "kind": "writes",
+   "label": "logs invoice updated on the order",
+   "evidence": "saleor/saleor/graphql/invoice/mutations/invoice_update.py:114"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_create.py#ShippingZoneCreate",
+   "kind": "calls",
+   "label": "routes the shippingZoneCreate mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:94"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_update.py#ShippingZoneUpdate",
+   "kind": "calls",
+   "label": "routes the shippingZoneUpdate mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:97"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_delete.py#ShippingZoneDelete",
+   "kind": "calls",
+   "label": "routes the shippingZoneDelete mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:95"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_create.py#ShippingPriceCreate",
+   "kind": "calls",
+   "label": "routes the shippingPriceCreate mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:84"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_update.py#ShippingPriceUpdate",
+   "kind": "calls",
+   "label": "routes the shippingPriceUpdate mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:87"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_delete.py#ShippingPriceDelete",
+   "kind": "calls",
+   "label": "routes the shippingPriceDelete mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:85"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_exclude_products.py#ShippingPriceExcludeProducts",
+   "kind": "calls",
+   "label": "routes the shippingPriceExcludeProducts mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:89"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_remove_product_from_exclude.py#ShippingPriceRemoveProductFromExclude",
+   "kind": "calls",
+   "label": "routes the shippingPriceRemoveProductFromExclude mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:91"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/shipping_method_channel_listing_update.py#ShippingMethodChannelListingUpdate",
+   "kind": "calls",
+   "label": "routes the shippingMethodChannelListingUpdate mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:83"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/delivery_options_calculate.py#DeliveryOptionsCalculate",
+   "kind": "calls",
+   "label": "routes the deliveryOptionsCalculate mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:82"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/bulk_mutations/shipping_price_bulk_delete.py#ShippingPriceBulkDelete",
+   "kind": "calls",
+   "label": "routes the shippingPriceBulkDelete mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:86"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/shipping/bulk_mutations/shipping_zone_bulk_delete.py#ShippingZoneBulkDelete",
+   "kind": "calls",
+   "label": "routes the shippingZoneBulkDelete mutation",
+   "evidence": "saleor/saleor/graphql/shipping/schema.py:96"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_create.py#ShippingZoneCreate",
+   "to": "f:saleor/saleor/graphql/shipping/mutations/base.py",
+   "kind": "calls",
+   "label": "validates zone input",
+   "evidence": "saleor/saleor/graphql/shipping/mutations/shipping_zone_create.py:42"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/shipping/mutations/shipping_zone_update.py#ShippingZoneUpdate",
+   "to": "f:saleor/saleor/shipping/tasks.py",
+   "kind": "triggers",
+   "label": "queues cleanup of removed channels",
+   "evidence": "saleor/saleor/graphql/shipping/mutations/base.py:215"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/shipping/mutations/shipping_method_channel_listing_update.py#ShippingMethodChannelListingUpdate",
+   "to": "f:saleor/saleor/shipping/tasks.py",
+   "kind": "triggers",
+   "label": "queues cleanup when channels are removed",
+   "evidence": "saleor/saleor/graphql/shipping/mutations/shipping_method_channel_listing_update.py:116"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/shipping/mutations/shipping_price_create.py#ShippingPriceCreate",
+   "to": "f:saleor/saleor/shipping/models.py",
+   "kind": "writes",
+   "label": "creates a shipping method",
+   "evidence": "saleor/saleor/graphql/shipping/mutations/base.py:405"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/shipping/mutations/delivery_options_calculate.py#DeliveryOptionsCalculate",
+   "to": "f:saleor/saleor/checkout/delivery_context.py#fetch_shipping_methods_for_checkout",
+   "kind": "calls",
+   "label": "fetches built-in and app shipping methods",
+   "evidence": "saleor/saleor/graphql/shipping/mutations/delivery_options_calculate.py:61"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_create.py#WarehouseCreate",
+   "kind": "calls",
+   "label": "routes the createWarehouse mutation",
+   "evidence": "saleor/saleor/graphql/warehouse/schema.py:80"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_update.py#WarehouseUpdate",
+   "kind": "calls",
+   "label": "routes the updateWarehouse mutation",
+   "evidence": "saleor/saleor/graphql/warehouse/schema.py:81"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_delete.py#WarehouseDelete",
+   "kind": "calls",
+   "label": "routes the deleteWarehouse mutation",
+   "evidence": "saleor/saleor/graphql/warehouse/schema.py:82"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_assign.py#WarehouseShippingZoneAssign",
+   "kind": "calls",
+   "label": "routes the assignWarehouseShippingZone mutation",
+   "evidence": "saleor/saleor/graphql/warehouse/schema.py:83"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_unassign.py#WarehouseShippingZoneUnassign",
+   "kind": "calls",
+   "label": "routes the unassignWarehouseShippingZone mutation",
+   "evidence": "saleor/saleor/graphql/warehouse/schema.py:84"
+  },
+  {
+   "from": "ep:api POST /graphql/",
+   "to": "f:saleor/saleor/graphql/warehouse/bulk_mutations/stock_bulk_update.py#StockBulkUpdate",
+   "kind": "calls",
+   "label": "routes the stockBulkUpdate mutation",
+   "evidence": "saleor/saleor/graphql/warehouse/schema.py:118"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_delete.py#WarehouseDelete",
+   "to": "f:saleor/saleor/warehouse/webhooks/stock_events.py#trigger_product_variant_out_of_stock",
+   "kind": "triggers",
+   "label": "fires out-of-stock per removed stock",
+   "evidence": "saleor/saleor/graphql/warehouse/mutations/warehouse_delete.py:12"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_delete.py#WarehouseDelete",
+   "to": "f:saleor/saleor/warehouse/models.py#Warehouse",
+   "kind": "writes",
+   "label": "deletes the warehouse",
+   "evidence": "saleor/saleor/graphql/warehouse/mutations/warehouse_delete.py:98"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_assign.py#WarehouseShippingZoneAssign",
+   "to": "f:saleor/saleor/warehouse/validation.py",
+   "kind": "calls",
+   "label": "checks zones are not shared",
+   "evidence": "saleor/saleor/graphql/warehouse/mutations/warehouse_shipping_zone_assign.py:50"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/warehouse/bulk_mutations/stock_bulk_update.py#StockBulkUpdate",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "writes",
+   "label": "bulk-updates quantities",
+   "evidence": "saleor/saleor/graphql/warehouse/bulk_mutations/stock_bulk_update.py:392"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/warehouse/bulk_mutations/stock_bulk_update.py#StockBulkUpdate",
+   "to": "f:saleor/saleor/warehouse/webhooks/stock_events.py#trigger_product_variant_stocks_updated",
+   "kind": "triggers",
+   "label": "fires stock updated",
+   "evidence": "saleor/saleor/graphql/warehouse/bulk_mutations/stock_bulk_update.py:404"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/warehouse/dataloaders.py",
+   "to": "f:saleor/saleor/warehouse/models.py#Stock",
+   "kind": "reads",
+   "label": "computes available quantities",
+   "evidence": "saleor/saleor/graphql/warehouse/dataloaders.py:50"
+  }
+ ],
+ "flows": [
+  {
+   "id": "flow.core-orders.fulfil",
+   "name": "A staff member fulfils an order from a warehouse",
+   "summary": "From the orderFulfill mutation to lower stock, a new order status, webhooks and the customer email.",
+   "steps": [
+    {
+     "node": "x:staff",
+     "text": "In the dashboard a staff member picks quantities of each order line and the warehouse to ship them from, then submits."
+    },
+    {
+     "node": "ep:api POST /graphql/",
+     "text": "The dashboard sends the orderFulfill mutation to the single GraphQL endpoint with the order id and per-line, per-warehouse quantities."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill",
+     "text": "OrderFulfill checks MANAGE_ORDERS and that the staff user may access the order's channel."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/order/mutations/order_fulfill.py#OrderFulfill.clean_input",
+     "text": "It refuses unpaid orders when auto-approve is on and unpaid fulfilment is off, rejects duplicates and over-fulfilment, and groups quantities by warehouse."
+    },
+    {
+     "node": "f:saleor/saleor/order/actions.py#create_fulfillments",
+     "text": "In one transaction the order lines are locked and re-checked, and a Fulfillment row is created per warehouse, fulfilled or waiting for approval depending on the site setting."
+    },
+    {
+     "node": "f:saleor/saleor/order/actions.py#_create_fulfillment_lines",
+     "text": "For each line it finds the variant's stock in that warehouse for the channel and builds FulfillmentLines that remember the stock used."
+    },
+    {
+     "node": "f:saleor/saleor/warehouse/management.py#decrease_stock",
+     "text": "If auto-approved, the line's allocation is released and the warehouse quantity is lowered; a shortage raises InsufficientStock and the whole mutation fails with a stocks error."
+    },
+    {
+     "node": "f:saleor/saleor/order/actions.py#order_fulfilled",
+     "text": "The order status is recomputed (partially fulfilled or fulfilled), gift cards are created for gift card lines and a fulfilled-items event is logged."
+    },
+    {
+     "node": "f:saleor/saleor/order/utils.py#determine_order_status",
+     "text": "Status comes from quantities: fulfilled equals total means fulfilled, otherwise partially fulfilled."
+    },
+    {
+     "node": "f:saleor/saleor/order/actions.py#call_order_events",
+     "text": "FULFILLMENT_CREATED, ORDER_UPDATED and, when complete, ORDER_FULFILLED are queued for subscribed apps through the plugin manager."
+    },
+    {
+     "node": "ep:smtp POST /api/webhooks/order-fulfilled",
+     "text": "An email app such as the SMTP app receives ORDER_FULFILLED; Saleor also sends its own fulfilment confirmation notify event to the customer."
+    }
+   ]
+  },
+  {
+   "id": "flow.core-orders.refund",
+   "name": "A refund is granted and processed",
+   "summary": "Staff grant a refund on the order, then request it from the payment app, and the result flows back into the granted refund status.",
+   "steps": [
+    {
+     "node": "x:staff",
+     "text": "On the order page a staff member chooses lines (and optionally shipping) to refund and the transaction to refund from."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/order/mutations/order_grant_refund_create.py#OrderGrantRefundCreate",
+     "text": "orderGrantRefundCreate validates the lines, the shipping flag and the amount, which may not exceed the transaction's charged value."
+    },
+    {
+     "node": "f:saleor/saleor/order/models.py#OrderGrantedRefund",
+     "text": "An OrderGrantedRefund with its lines is stored with status none; no money has moved yet."
+    },
+    {
+     "node": "f:saleor/saleor/order/utils.py#update_order_charge_status",
+     "text": "The order's expected total drops by the granted amount, so charge_status can become overcharged, which tells the dashboard money is owed back."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/payment/mutations/transaction/transaction_request_refund_for_granted_refund.py#TransactionRequestRefundForGrantedRefund",
+     "text": "Staff then trigger transactionRequestRefundForGrantedRefund (payment area), which records a refund request event and asks the payment app."
+    },
+    {
+     "node": "f:saleor/saleor/payment/gateway.py#request_refund_action",
+     "text": "The request is sent as the TRANSACTION_REFUND_REQUESTED synchronous webhook to the app that owns the transaction."
+    },
+    {
+     "node": "ep:stripe POST /api/webhooks/saleor/transaction-refund-requested",
+     "text": "For Stripe payments the Stripe app receives the request and creates a refund at Stripe."
+    },
+    {
+     "node": "x:stripe",
+     "text": "Stripe processes the refund; the app reports success or failure back to Saleor as a transaction event."
+    },
+    {
+     "node": "f:saleor/saleor/order/utils.py#calculate_order_granted_refund_status",
+     "text": "The latest refund event linked to the granted refund sets its status to pending, success or failure."
+    }
+   ]
+  },
+  {
+   "id": "flow.core-orders.draft",
+   "name": "A draft order becomes a confirmed order",
+   "summary": "Staff build a draft, complete it into an order with stock allocated, and confirm it if the channel requires confirmation.",
+   "steps": [
+    {
+     "node": "f:saleor/saleor/graphql/order/mutations/draft_order_create.py#DraftOrderCreate",
+     "text": "draftOrderCreate stores an order in status draft with lines, addresses and a shipping method; prices are marked for recalculation."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/order/mutations/draft_order_complete.py#DraftOrderComplete",
+     "text": "draftOrderComplete recalculates prices and taxes, refusing to finish on a tax error or a concurrent change."
+    },
+    {
+     "node": "f:saleor/saleor/order/calculations.py#fetch_order_prices_if_expired",
+     "text": "Taxes come from the channel's flat rates, a tax plugin or a tax app over the ORDER_CALCULATE_TAXES webhook."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/order/utils.py",
+     "text": "validate_draft_order checks addresses, shipping method, line availability in the channel and vouchers."
+    },
+    {
+     "node": "f:saleor/saleor/warehouse/management.py#allocate_stocks",
+     "text": "Status becomes unfulfilled or unconfirmed and each tracked line gets allocations from the channel's stocks in allocation-strategy order."
+    },
+    {
+     "node": "f:saleor/saleor/order/actions.py#order_created",
+     "text": "After commit the placed-from-draft event is logged and ORDER_CREATED fires; staff are notified."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/order/mutations/order_confirm.py#OrderConfirm",
+     "text": "If the channel does not confirm automatically, orderConfirm later moves the unconfirmed order to unfulfilled and fires ORDER_CONFIRMED."
+    }
+   ]
+  }
+ ]
+}

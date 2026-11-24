@@ -1,0 +1,130 @@
+{
+ "title": "Saleor Commerce",
+ "generated": "16 November 2026",
+ "repos": [
+  {
+   "key": "app:core",
+   "name": "Saleor API",
+   "url": null,
+   "commit": null,
+   "prefix": "saleor/",
+   "note": "mapped from its source code (saleor/saleor main, last commit 2026-11-13)."
+  },
+  {
+   "key": "app:dashboard",
+   "name": "Saleor Dashboard",
+   "url": null,
+   "commit": null,
+   "prefix": "saleor-dashboard/",
+   "note": "mapped from its source code (saleor/saleor-dashboard main, last commit 2026-11-16)."
+  },
+  {
+   "key": "app:apps",
+   "name": "Saleor Apps",
+   "url": null,
+   "commit": null,
+   "prefix": "saleor-apps/",
+   "note": "mapped from its source code (saleor/apps main, last commit 2026-10-28): the Stripe, AvaTax, SMTP and search apps and their shared packages."
+  }
+ ],
+ "regions": [
+  {
+   "id": "app:core",
+   "rect": [
+    0,
+    0,
+    1100,
+    1000
+   ],
+   "hue": 262,
+   "sat": 34
+  },
+  {
+   "id": "app:dashboard",
+   "rect": [
+    1180,
+    0,
+    1880,
+    1000
+   ],
+   "hue": 189,
+   "sat": 40
+  },
+  {
+   "id": "app:apps",
+   "rect": [
+    1960,
+    0,
+    2600,
+    1000
+   ],
+   "hue": 38,
+   "sat": 46
+  },
+  {
+   "id": "ext",
+   "rect": [
+    0,
+    1100,
+    2600,
+    1420
+   ],
+   "hue": 212,
+   "sat": 14
+  }
+ ],
+ "apps": {
+  "app:core": {
+   "provenance": "Mapped from source · November 2026"
+  },
+  "app:dashboard": {
+   "provenance": "Mapped from source · November 2026"
+  },
+  "app:apps": {
+   "provenance": "Mapped from source · November 2026"
+  }
+ },
+ "default_parent": "core.api",
+ "owners": [],
+ "endpoint_fallback": {
+  "api": [
+   "f:saleor/saleor/urls.py",
+   "core.api"
+  ],
+  "stripe": [
+   "apps.stripe"
+  ],
+  "avatax": [
+   "apps.avatax"
+  ],
+  "smtp": [
+   "apps.smtp"
+  ],
+  "search": [
+   "apps.search"
+  ],
+  "stripe-api": [
+   "x:stripe"
+  ],
+  "avatax-api": [
+   "x:avatax"
+  ],
+  "algolia": [
+   "x:algolia"
+  ]
+ },
+ "prefix_fallback": {},
+ "area_names": {
+  "core-api": "GraphQL API and platform",
+  "core-accounts": "Accounts and authentication",
+  "core-catalog": "Catalog, channels and pricing",
+  "core-checkout": "Checkout, payments and tax",
+  "core-orders": "Orders and fulfilment",
+  "core-webhooks": "Apps, webhooks and plugins",
+  "dash-shell": "Dashboard shell and extensions",
+  "dash-orders": "Dashboard orders and customers",
+  "dash-catalog": "Dashboard catalog and settings",
+  "apps-stripe": "Stripe app and shared packages",
+  "apps-others": "AvaTax, SMTP and search apps"
+ }
+}

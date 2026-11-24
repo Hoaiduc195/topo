@@ -1,0 +1,3284 @@
+{
+ "area": "core-accounts",
+ "nodes": [
+  {
+   "id": "core.acc.domain",
+   "parent": "core.accounts",
+   "name": "Users, addresses and customer records",
+   "kind": "group",
+   "summary": "The account data: users (staff and customers in one table), addresses, customer types, notes, lifecycle events and the helpers around them.",
+   "detail": "The User model in saleor/account/models.py serves both shoppers and staff; is_staff, permission groups and direct permissions decide what each can do. Addresses are a separate table linked many-to-many to users, with default shipping and billing pointers on the user. Customer events record what happened to an account (created, password reset, email changed, note added, order placed), written by small functions in events.py. Helpers in utils.py look users up by email, store checkout addresses into the address book (capped by MAX_USER_ADDRESSES, default 100) and fire customer or staff created or updated events through the plugin manager. search.py keeps a PostgreSQL full-text search vector on each user.",
+   "paths": [
+    "saleor/saleor/account/apps.py",
+    "saleor/saleor/account/lock_objects.py",
+    "saleor/saleor/account/exceptions.py",
+    "saleor/saleor/auth/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.address",
+   "parent": "core.accounts",
+   "name": "Address validation and forms",
+   "kind": "group",
+   "summary": "Country-aware address validation built on Google's i18naddress rules, the Django forms behind it and the GraphQL mixin every address mutation uses.",
+   "detail": "Every address coming through the GraphQL layer goes through I18nMixin.validate_address in graphql/account/i18n.py. It checks the phone number, builds a country-specific Django form (account/forms.py and account/i18n.py), and that form normalizes the address with the i18naddress library: required fields, postal code formats and country area names. Callers with the right permission may pass skip_validation, in which case format errors are dropped and the address is stored with validation_skipped set. A settings hook patches the i18naddress rules for Japan, and a substitution map rewrites Irish county names into the form the library accepts.",
+   "paths": [
+    "saleor/saleor/account/widgets.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.auth",
+   "parent": "core.accounts",
+   "name": "Sign-in, tokens and passwords",
+   "kind": "group",
+   "summary": "The GraphQL mutations that create, refresh, verify and revoke JSON Web Tokens (JWT), reset and change passwords, and hand external sign-in to plugins.",
+   "detail": "tokenCreate checks the email and password through a cache-backed throttle, then signs a short-lived access token (JWT_TTL_ACCESS, default 5 minutes) and a refresh token (JWT_TTL_REFRESH, default 30 days) carrying a cross-site request forgery (CSRF) token. The refresh token is also set as the http-only refreshToken cookie by core middleware. tokenRefresh accepts the refresh token from the input or the cookie (then the CSRF token is required) and issues a new access token. Every token embeds the user's jwt_token_key, so tokensDeactivateAll rotates that key to revoke them all. Password reset sends a signed one-time token by email from a Celery task; setPassword checks it, saves the password, confirms the account and signs the user in. The external* mutations pass a plugin id and free-form input to the plugin manager, which the OpenID Connect plugin answers. The site setting password_login_mode can disable password sign-in.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.shopper",
+   "parent": "core.accounts",
+   "name": "Shopper account mutations",
+   "kind": "group",
+   "summary": "What a signed-in or registering customer can do to their own account: register, confirm, update, manage addresses, change email and delete the account.",
+   "detail": "accountRegister never reveals whether an email already exists: duplicate-email errors are swallowed and the follow-up work (search index, confirmation email, CUSTOMER_CREATED webhook) runs in the finish_creating_user Celery task so response times match. confirmAccount checks a signed token and, when the site's merge mode asks for it, the password before linking past guest orders and gift cards. Email change is a two-step flow: requestEmailChange signs a JSON Web Token (JWT) valid for JWT_TTL_REQUEST_EMAIL_CHANGE (default 1 hour) and emails it to the new address; confirmEmailChange checks it against the signed-in user. Account deletion likewise needs a token sent by email. Apps holding IMPERSONATE_USER can run accountUpdate and accountAddressCreate for a given customer.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/__init__.py",
+    "saleor/saleor/graphql/account/mutations/account/base.py",
+    "saleor/saleor/graphql/account/mutations/account/utils.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.staff",
+   "parent": "core.accounts",
+   "name": "Staff and customer administration",
+   "kind": "group",
+   "summary": "Mutations staff and apps use to create, update, delete and bulk-edit customers and staff members, their addresses and avatars.",
+   "detail": "Customer mutations need MANAGE_USERS and work for staff and apps; staff mutations need MANAGE_STAFF and refuse apps outright. Shared bases in mutations/base.py clean nested default addresses, customer type and attributes, and guard deletions: nobody deletes their own or a superuser's account, customer mutations refuse staff accounts, and staff deletions check that the requestor's permissions cover the target and that every permission keeps at least one active manager. Creating a customer or staff member with a redirect link emails a set-password token. Bulk mutations cover customer update and delete, staff delete and activation.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/__init__.py",
+    "saleor/saleor/graphql/account/mutations/staff/__init__.py",
+    "saleor/saleor/graphql/account/mutations/staff/base.py",
+    "saleor/saleor/graphql/account/mutations/staff/utils.py",
+    "saleor/saleor/graphql/account/bulk_mutations/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.ctypes",
+   "parent": "core.accounts",
+   "name": "Customer types",
+   "kind": "group",
+   "summary": "Mutations that manage customer types: named classes of customers with their own attribute sets and one default type.",
+   "detail": "Every user has a customer type; new users get the default one and older rows fall back to it when the column is still empty. Creating or updating a type with isDefault true locks all customer type rows and clears the old default inside one transaction, so the partial unique constraint on is_default is never violated. Assign, unassign and reorder mutations manage which attributes a type carries. All of them need MANAGE_CUSTOMER_TYPES_AND_ATTRIBUTES.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/customer_type/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.perms",
+   "parent": "core.accounts",
+   "name": "Permissions and permission groups",
+   "kind": "group",
+   "summary": "Permission enums, the Permission model, authorization filters, the checks every resolver and mutation runs, and the mutations that manage permission groups.",
+   "detail": "Saleor keeps its own copy of Django's auth Permission model and PermissionsMixin. Permissions are declared as Python enums (seventeen enums, codenames like account.manage_users) and created in the database after each migration. A user's effective permissions are the union of direct permissions and those of their groups; superusers get all. Mutations and PermissionsField fields call all_permissions_required or one_of_permissions_or_auth_filter_required, which combine real permissions with authorization filters (authenticated app, user, staff user, owner). Apps are checked through the same has_perm interface; permission_required refuses MANAGE_STAFF to apps, and staff and permission group mutations reject apps outright. Permission group mutations refuse apps and stop staff from granting permissions or channels they do not hold themselves, or from leaving a permission with nobody able to manage it.",
+   "paths": [
+    "saleor/saleor/permission/__init__.py",
+    "saleor/saleor/graphql/account/mutations/permission_group/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.gql",
+   "parent": "core.accounts",
+   "name": "Account GraphQL schema and types",
+   "kind": "group",
+   "summary": "The account part of the GraphQL schema: query and mutation registration, object types, resolvers, dataloaders, filters and sorting.",
+   "detail": "schema.py declares AccountQueries (me, user, customers, staffUsers, permissionGroups, customerTypes, address, addressValidationRules) and AccountMutations (every account, auth, staff, customer type and permission group mutation); core-api's graphql/api.py merges both into the root schema. types.py defines the User, Address, Group and CustomerType object types and guards sensitive fields per field: notes need MANAGE_USERS or MANAGE_STAFF, orders need ownership or MANAGE_ORDERS. Dataloaders batch user, address, event and channel-access lookups per request, including the user-by-email loader the JSON Web Token (JWT) authentication backend uses.",
+   "paths": [
+    "saleor/saleor/graphql/account/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.oidc",
+   "parent": "core.accounts",
+   "name": "OpenID Connect sign-in plugin",
+   "kind": "group",
+   "summary": "The built-in plugin that signs staff and customers in through an outside OpenID Connect (OIDC) provider and maps its scopes and email domains to Saleor permissions.",
+   "detail": "OpenIDConnectPlugin (id mirumee.authentication.openidconnect, one global configuration) supports two modes. With authorization, token and JSON Web Key Set (JWKS) addresses set it runs the authorization code flow: externalAuthenticationUrl returns the provider's sign-in link with a signed state, externalObtainAccessTokens swaps the code for tokens, validates the ID token against the provider's keys, finds or creates the user by subject and email, and wraps the result in Saleor-signed tokens owned by the plugin. With a user info address and JWKS it also accepts the provider's own access tokens on each request. Users whose email domain is in staff_user_domains, or whose scope carries saleor:staff or saleor permission scopes, become staff and join the default group. Outside calls go through a hardened HTTP client; keys and user info are cached for 1 hour.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/__init__.py",
+    "saleor/saleor/plugins/openid_connect/const.py",
+    "saleor/saleor/plugins/openid_connect/exceptions.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "core.acc.ops",
+   "parent": "core.accounts",
+   "name": "Background tasks, notifications and commands",
+   "kind": "group",
+   "summary": "Celery tasks that finish registration and password reset, the notification payload builders for account emails, the avatar clean-up signal and management commands.",
+   "detail": "Slow or enumeration-sensitive work leaves the request: finish_creating_user and trigger_send_password_reset_notification run as Celery tasks, rebuild a requestor context (user, app, replica flag) from primary keys, and call the plugin manager. notifications.py builds payloads (user, recipient, token, prepared redirect link, site context) for the NOTIFY_USER event that email plugins and apps render; the same tokens are also sent through dedicated webhook events. A post_delete signal removes avatar files from storage. createsuperuser and changepassword are Saleor copies of Django's commands.",
+   "paths": [
+    "saleor/saleor/account/management/__init__.py",
+    "saleor/saleor/account/management/commands/__init__.py"
+   ],
+   "tech": [
+    "Python",
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py",
+   "parent": "core.acc.domain",
+   "name": "Account data model",
+   "kind": "module",
+   "summary": "Django models for users, addresses, customer types, notes, events, staff notification recipients and permission groups.",
+   "detail": "User subclasses Saleor's PermissionsMixin, metadata and external-reference mixins and Django's AbstractBaseUser, with email as the username field. It carries jwt_token_key (a random 12-character string embedded in every token), confirmation and password-reset timestamps, default address pointers, a search vector and a denormalized order count. UserManager.customers() returns non-staff users plus staff who have placed orders. Address rows have trigram indexes for search and an equality based on their data, not their key. Group replaces Django's auth group and adds channel restriction.",
+   "paths": [
+    "saleor/saleor/account/models.py"
+   ],
+   "tech": [
+    "Django",
+    "PostgreSQL"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#User",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "User",
+   "kind": "data",
+   "summary": "One table for shoppers and staff: email, names, flags, addresses, permissions, token key, language and customer type.",
+   "detail": "is_staff separates staff from customers; is_active blocks sign-in; is_confirmed tracks email confirmation. can_login() allows a user when active and either confirmation is off, unconfirmed sign-in is allowed, or the user is confirmed. has_perm accepts permission enums, short-circuits for active superusers and otherwise asks the authentication backends. __str__ returns the UUID so emails never leak into logs.",
+   "paths": [
+    "saleor/saleor/account/models.py:169"
+   ],
+   "signature": "class User(PermissionsMixin, ModelWithMetadata, AbstractBaseUser, ModelWithExternalReference)",
+   "facts": [
+    "USERNAME_FIELD is email, unique",
+    "jwt_token_key is 12 random characters",
+    "Permissions declared: manage_users, manage_staff, impersonate_user"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#User.effective_permissions",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "User.effective_permissions",
+   "kind": "function",
+   "summary": "Lazily computes the permission queryset a user really holds: all permissions for superusers, else direct plus group permissions.",
+   "detail": "Built with EXISTS subqueries over the user-permission and group-permission join tables. Token payloads with a permissions claim overwrite it through the setter, which also clears the backend's per-request cache.",
+   "paths": [
+    "saleor/saleor/account/models.py:295-329"
+   ],
+   "signature": "def effective_permissions(self) -> QuerySet[Permission]"
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#Address",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "Address",
+   "kind": "data",
+   "summary": "A postal address with names, company, street lines, city, postal code, country, phone and a validation_skipped flag.",
+   "paths": [
+    "saleor/saleor/account/models.py:63"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#CustomerType",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "CustomerType",
+   "kind": "data",
+   "summary": "A named class of customers with a unique slug; a partial unique constraint allows only one default type.",
+   "paths": [
+    "saleor/saleor/account/models.py:144"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#CustomerNote",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "CustomerNote",
+   "kind": "data",
+   "summary": "A note on a customer written by a staff user, with a date and a public flag.",
+   "paths": [
+    "saleor/saleor/account/models.py:377"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#CustomerEvent",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "CustomerEvent",
+   "kind": "data",
+   "summary": "One entry in a customer's history: type, date, optional order, app and JSON parameters.",
+   "paths": [
+    "saleor/saleor/account/models.py:392"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#Group",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "Group (permission group)",
+   "kind": "data",
+   "summary": "A named permission group with permissions, members and optional restriction to listed channels.",
+   "detail": "Replaces Django's auth Group. When restricted_access_to_channels is false the group's members can see every channel; otherwise only the linked channels.",
+   "paths": [
+    "saleor/saleor/account/models.py:443"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/models.py#StaffNotificationRecipient",
+   "parent": "f:saleor/saleor/account/models.py",
+   "name": "StaffNotificationRecipient",
+   "kind": "data",
+   "summary": "A staff user or bare email address that receives staff notifications, with an active flag.",
+   "paths": [
+    "saleor/saleor/account/models.py:416"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/__init__.py",
+   "parent": "core.acc.domain",
+   "name": "Customer event types",
+   "kind": "config",
+   "summary": "The CustomerEvents constants: account, password, email, order and staff-action event types with labels.",
+   "paths": [
+    "saleor/saleor/account/__init__.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/events.py",
+   "parent": "core.acc.domain",
+   "name": "Customer event recorders",
+   "kind": "module",
+   "summary": "One function per event type that inserts a CustomerEvent row, attributing it to the user, staff member or app.",
+   "detail": "Order code records placed-order and order-note events, staff mutations record name, email and activation changes, and the user email plugin records password-reset and email-change events.",
+   "paths": [
+    "saleor/saleor/account/events.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/utils.py",
+   "parent": "core.acc.domain",
+   "name": "Account helpers",
+   "kind": "module",
+   "summary": "Lookups and side effects shared across the account code: default customer type, address book, email lookup, group permissions, events.",
+   "detail": "Also holds update_user_orders_count, used after order bulk import to bump the denormalized order counter under row locks.",
+   "paths": [
+    "saleor/saleor/account/utils.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/utils.py#retrieve_user_by_email",
+   "parent": "f:saleor/saleor/account/utils.py",
+   "name": "retrieve_user_by_email()",
+   "kind": "function",
+   "summary": "Finds a user by email case-insensitively, falling back to an exact or lower-case match when several rows differ only in case.",
+   "paths": [
+    "saleor/saleor/account/utils.py:150"
+   ],
+   "signature": "def retrieve_user_by_email(email)"
+  },
+  {
+   "id": "f:saleor/saleor/account/utils.py#store_user_address",
+   "parent": "f:saleor/saleor/account/utils.py",
+   "name": "store_user_address()",
+   "kind": "function",
+   "summary": "Copies a checkout or order address into the user's address book and sets it as default when none is set.",
+   "detail": "Skips silently when the user already has MAX_USER_ADDRESSES addresses (default 100). Reuses an identical existing address instead of creating a duplicate.",
+   "paths": [
+    "saleor/saleor/account/utils.py:76"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/utils.py#RequestorAwareContext",
+   "parent": "f:saleor/saleor/account/utils.py",
+   "name": "RequestorAwareContext",
+   "kind": "class",
+   "summary": "A serializable stand-in for the request context so Celery tasks can rebuild the requesting user and app.",
+   "paths": [
+    "saleor/saleor/account/utils.py:23"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/utils.py#send_user_event",
+   "parent": "f:saleor/saleor/account/utils.py",
+   "name": "send_user_event()",
+   "kind": "function",
+   "summary": "Fires staff or customer created or updated events through the plugin manager after outside sign-in changes a user.",
+   "paths": [
+    "saleor/saleor/account/utils.py:180"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/utils.py#get_default_customer_type",
+   "parent": "f:saleor/saleor/account/utils.py",
+   "name": "get_default_customer_type()",
+   "kind": "function",
+   "summary": "Returns the customer type flagged as default or raises NoDefaultCustomerType.",
+   "paths": [
+    "saleor/saleor/account/utils.py:59"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/search.py",
+   "parent": "core.acc.domain",
+   "name": "User search vector",
+   "kind": "module",
+   "summary": "Builds the PostgreSQL full-text search vector for a user from names, email, email domain and address fields.",
+   "detail": "Names and email get weight A, the email domain and address fields weight B, all with the simple configuration. Customer attribute values are deliberately not indexed.",
+   "paths": [
+    "saleor/saleor/account/search.py"
+   ],
+   "tech": [
+    "PostgreSQL"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/error_codes.py",
+   "parent": "core.acc.domain",
+   "name": "Account error codes",
+   "kind": "config",
+   "summary": "Error code enums for account, customer bulk update, customer type, permission group and confirmation email mutations.",
+   "paths": [
+    "saleor/saleor/account/error_codes.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/i18n.py",
+   "parent": "core.acc.address",
+   "name": "Country-aware address forms",
+   "kind": "module",
+   "summary": "Builds one Django ModelForm class per country from i18naddress rules and validates and normalizes addresses with it.",
+   "detail": "At import time construct_address_form creates a form per country with the right labels and required fields. CountryAwareAddressForm maps Saleor fields to i18naddress fields, normalizes the address and turns library errors into field errors; it can keep fields the country format does not allow when preserve_all_address_fields is on.",
+   "paths": [
+    "saleor/saleor/account/i18n.py"
+   ],
+   "tech": [
+    "Django",
+    "i18naddress"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/i18n.py#CountryAwareAddressForm.validate_address",
+   "parent": "f:saleor/saleor/account/i18n.py",
+   "name": "CountryAwareAddressForm.validate_address()",
+   "kind": "function",
+   "summary": "Joins the street lines, substitutes known name variants, runs i18naddress normalization and records field errors.",
+   "paths": [
+    "saleor/saleor/account/i18n.py:196-219"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/forms.py",
+   "parent": "core.acc.address",
+   "name": "Address form factory",
+   "kind": "module",
+   "summary": "get_address_form picks the country's form class, pre-fills the dialling code and returns a bound form.",
+   "paths": [
+    "saleor/saleor/account/forms.py"
+   ],
+   "detail": "Reads the country from a small meta form first, so a changed country in the input picks the matching form, and turns country area choices into plain values."
+  },
+  {
+   "id": "f:saleor/saleor/account/i18n_rules_override.py",
+   "parent": "core.acc.address",
+   "name": "Address rule patches",
+   "kind": "module",
+   "summary": "Monkey-patches i18naddress.load_validation_data so Japanese addresses keep their city field.",
+   "paths": [
+    "saleor/saleor/account/i18n_rules_override.py"
+   ],
+   "detail": "settings.py calls i18n_rules_override() at start-up, which swaps i18naddress.load_validation_data for a wrapper that overwrites the Japanese fmt and lfmt format strings after loading."
+  },
+  {
+   "id": "f:saleor/saleor/account/i18n_valid_address_extension.py",
+   "parent": "core.acc.address",
+   "name": "Address name substitutions",
+   "kind": "config",
+   "summary": "Maps Irish county names without the Co. prefix to the names i18naddress accepts.",
+   "paths": [
+    "saleor/saleor/account/i18n_valid_address_extension.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/validators.py",
+   "parent": "core.acc.address",
+   "name": "Phone number validator",
+   "kind": "function",
+   "summary": "validate_possible_number parses a phone number for a country and rejects numbers that are impossible or invalid.",
+   "paths": [
+    "saleor/saleor/account/validators.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/i18n.py",
+   "parent": "core.acc.address",
+   "name": "Address validation mixin",
+   "kind": "module",
+   "summary": "I18nMixin, mixed into every GraphQL mutation that accepts an address, plus the map of which mutations may skip validation and with which permissions.",
+   "detail": "SKIP_ADDRESS_VALIDATION_PERMISSION_MAP names mutations across areas (customer, order, warehouse, shop, checkout and account) and the permissions required to skip validation for each.",
+   "paths": [
+    "saleor/saleor/graphql/account/i18n.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.validate_address",
+   "parent": "f:saleor/saleor/graphql/account/i18n.py",
+   "name": "I18nMixin.validate_address()",
+   "kind": "function",
+   "summary": "Requires a country, honours skip_validation when allowed, validates through the country form and returns an unsaved Address.",
+   "paths": [
+    "saleor/saleor/graphql/account/i18n.py:157-202"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.can_skip_address_validation",
+   "parent": "f:saleor/saleor/graphql/account/i18n.py",
+   "name": "I18nMixin.can_skip_address_validation()",
+   "kind": "function",
+   "summary": "Looks up the current mutation name in the skip map and requires all of its permissions, else raises.",
+   "paths": [
+    "saleor/saleor/graphql/account/i18n.py:203-224"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/throttling.py",
+   "parent": "core.acc.auth",
+   "name": "Sign-in throttling",
+   "kind": "module",
+   "summary": "Cache-based brute-force and credential-stuffing protection for password sign-in, keyed by client Internet Protocol (IP) address and user.",
+   "detail": "Keys: login:fail:ip:<ip>, login:fail:ip:<ip>:user:<id> and login:block:ip:<ip>. A block key is added for at least 1 second before each attempt so concurrent attempts from one address fail fast. Failed counters live for 7200 seconds. The client address comes from core's get_client_ip, which trusts the first valid X-Forwarded-For entry.",
+   "paths": [
+    "saleor/saleor/account/throttling.py"
+   ],
+   "facts": [
+    "MIN_DELAY 1 second, MAX_DELAY 3600 seconds",
+    "ATTEMPT_COUNTER_EXPIRE_TIME 7200 seconds",
+    "Uses the Django cache (CACHE_URL or REDIS_URL)"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/throttling.py#authenticate_with_throttling",
+   "parent": "f:saleor/saleor/account/throttling.py",
+   "name": "authenticate_with_throttling()",
+   "kind": "function",
+   "summary": "Checks email and password, blocking the client address for a growing delay after failures; returns the user or None.",
+   "detail": "Raises when the client address is unknown or currently blocked. Checks the password even for unknown emails (against an empty User) so timing does not reveal accounts. On success clears the counters; on failure increments the per-address and per-address-and-user counters and blocks for get_delay_time seconds.",
+   "paths": [
+    "saleor/saleor/account/throttling.py:21-75"
+   ],
+   "signature": "def authenticate_with_throttling(request, email, password) -> User | None",
+   "code": "    correct_password = user.check_password(password)\n\n    if user_exists:\n        ip_user_key = get_cache_key_failed_ip_with_user(ip, user.pk)\n\n        if correct_password:\n            # clear cache entries when login successful\n            clear_cache([ip_key, ip_user_key, block_key])\n            return user\n\n        # increment failed attempt for known user\n        ip_user_attempts_count = increment_attempt(ip_user_key)\n\n    # increment failed attempt for whatever user\n    ip_attempts_count = increment_attempt(ip_key)"
+  },
+  {
+   "id": "f:saleor/saleor/account/throttling.py#get_delay_time",
+   "parent": "f:saleor/saleor/account/throttling.py",
+   "name": "get_delay_time()",
+   "kind": "function",
+   "summary": "Doubles the delay every 10 failures from one address, or every failure for one address and known user, capped at 3600 seconds.",
+   "paths": [
+    "saleor/saleor/account/throttling.py:95-128"
+   ],
+   "code": "        ip_delay = (\n            2 ** (ceil(ip_attempts_count / 10) - 1)\n            if ip_attempts_count < 100\n            else MAX_DELAY\n        )\n\n    ip_user_delay = 0\n    if ip_user_attempts_count > 0:\n        ip_user_delay = (\n            2 ** (ip_user_attempts_count - 1)\n            if ip_user_attempts_count < 10\n            else MAX_DELAY\n        )\n\n    return max(ip_delay, ip_user_delay, MIN_DELAY)"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "parent": "core.acc.auth",
+   "name": "tokenCreate (CreateToken)",
+   "kind": "class",
+   "summary": "Signs a user in with email and password and returns an access token, refresh token, cross-site request forgery (CSRF) token and the user.",
+   "detail": "Refuses when password login is disabled, the credentials are wrong (throttled), the account is unconfirmed while confirmation is required, or the account is inactive. An optional audience becomes a custom: aud claim. The refresh token is stored on the request so core middleware sets the http-only cookie, and last_login is updated at most every TOKEN_UPDATE_LAST_LOGIN_THRESHOLD (default 5 seconds).",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/create_token.py:22"
+   ],
+   "signature": "tokenCreate(email: String!, password: String!, audience: String): CreateToken",
+   "code": "        additional_payload: dict[str, Any] = {}\n\n        site_settings = get_site_promise(info.context).get().settings\n        check_password_login_not_disabled(site_settings)\n\n        csrf_token = _get_new_csrf_token()\n        refresh_additional_payload: dict[str, Any] = {\n            \"csrfToken\": csrf_token,\n        }\n        if audience:\n            additional_payload[\"aud\"] = f\"custom:{audience}\"\n            refresh_additional_payload[\"aud\"] = f\"custom:{audience}\"\n\n        user = cls.get_user(info, email, password)\n"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/refresh_token.py#RefreshToken",
+   "parent": "core.acc.auth",
+   "name": "tokenRefresh (RefreshToken)",
+   "kind": "class",
+   "summary": "Issues a new access token from a refresh token passed in the input or read from the refreshToken cookie.",
+   "detail": "When the token comes from the cookie the caller must also send the CSRF token from tokenCreate, compared in constant time. The refresh token's type must be refresh and its user must still exist, be active and hold the same jwt_token_key.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/refresh_token.py:25"
+   ],
+   "signature": "tokenRefresh(refreshToken: String, csrfToken: String): RefreshToken",
+   "code": "        site_settings = get_site_promise(info.context).get().settings\n        check_password_login_not_disabled(site_settings)\n\n        need_csrf = refresh_token is None\n        refresh_token = cls.get_refresh_token(info, refresh_token)\n        payload = cls.clean_refresh_token(refresh_token)\n\n        # None when we got refresh_token from cookie.\n        if need_csrf:\n            cls.clean_csrf_token(csrf_token, payload)\n\n        additional_payload = {}\n        if audience := payload.get(\"aud\"):\n            additional_payload[\"aud\"] = audience\n        user = get_user(payload)"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/verify_token.py#VerifyToken",
+   "parent": "core.acc.auth",
+   "name": "tokenVerify (VerifyToken)",
+   "kind": "class",
+   "summary": "Decodes a Saleor JSON Web Token (JWT) and returns whether it is valid, its payload and its user.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/verify_token.py:13"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/deactivate_all_user_tokens.py#DeactivateAllUserTokens",
+   "parent": "core.acc.auth",
+   "name": "tokensDeactivateAll",
+   "kind": "class",
+   "summary": "Revokes every token of the signed-in user by replacing their jwt_token_key with a new random 12-character string.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/deactivate_all_user_tokens.py:13"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/utils.py",
+   "parent": "core.acc.auth",
+   "name": "Token mutation helpers",
+   "kind": "module",
+   "summary": "Decodes tokens into typed validation errors, loads the token's user, creates and compares CSRF tokens and checks the password login mode.",
+   "detail": "get_user applies a permissions claim from the token to the user's effective permissions. CSRF tokens reuse Django's masking helpers.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/utils.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/request_password_reset.py#RequestPasswordReset",
+   "parent": "core.acc.auth",
+   "name": "requestPasswordReset",
+   "kind": "class",
+   "summary": "Validates the storefront redirect link and queues the reset email task, without revealing whether the email exists.",
+   "detail": "Unknown or inactive users, and users who asked within RESET_PASSWORD_LOCK_TIME (default 15 minutes), are silently dropped by passing no user to the task. A missing or invalid channel is ignored for the same reason.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/request_password_reset.py:21"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/set_password.py#SetPassword",
+   "parent": "core.acc.auth",
+   "name": "setPassword (SetPassword)",
+   "kind": "class",
+   "summary": "Sets a new password from an emailed reset token, confirms the account if needed and signs the user in like tokenCreate.",
+   "detail": "Accepts tokens from the current or legacy password reset generator. Unknown emails are checked against an empty User so timing is the same. Confirming here also links past guest orders to the account.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/set_password.py:29"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/password_change.py#PasswordChange",
+   "parent": "core.acc.auth",
+   "name": "passwordChange",
+   "kind": "class",
+   "summary": "Changes the signed-in user's password after checking the old one, or without it when the account has no usable password.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/password_change.py:21"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/external_authentication_url.py#ExternalAuthenticationUrl",
+   "parent": "core.acc.auth",
+   "name": "externalAuthenticationUrl",
+   "kind": "class",
+   "summary": "Asks the named authentication plugin for the outside provider's sign-in link.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/external_authentication_url.py:11"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py#ExternalObtainAccessTokens",
+   "parent": "core.acc.auth",
+   "name": "externalObtainAccessTokens",
+   "kind": "class",
+   "summary": "Asks the named plugin to turn the provider's callback data into Saleor tokens and a user.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py:13"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/external_refresh.py#ExternalRefresh",
+   "parent": "core.acc.auth",
+   "name": "externalRefresh",
+   "kind": "class",
+   "summary": "Asks the named plugin to refresh its tokens with the provider.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/external_refresh.py:13"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/external_verify.py#ExternalVerify",
+   "parent": "core.acc.auth",
+   "name": "externalVerify",
+   "kind": "class",
+   "summary": "Asks the named plugin to verify a token it issued and return the user and payload.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/external_verify.py:12"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/authentication/external_logout.py#ExternalLogout",
+   "parent": "core.acc.auth",
+   "name": "externalLogout",
+   "kind": "class",
+   "summary": "Asks the named plugin for the provider's logout link.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/authentication/external_logout.py:11"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_register.py#AccountRegister",
+   "parent": "core.acc.shopper",
+   "name": "accountRegister (AccountRegister)",
+   "kind": "class",
+   "summary": "Registers a customer from email and password while hiding whether the email is already taken.",
+   "detail": "Validates the password with Django's validators and, when confirmation by email is on, requires a storefront redirect link and a channel. A unique-email error marks the user as existing and is dropped from the response. New users are saved unconfirmed with the default customer type; the follow-up runs in finish_creating_user, queued with no user id when nothing was created. The returned user never has an id.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_register.py:60"
+   ],
+   "signature": "accountRegister(input: AccountRegisterInput!): AccountRegister",
+   "code": "        )\n        instance.is_confirmed = False\n        instance.customer_type = get_default_customer_type()\n\n        user_created = False\n        if not user_exists:\n            user_created = cls._save(instance)\n\n        # moving logic to async task to prevent timing attacks\n        finish_creating_user.delay(\n            instance.pk if user_created else None,\n            cleaned_input.get(\"redirect_url\"),\n            cleaned_input.get(\"channel\"),\n            context_data,\n        )"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+   "parent": "core.acc.shopper",
+   "name": "confirmAccount (ConfirmAccount)",
+   "kind": "class",
+   "summary": "Confirms an account from the emailed token, optionally after a password check, then links guest orders and gift cards.",
+   "detail": "Only active, unconfirmed users match; unknown emails use an empty User so the token check costs the same. When the site's account_confirm_merge_mode is REQUIRE_PASSWORD the password is checked through the sign-in throttle before orders and gift cards placed under the email are merged into the account. Emits ACCOUNT_CONFIRMED and CUSTOMER_UPDATED or STAFF_UPDATED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/confirm_account.py:35"
+   ],
+   "code": "        try:\n            user = models.User.objects.get(\n                email=data[\"email\"], is_active=True, is_confirmed=False\n            )\n        except ObjectDoesNotExist:\n            # If user doesn't exists in the database we create fake user for calculation\n            # purpose, as we don't want to indicate non existence of user in the system.\n            error = True\n            user = models.User()\n\n        valid_token = try_generators(\n            current_generator=account_confirm_token_generator,\n            fallback_generator=legacy_account_confirm_token_generator,\n            user=user,\n            token=data[\"token\"],"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/send_confirmation_email.py#SendConfirmationEmail",
+   "parent": "core.acc.shopper",
+   "name": "sendConfirmationEmail",
+   "kind": "class",
+   "summary": "Re-sends the confirmation email to the signed-in unconfirmed user, at most once per CONFIRMATION_EMAIL_LOCK_TIME (default 15 minutes).",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/send_confirmation_email.py:26"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_update.py#AccountUpdate",
+   "parent": "core.acc.shopper",
+   "name": "accountUpdate (AccountUpdate)",
+   "kind": "class",
+   "summary": "Updates the signed-in user's names, language, default addresses and public metadata; apps may act for a customer.",
+   "detail": "Saves only modified fields, rebuilds the search vector when non-metadata fields change, and emits CUSTOMER_UPDATED and CUSTOMER_METADATA_UPDATED as appropriate (metadata-only changes emit CUSTOMER_UPDATED only under the legacy emission setting).",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_update.py:46"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_address_create.py#AccountAddressCreate",
+   "parent": "core.acc.shopper",
+   "name": "accountAddressCreate",
+   "kind": "class",
+   "summary": "Validates and adds an address to the user's address book, optionally as the default shipping or billing address.",
+   "detail": "When the book is full the oldest non-default address is removed first. Emits CUSTOMER_UPDATED and ADDRESS_CREATED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_address_create.py:24"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_address_update.py#AccountAddressUpdate",
+   "parent": "core.acc.shopper",
+   "name": "accountAddressUpdate",
+   "kind": "class",
+   "summary": "Updates one of the user's addresses after checking ownership or MANAGE_USERS.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_address_update.py:11"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_address_delete.py#AccountAddressDelete",
+   "parent": "core.acc.shopper",
+   "name": "accountAddressDelete",
+   "kind": "class",
+   "summary": "Deletes one of the user's addresses after checking ownership or MANAGE_USERS.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_address_delete.py:10"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_set_default_address.py#AccountSetDefaultAddress",
+   "parent": "core.acc.shopper",
+   "name": "accountSetDefaultAddress",
+   "kind": "class",
+   "summary": "Makes one of the user's own addresses the default shipping or billing address.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_set_default_address.py:21"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/request_email_change.py#RequestEmailChange",
+   "parent": "core.acc.shopper",
+   "name": "requestEmailChange",
+   "kind": "class",
+   "summary": "Checks the password and emails a signed change token to the new address; does not check whether the new email is taken.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/request_email_change.py:24"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/confirm_email_change.py#ConfirmEmailChange",
+   "parent": "core.acc.shopper",
+   "name": "confirmEmailChange",
+   "kind": "class",
+   "summary": "Applies an email change from the signed token after matching its type, user id and old email, then relinks orders and gift cards.",
+   "detail": "Rejects the change when the new email already belongs to another user. The new email and search vector are saved before the channel argument is validated, so an invalid channel returns an error after the change is already stored.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/confirm_email_change.py:27"
+   ],
+   "code": "        user.email = new_email\n        search.update_user_search_vector(user, save=False)\n        user.save(update_fields=[\"email\", \"search_vector\", \"updated_at\"])\n        channel_slug = clean_channel(\n            channel, error_class=AccountErrorCode, allow_replica=False\n        ).slug\n\n        cls.post_save_action(info, user, channel_slug, old_email)\n"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_request_deletion.py#AccountRequestDeletion",
+   "parent": "core.acc.shopper",
+   "name": "accountRequestDeletion",
+   "kind": "class",
+   "summary": "Emails the signed-in user a one-time deletion link and emits ACCOUNT_DELETE_REQUESTED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_request_deletion.py:23"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/account/account_delete.py#AccountDelete",
+   "parent": "core.acc.shopper",
+   "name": "accountDelete",
+   "kind": "class",
+   "summary": "Deletes the signed-in customer's account after checking the emailed token; staff accounts are refused.",
+   "detail": "Inside one transaction it detaches and deactivates assigned gift cards (their foreign key is protected) and deletes unique attribute values before deleting the user, then emits ACCOUNT_DELETED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/account/account_delete.py:28"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/base.py",
+   "parent": "core.acc.staff",
+   "name": "Shared account mutation bases",
+   "kind": "module",
+   "summary": "Base classes and input types shared by shopper and staff mutations: address update and delete, customer create, and deletion guards.",
+   "detail": "Defines UserInput, UserAddressInput, CustomerInput and UserCreateInput, BaseAddressUpdate and BaseAddressDelete (ownership checked before saving), BaseCustomerCreate, and the delete mixins for users, customers and staff.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/base.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/base.py#check_can_edit_address",
+   "parent": "f:saleor/saleor/graphql/account/mutations/base.py",
+   "name": "check_can_edit_address()",
+   "kind": "function",
+   "summary": "Allows an address edit for holders of MANAGE_USERS or for the signed-in user who owns the address; apps need the permission.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/base.py:43-62"
+   ],
+   "code": "    requester = get_user_or_app_from_context(context)\n    if requester and requester.has_perm(AccountPermissions.MANAGE_USERS):\n        return True\n    app = get_app_promise(context).get()\n    if not app and context.user:\n        is_owner = context.user.addresses.filter(pk=address.pk).exists()\n        if is_owner:\n            return True\n    raise PermissionDenied(\n        permissions=[AccountPermissions.MANAGE_USERS, AuthorizationFilters.OWNER]\n    )"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/base.py#BaseCustomerCreate",
+   "parent": "f:saleor/saleor/graphql/account/mutations/base.py",
+   "name": "BaseCustomerCreate",
+   "kind": "class",
+   "summary": "Cleans customer input: nested default addresses with metadata, customer type, redirect link, lower-cased email and customer attributes.",
+   "detail": "New users are always saved unconfirmed; confirmation happens when they set a password. Attributes are validated against the customer type from the input, else the current one, else the default.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/base.py:274"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/base.py#StaffDeleteMixin",
+   "parent": "f:saleor/saleor/graphql/account/mutations/base.py",
+   "name": "StaffDeleteMixin",
+   "kind": "class",
+   "summary": "Guards staff deletion: no apps, staff only, nobody out of the requestor's permission scope, and no permission left without an active manager.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/base.py:495"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/customer_create.py#CustomerCreate",
+   "parent": "core.acc.staff",
+   "name": "customerCreate (CustomerCreate)",
+   "kind": "class",
+   "summary": "Creates a customer with addresses, attributes and metadata, records ACCOUNT_CREATED and emails a set-password link when a redirect is given.",
+   "detail": "Needs MANAGE_USERS. An integrity error on save is turned into a unique-email error when the row turns out to exist (race protection). Emits CUSTOMER_CREATED and, with a redirect link, NOTIFY_USER and ACCOUNT_SET_PASSWORD_REQUESTED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/customer_create.py:29"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/customer_update.py#CustomerUpdate",
+   "parent": "core.acc.staff",
+   "name": "customerUpdate (CustomerUpdate)",
+   "kind": "class",
+   "summary": "Updates a customer by id or external reference and records name, email, activation and deactivation events.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/customer_update.py:31"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/customer_delete.py#CustomerDelete",
+   "parent": "core.acc.staff",
+   "name": "customerDelete",
+   "kind": "class",
+   "summary": "Deletes a customer (never staff, superusers or the requestor), records CUSTOMER_DELETED and emits the webhook.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/customer_delete.py:19"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/staff_create.py#StaffCreate",
+   "parent": "core.acc.staff",
+   "name": "staffCreate (StaffCreate)",
+   "kind": "class",
+   "summary": "Creates a staff member, or promotes an existing customer with that email, adds groups and emails a set-password link.",
+   "detail": "Needs MANAGE_STAFF and refuses apps. Groups to add must be within the requestor's permission scope. When an existing non-staff user matches the email no set-password email is sent. Emits STAFF_CREATED and STAFF_SET_PASSWORD_REQUESTED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/staff_create.py:53"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/staff_update.py#StaffUpdate",
+   "parent": "core.acc.staff",
+   "name": "staffUpdate",
+   "kind": "class",
+   "summary": "Updates a staff member's details, groups and active flag with scope and last-manager checks on deactivation.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/staff_update.py:42"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/staff_delete.py#StaffDelete",
+   "parent": "core.acc.staff",
+   "name": "staffDelete",
+   "kind": "class",
+   "summary": "Deletes a staff member through StaffDeleteMixin's checks and emits STAFF_DELETED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/staff_delete.py:19"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/address_create.py#AddressCreate",
+   "parent": "core.acc.staff",
+   "name": "addressCreate",
+   "kind": "class",
+   "summary": "Staff or apps with MANAGE_USERS add a validated address to a given user and emit ADDRESS_CREATED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/address_create.py:22"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/address_update.py#AddressUpdate",
+   "parent": "core.acc.staff",
+   "name": "addressUpdate",
+   "kind": "class",
+   "summary": "Updates any address for holders of MANAGE_USERS, or the owner's own address.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/address_update.py:12"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/address_delete.py#AddressDelete",
+   "parent": "core.acc.staff",
+   "name": "addressDelete",
+   "kind": "class",
+   "summary": "Deletes an address for holders of MANAGE_USERS or the owner.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/address_delete.py:11"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/address_set_default.py#AddressSetDefault",
+   "parent": "core.acc.staff",
+   "name": "addressSetDefault",
+   "kind": "class",
+   "summary": "Sets a user's default shipping or billing address on behalf of staff with MANAGE_USERS.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/address_set_default.py:19"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/staff/user_avatar_update.py#UserAvatarUpdate",
+   "parent": "core.acc.staff",
+   "name": "userAvatarUpdate",
+   "kind": "class",
+   "summary": "Replaces the signed-in staff member's avatar image, deleting the old file and its thumbnails.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/staff/user_avatar_update.py:17",
+    "saleor/saleor/graphql/account/mutations/staff/user_avatar_delete.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/bulk_mutations/customer_bulk_update.py#CustomerBulkUpdate",
+   "parent": "core.acc.staff",
+   "name": "customerBulkUpdate",
+   "kind": "class",
+   "summary": "Updates many customers by id or external reference with per-row errors and a reject-everything or reject-failed-rows policy.",
+   "detail": "Validates each row (addresses through I18nMixin, metadata, attributes), saves the surviving rows and then emits CUSTOMER_UPDATED and CUSTOMER_METADATA_UPDATED per changed customer.",
+   "paths": [
+    "saleor/saleor/graphql/account/bulk_mutations/customer_bulk_update.py:74"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/bulk_mutations/customer_bulk_delete.py#CustomerBulkDelete",
+   "parent": "core.acc.staff",
+   "name": "customerBulkDelete",
+   "kind": "class",
+   "summary": "Deletes many customers with the same guards as customerDelete and emits CUSTOMER_DELETED for each.",
+   "paths": [
+    "saleor/saleor/graphql/account/bulk_mutations/customer_bulk_delete.py:36"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/bulk_mutations/staff_bulk_delete.py#StaffBulkDelete",
+   "parent": "core.acc.staff",
+   "name": "staffBulkDelete",
+   "kind": "class",
+   "summary": "Deletes many staff members through StaffDeleteMixin's checks and emits STAFF_DELETED for each.",
+   "paths": [
+    "saleor/saleor/graphql/account/bulk_mutations/staff_bulk_delete.py:23"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/bulk_mutations/user_bulk_set_active.py#UserBulkSetActive",
+   "parent": "core.acc.staff",
+   "name": "userBulkSetActive",
+   "kind": "class",
+   "summary": "Activates or deactivates many users with one UPDATE; refuses only the requestor's own account and superusers.",
+   "detail": "Needs only MANAGE_USERS and does not distinguish staff from customers, so it skips the MANAGE_STAFF scope and last-manager checks staffUpdate applies. It records no customer events and emits no webhooks.",
+   "paths": [
+    "saleor/saleor/graphql/account/bulk_mutations/user_bulk_set_active.py:14"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mixins.py",
+   "parent": "core.acc.staff",
+   "name": "Account mutation mixins",
+   "kind": "module",
+   "summary": "AddressMetadataMixin stores address metadata on construction; AppImpersonateMixin resolves which user an app acts for.",
+   "paths": [
+    "saleor/saleor/graphql/account/mixins.py"
+   ],
+   "detail": "AppImpersonateMixin lets accountUpdate and accountAddressCreate serve both a signed-in user, who may not pass customerId, and an app with IMPERSONATE_USER, which must pass it and gets that customer loaded by global id."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mixins.py#AppImpersonateMixin.get_user_instance",
+   "parent": "f:saleor/saleor/graphql/account/mixins.py",
+   "name": "AppImpersonateMixin.get_user_instance()",
+   "kind": "function",
+   "summary": "Users act on themselves and may not pass customerId; apps must hold IMPERSONATE_USER and must pass customerId.",
+   "paths": [
+    "saleor/saleor/graphql/account/mixins.py:30-56"
+   ],
+   "code": "        requester = get_user_or_app_from_context(info.context)\n        user = None\n        if isinstance(requester, models.User):\n            if customer_id:\n                raise_validation_error(\n                    field=\"customerId\",\n                    code=AccountErrorCode.INVALID,\n                    message=\"This field can be used by apps only.\",\n                )\n            user = requester\n        elif isinstance(requester, App):\n            if not requester.has_perm(AccountPermissions.IMPERSONATE_USER):\n                raise PermissionDenied(\n                    permissions=[AccountPermissions.IMPERSONATE_USER]\n                )"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_create.py#CustomerTypeCreate",
+   "parent": "core.acc.ctypes",
+   "name": "customerTypeCreate",
+   "kind": "class",
+   "summary": "Creates a customer type; with isDefault true it takes over the default flag under row locks.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/customer_type/customer_type_create.py:73"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_update.py#CustomerTypeUpdate",
+   "parent": "core.acc.ctypes",
+   "name": "customerTypeUpdate",
+   "kind": "class",
+   "summary": "Updates a customer type's name, slug and default flag with the same default transfer.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/customer_type/customer_type_update.py:37"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_delete.py#CustomerTypeDelete",
+   "parent": "core.acc.ctypes",
+   "name": "customerTypeDelete",
+   "kind": "class",
+   "summary": "Deletes a non-default customer type under row locks, moving its users to the default type without per-user webhooks.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/customer_type/customer_type_delete.py:28"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_assign_attributes.py#CustomerTypeAssignAttributes",
+   "parent": "core.acc.ctypes",
+   "name": "customerTypeAssignAttributes",
+   "kind": "class",
+   "summary": "Assigns customer-type attributes to a customer type.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/customer_type/customer_type_assign_attributes.py:39"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_unassign_attributes.py#CustomerTypeUnassignAttributes",
+   "parent": "core.acc.ctypes",
+   "name": "customerTypeUnassignAttributes",
+   "kind": "class",
+   "summary": "Removes attributes from a customer type.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/customer_type/customer_type_unassign_attributes.py:30"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_reorder_attributes.py#CustomerTypeReorderAttributes",
+   "parent": "core.acc.ctypes",
+   "name": "customerTypeReorderAttributes",
+   "kind": "class",
+   "summary": "Moves attributes within a customer type's ordered list.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/customer_type/customer_type_reorder_attributes.py:35"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/permission/enums.py",
+   "parent": "core.acc.perms",
+   "name": "Permission enums",
+   "kind": "module",
+   "summary": "Seventeen permission enums such as AccountPermissions and OrderPermissions, and helpers that turn names and codenames into Permission rows.",
+   "detail": "Each enum value is app_label.codename (for example account.manage_users). PERMISSIONS_ENUMS lists them all; the OpenID Connect plugin turns the same codenames into saleor:<codename> scopes.",
+   "paths": [
+    "saleor/saleor/permission/enums.py"
+   ],
+   "facts": [
+    "17 enums, 25 permissions in total",
+    "AccountPermissions: MANAGE_USERS, MANAGE_STAFF, IMPERSONATE_USER"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/permission/enums.py#get_permissions",
+   "parent": "f:saleor/saleor/permission/enums.py",
+   "name": "get_permissions()",
+   "kind": "function",
+   "summary": "Returns Permission rows for the given enum values, or for every Saleor permission when none are given.",
+   "paths": [
+    "saleor/saleor/permission/enums.py:162"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/permission/auth_filters.py",
+   "parent": "core.acc.perms",
+   "name": "Authorization filters",
+   "kind": "module",
+   "summary": "Pseudo-permissions that grant access by kind of requestor: any authenticated app, user or staff user, or the owner of an object.",
+   "detail": "OWNER has no function; each resolver decides ownership itself.",
+   "paths": [
+    "saleor/saleor/permission/auth_filters.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/permission/utils.py",
+   "parent": "core.acc.perms",
+   "name": "Permission checks",
+   "kind": "module",
+   "summary": "The functions mutations and fields call to decide whether the requesting user or app may proceed.",
+   "paths": [
+    "saleor/saleor/permission/utils.py"
+   ],
+   "detail": "all_permissions_required needs every listed permission plus one listed authorization filter if any; one_of_permissions_or_auth_filter_required needs any one of them. permission_required and has_one_of_permissions work on a requestor object directly and never grant MANAGE_STAFF to apps."
+  },
+  {
+   "id": "f:saleor/saleor/permission/utils.py#all_permissions_required",
+   "parent": "f:saleor/saleor/permission/utils.py",
+   "name": "all_permissions_required()",
+   "kind": "function",
+   "summary": "Requires every real permission, and at least one authorization filter when any are listed.",
+   "paths": [
+    "saleor/saleor/permission/utils.py:12-29"
+   ],
+   "code": "    if not permissions:\n        return True\n\n    perm_results = _get_result_of_permissions_checks(context, permissions)\n    auth_filters_results = _get_result_of_authorization_filters_checks(\n        context, permissions\n    )\n    if auth_filters_results:\n        return all(perm_results) and any(auth_filters_results)\n    return all(perm_results)"
+  },
+  {
+   "id": "f:saleor/saleor/permission/utils.py#one_of_permissions_or_auth_filter_required",
+   "parent": "f:saleor/saleor/permission/utils.py",
+   "name": "one_of_permissions_or_auth_filter_required()",
+   "kind": "function",
+   "summary": "Passes when the requestor holds any listed permission or satisfies any listed authorization filter.",
+   "paths": [
+    "saleor/saleor/permission/utils.py:32"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/permission/utils.py#permission_required",
+   "parent": "f:saleor/saleor/permission/utils.py",
+   "name": "permission_required()",
+   "kind": "function",
+   "summary": "Checks permissions for a user or app; apps never pass a check that includes MANAGE_STAFF.",
+   "paths": [
+    "saleor/saleor/permission/utils.py:83-95"
+   ],
+   "code": "def permission_required(\n    requestor: Union[\"User\", \"App\", None], perms: Iterable[BasePermissionEnum]\n) -> bool:\n    from ..account.models import User\n\n    if isinstance(requestor, User):\n        return requestor.has_perms(perms)\n    if requestor:\n        # for now MANAGE_STAFF permission for app is not supported\n        if AccountPermissions.MANAGE_STAFF in perms:\n            return False\n        return requestor.has_perms(perms)\n    return False"
+  },
+  {
+   "id": "f:saleor/saleor/permission/models.py",
+   "parent": "core.acc.perms",
+   "name": "Permission model and mixin",
+   "kind": "module",
+   "summary": "Saleor's copies of Django's Permission model and PermissionsMixin (superuser flag, groups, direct permissions, has_perm through the backends).",
+   "detail": "_user_has_perm asks each configured authentication backend in turn; core's JSONWebTokenBackend answers from the user's effective permissions.",
+   "paths": [
+    "saleor/saleor/permission/models.py"
+   ],
+   "tech": [
+    "Django"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/permission/management.py#create_permissions",
+   "parent": "core.acc.perms",
+   "name": "create_permissions()",
+   "kind": "function",
+   "summary": "After each migration, creates any missing Permission rows for every model's default and declared permissions.",
+   "detail": "Connected to Django's post_migrate signal in permission/apps.py, reusing the dispatch id of Django's auth handler; django.contrib.auth itself is not an installed app, and saleor.auth is an empty placeholder kept for migrations.",
+   "paths": [
+    "saleor/saleor/permission/management.py:28",
+    "saleor/saleor/permission/apps.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py#PermissionGroupCreate",
+   "parent": "core.acc.perms",
+   "name": "permissionGroupCreate",
+   "kind": "class",
+   "summary": "Creates a permission group with permissions, staff members and channels, refusing apps and anything beyond the requestor's own scope.",
+   "detail": "Non-superusers may only add permissions they hold and channels they can access; turning off channel restriction needs access to every channel. Only staff users may be added. Emits PERMISSION_GROUP_CREATED.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py:60"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_update.py#PermissionGroupUpdate",
+   "parent": "core.acc.perms",
+   "name": "permissionGroupUpdate",
+   "kind": "class",
+   "summary": "Adds and removes permissions, users and channels on a group, refusing changes that leave a permission with no active manager.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/permission_group/permission_group_update.py:57"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_delete.py#PermissionGroupDelete",
+   "parent": "core.acc.perms",
+   "name": "permissionGroupDelete",
+   "kind": "class",
+   "summary": "Deletes a group the requestor can manage unless that would leave permissions unmanageable.",
+   "paths": [
+    "saleor/saleor/graphql/account/mutations/permission_group/permission_group_delete.py:25"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/utils.py",
+   "parent": "core.acc.perms",
+   "name": "Permission scope helpers",
+   "kind": "module",
+   "summary": "Answers who can manage which groups, users and permissions, and which permissions would become unmanageable after a change.",
+   "detail": "A permission is manageable when at least one active staff member holds both it and MANAGE_STAFF. The helpers build a group-to-permissions-and-users map once and search it. Also holds the owner-or-permission checks types use.",
+   "paths": [
+    "saleor/saleor/graphql/account/utils.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/utils.py#get_groups_which_user_can_manage",
+   "parent": "f:saleor/saleor/graphql/account/utils.py",
+   "name": "get_groups_which_user_can_manage()",
+   "kind": "function",
+   "summary": "Returns the groups whose every permission the staff user also holds; customers get none.",
+   "paths": [
+    "saleor/saleor/graphql/account/utils.py:116"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/utils.py#get_not_manageable_permissions_when_deactivate_or_remove_users",
+   "parent": "f:saleor/saleor/graphql/account/utils.py",
+   "name": "Unmanageable permissions after user removal",
+   "kind": "function",
+   "summary": "Lists permissions that would have no active MANAGE_STAFF holder once the given users are removed or deactivated.",
+   "paths": [
+    "saleor/saleor/graphql/account/utils.py:143"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/schema.py",
+   "parent": "core.acc.gql",
+   "name": "Account schema",
+   "kind": "module",
+   "summary": "Declares the account queries and mutations and the filter input types they take.",
+   "paths": [
+    "saleor/saleor/graphql/account/schema.py"
+   ],
+   "tech": [
+    "Graphene"
+   ],
+   "detail": "AccountQueries and AccountMutations are plain Graphene object types; core-api's graphql/api.py lists them among the root query and mutation classes. Fields declare their permissions, which PermissionsField and the mutation base classes enforce."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "parent": "f:saleor/saleor/graphql/account/schema.py",
+   "name": "AccountQueries",
+   "kind": "class",
+   "summary": "Queries: me, user, customers, staffUsers, permissionGroup(s), customerType(s), address and addressValidationRules, each with its permission list.",
+   "detail": "customers needs MANAGE_ORDERS or MANAGE_USERS and supports prefix search and rank sorting; staffUsers and permissionGroups need MANAGE_STAFF; user takes exactly one of id, email or external reference; me returns the request's user or null.",
+   "paths": [
+    "saleor/saleor/graphql/account/schema.py:140"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "parent": "f:saleor/saleor/graphql/account/schema.py",
+   "name": "AccountMutations",
+   "kind": "class",
+   "summary": "Registers every account mutation: tokens and external sign-in, passwords and email, shopper account, staff, customers, customer types and permission groups.",
+   "paths": [
+    "saleor/saleor/graphql/account/schema.py:356"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/resolvers.py",
+   "parent": "core.acc.gql",
+   "name": "Account resolvers",
+   "kind": "module",
+   "summary": "Query resolvers for users, customers, staff, groups, customer types, addresses, payment sources and address validation rules.",
+   "paths": [
+    "saleor/saleor/graphql/account/resolvers.py"
+   ],
+   "detail": "Resolvers return querysets on the database connection the request allows (replica for reads where permitted); schema.py then applies filters, search and pagination. resolve_user narrows by the requestor's permissions; resolve_address treats only apps as privileged."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/resolvers.py#resolve_user",
+   "parent": "f:saleor/saleor/graphql/account/resolvers.py",
+   "name": "resolve_user()",
+   "kind": "function",
+   "summary": "Finds one user by id, email or external reference, narrowing to staff or customers by the requestor's permissions.",
+   "detail": "Holders of both MANAGE_STAFF and MANAGE_USERS see anyone; MANAGE_STAFF alone sees staff; MANAGE_USERS or MANAGE_ORDERS sees customers.",
+   "paths": [
+    "saleor/saleor/graphql/account/resolvers.py:76-118"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/resolvers.py#resolve_address",
+   "parent": "f:saleor/saleor/graphql/account/resolvers.py",
+   "name": "resolve_address()",
+   "kind": "function",
+   "summary": "Returns an address by id to apps with MANAGE_USERS, or from the signed-in user's own address book.",
+   "detail": "Unlike the query's description, a staff user's MANAGE_USERS permission is not consulted here: staff only see their own addresses.",
+   "paths": [
+    "saleor/saleor/graphql/account/resolvers.py:242-256"
+   ],
+   "code": "def resolve_address(info, id, app):\n    user = info.context.user\n    _, address_pk = from_global_id_or_error(id, Address)\n    if app and app.has_perm(AccountPermissions.MANAGE_USERS):\n        return (\n            models.Address.objects.using(get_database_connection_name(info.context))\n            .filter(pk=address_pk)\n            .first()\n        )\n    if user:\n        return user.addresses.filter(id=address_pk).first()\n    raise PermissionDenied(\n        permissions=[AccountPermissions.MANAGE_USERS, AuthorizationFilters.OWNER]\n    )\n"
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/types.py",
+   "parent": "core.acc.gql",
+   "name": "Account object types",
+   "kind": "module",
+   "summary": "GraphQL types for User, Address, CustomerEvent, CustomerType, Group, UserPermission and address validation data.",
+   "detail": "Fields resolve through dataloaders and guard sensitive data per field: the user's note needs MANAGE_USERS or MANAGE_STAFF, orders need ownership or MANAGE_ORDERS, customer events and attributes need ownership or a permission. Users returned by accountRegister are flagged as newly created so their resolvers return empty lists instead of touching the database.",
+   "paths": [
+    "saleor/saleor/graphql/account/types.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/types.py#User",
+   "parent": "f:saleor/saleor/graphql/account/types.py",
+   "name": "User (GraphQL type)",
+   "kind": "class",
+   "summary": "The User object type, federated by id and email, with addresses, checkouts, orders, gift cards, permissions, groups, channels and attributes.",
+   "paths": [
+    "saleor/saleor/graphql/account/types.py:448"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/dataloaders.py",
+   "parent": "core.acc.gql",
+   "name": "Account dataloaders",
+   "kind": "module",
+   "summary": "Per-request batch loaders for users, addresses, customer types and attributes, customer events, avatar thumbnails, permissions and channel access.",
+   "detail": "Channel access: a user's groups are loaded once; groups without channel restriction map to every channel, restricted ones to their linked channels.",
+   "paths": [
+    "saleor/saleor/graphql/account/dataloaders.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/dataloaders.py#UserByEmailLoader",
+   "parent": "f:saleor/saleor/graphql/account/dataloaders.py",
+   "name": "UserByEmailLoader",
+   "kind": "class",
+   "summary": "Batch-loads active users by email; core's JSON Web Token (JWT) backend uses it to find the token's user.",
+   "paths": [
+    "saleor/saleor/graphql/account/dataloaders.py:154"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/dataloaders.py#AccessibleChannelsByUserIdLoader",
+   "parent": "f:saleor/saleor/graphql/account/dataloaders.py",
+   "name": "AccessibleChannelsByUserIdLoader",
+   "kind": "class",
+   "summary": "Returns, per user id, the union of channels their permission groups grant.",
+   "paths": [
+    "saleor/saleor/graphql/account/dataloaders.py:228"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/filters.py",
+   "parent": "core.acc.gql",
+   "name": "Customer and staff filters",
+   "kind": "module",
+   "summary": "Legacy filter sets and where inputs for customers, customer types, staff and permission groups: dates, order counts, addresses, metadata and attributes.",
+   "paths": [
+    "saleor/saleor/graphql/account/filters.py"
+   ],
+   "detail": "Customers can be filtered by join date, update date, number of orders, placed orders, metadata, address fields and customer attribute values; staff by status, search and ids; permission groups by search and ids."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/sorters.py",
+   "parent": "core.acc.gql",
+   "name": "Account sort fields",
+   "kind": "module",
+   "summary": "Sort enums and inputs for users, customer types and permission groups, including search rank.",
+   "paths": [
+    "saleor/saleor/graphql/account/sorters.py"
+   ],
+   "detail": "UserSortField covers first and last name, email, order count, creation and update dates and search rank; rank sorting is only valid together with a search term and becomes the default when searching."
+  },
+  {
+   "id": "f:saleor/saleor/graphql/account/enums.py",
+   "parent": "core.acc.gql",
+   "name": "Account enums",
+   "kind": "module",
+   "summary": "GraphQL enums for address type, customer events, country codes and staff member status.",
+   "paths": [
+    "saleor/saleor/graphql/account/enums.py"
+   ],
+   "detail": "CountryCodeEnum is generated from django-countries with a description per code; CustomerEventsEnum and AddressTypeEnum come from the domain constants."
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/plugin.py",
+   "parent": "core.acc.oidc",
+   "name": "OpenID Connect plugin",
+   "kind": "module",
+   "summary": "The plugin class: configuration, OAuth session set-up and the external authentication hooks the plugin manager calls.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/plugin.py"
+   ],
+   "tech": [
+    "Authlib",
+    "OpenID Connect"
+   ],
+   "detail": "The plugin manager calls the hooks only on this plugin when the plugin id matches (or on every plugin for authenticate_user). Each hook returns the previous value untouched when the plugin is inactive or not configured for the authorization flow."
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin",
+   "parent": "f:saleor/saleor/plugins/openid_connect/plugin.py",
+   "name": "OpenIDConnectPlugin",
+   "kind": "class",
+   "summary": "Reads twelve settings (client id and secret, provider addresses, audience, scope permissions, staff domains, default group) and builds the OAuth session.",
+   "detail": "The requested scope is openid profile email, plus saleor:<codename> for every permission and saleor:staff when scope permissions are on, plus offline_access for refresh tokens except with Cognito or Google (Google gets access_type=offline on the sign-in link instead).",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/plugin.py:53"
+   ],
+   "facts": [
+    "PLUGIN_ID mirumee.authentication.openidconnect",
+    "CONFIGURATION_PER_CHANNEL is False",
+    "enable_refresh_token defaults to True"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "parent": "f:saleor/saleor/plugins/openid_connect/plugin.py",
+   "name": "external_obtain_access_tokens()",
+   "kind": "function",
+   "summary": "Swaps the authorization code for provider tokens, validates the ID token, finds or creates the user, applies staff rules and returns Saleor tokens.",
+   "detail": "The state must be a value signed by Saleor carrying the redirect link. Staff status comes from the saleor:staff scope, saleor permission scopes or the email domain; staff join the default group and lose staff status when none applies (only checked when scope permissions or a staff domain match are in play).",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/plugin.py:285"
+   ],
+   "code": "        user_permissions = []\n        is_staff_user_email = self.is_staff_user_email(user)\n        if self.config.use_scope_permissions or is_staff_user_email:\n            scope = token_data.get(\"scope\", [])\n            user_permissions = self._use_scope_permissions(user, scope)\n\n            is_staff_in_scope = SALEOR_STAFF_PERMISSION in scope\n            is_staff_user = is_staff_in_scope or user_permissions or is_staff_user_email\n            if is_staff_user:\n                assign_staff_to_default_group_and_update_permissions(\n                    user, self.config.default_group_name\n                )\n                if not user.is_staff and update_is_staff(user, True):\n                    user_updated = True\n            elif user.is_staff and not is_staff_user and update_is_staff(user, False):"
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_authentication_url",
+   "parent": "f:saleor/saleor/plugins/openid_connect/plugin.py",
+   "name": "external_authentication_url()",
+   "kind": "function",
+   "summary": "Builds the provider sign-in link with the redirect link, a signed state, the audience and Google's offline access flag.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/plugin.py:380"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_refresh",
+   "parent": "f:saleor/saleor/plugins/openid_connect/plugin.py",
+   "name": "external_refresh()",
+   "kind": "function",
+   "summary": "Refreshes provider tokens using the provider refresh token stored inside the Saleor refresh token, then re-reads groups and scopes.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/plugin.py:415"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.authenticate_user",
+   "parent": "f:saleor/saleor/plugins/openid_connect/plugin.py",
+   "name": "authenticate_user()",
+   "kind": "function",
+   "summary": "On each request, accepts tokens this plugin issued, or the provider's own access token when a user info address and keys are set.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/plugin.py:537"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/utils.py",
+   "parent": "core.acc.oidc",
+   "name": "OpenID Connect helpers",
+   "kind": "module",
+   "summary": "Key and user info fetching with caching, ID and access token decoding, user lookup and creation, staff group assignment and token minting.",
+   "detail": "Keys are cached under one key (oauth_jwks) for 1 hour; user info responses are cached per access token until it expires or 1 hour. Saleor tokens minted here carry the provider access token (oauth_access_key) and, in the refresh token, the provider refresh token, with the provider's expiry.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/utils.py"
+   ],
+   "facts": [
+    "JWKS_CACHE_TIME 3600 seconds",
+    "USER_INFO_DEFAULT_CACHE_TIME 3600 seconds",
+    "OIDC private metadata key is oidc:<provider address>"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/utils.py#get_or_create_user_from_payload",
+   "parent": "f:saleor/saleor/plugins/openid_connect/utils.py",
+   "name": "get_or_create_user_from_payload()",
+   "kind": "function",
+   "summary": "Finds the user by the provider subject stored in private metadata (cached), else by email, creating a confirmed user when missing.",
+   "detail": "When an existing email-matched user is claimed by this provider for the first time its password is made unusable, so old credentials stop working. New users get the default customer type and past guest orders. Inactive users are refused.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/utils.py:440"
+   ],
+   "code": "    cache_key = oidc_metadata_key + \":\" + sub\n    user_id = cache.get(cache_key)\n    if user_id:\n        get_kwargs = {\"id\": user_id}\n    created = False\n    try:\n        user = User.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME).get(\n            **get_kwargs\n        )\n    except User.DoesNotExist:\n        defaults_create[\"customer_type\"] = get_default_customer_type()\n        user, created = User.objects.get_or_create(\n            email=user_email,\n            defaults=defaults_create,\n        )"
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/utils.py#fetch_jwks",
+   "parent": "f:saleor/saleor/plugins/openid_connect/utils.py",
+   "name": "fetch_jwks()",
+   "kind": "function",
+   "summary": "Downloads the provider's JSON Web Key Set (JWKS) without following redirects and caches the keys for 1 hour.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/utils.py:67"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/utils.py#get_user_info",
+   "parent": "f:saleor/saleor/plugins/openid_connect/utils.py",
+   "name": "get_user_info()",
+   "kind": "function",
+   "summary": "Calls the provider's user info endpoint with the access token as a bearer token; returns None on any failure.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/utils.py:129"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/utils.py#get_user_from_oauth_access_token",
+   "parent": "f:saleor/saleor/plugins/openid_connect/utils.py",
+   "name": "get_user_from_oauth_access_token()",
+   "kind": "function",
+   "summary": "Turns a provider access token into a user: decode it locally when it is a JSON Web Token, else ask the user info endpoint.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/utils.py:284"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/utils.py#create_tokens_from_oauth_payload",
+   "parent": "f:saleor/saleor/plugins/openid_connect/utils.py",
+   "name": "create_tokens_from_oauth_payload()",
+   "kind": "function",
+   "summary": "Mints a Saleor access token owned by the plugin and, when the provider sent one, a refresh token with a new CSRF token.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/utils.py:633"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/utils.py#assign_staff_to_default_group_and_update_permissions",
+   "parent": "f:saleor/saleor/plugins/openid_connect/utils.py",
+   "name": "Add staff to default group",
+   "kind": "function",
+   "summary": "Adds the user to the configured default group (created channel-restricted when missing) and merges group permissions in.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/utils.py:334"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/client.py#OAuth2Client",
+   "parent": "core.acc.oidc",
+   "name": "OAuth2Client",
+   "kind": "class",
+   "summary": "Authlib's OAuth 2 session running on Saleor's hardened HTTP session and configuration.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/client.py:7"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/plugins/openid_connect/dataclasses.py",
+   "parent": "core.acc.oidc",
+   "name": "Plugin configuration record",
+   "kind": "config",
+   "summary": "OpenIDConnectConfig, the typed view of the plugin's twelve settings.",
+   "paths": [
+    "saleor/saleor/plugins/openid_connect/dataclasses.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/tasks.py",
+   "parent": "core.acc.ops",
+   "name": "Account Celery tasks",
+   "kind": "module",
+   "summary": "Tasks that finish registration and send password reset messages outside the request.",
+   "paths": [
+    "saleor/saleor/account/tasks.py"
+   ],
+   "tech": [
+    "Celery"
+   ],
+   "detail": "Both tasks run with writer access, rebuild the requesting user and app from primary keys, load the plugin manager and site settings through the GraphQL dataloaders, and return early when no user id is passed."
+  },
+  {
+   "id": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "parent": "f:saleor/saleor/account/tasks.py",
+   "name": "finish_creating_user()",
+   "kind": "job",
+   "summary": "After registration, indexes the user, sends the confirmation email when enabled, and emits ACCOUNT_CONFIRMATION_REQUESTED and CUSTOMER_CREATED.",
+   "detail": "Returns immediately when no user id was passed (the email already existed). Records the ACCOUNT_CREATED customer event last.",
+   "paths": [
+    "saleor/saleor/account/tasks.py:84-122"
+   ],
+   "code": "        if redirect_url:\n            redirect_url = _prepare_redirect_url(user, redirect_url, token)\n\n        call_event(\n            manager.account_confirmation_requested,\n            user,\n            channel_slug,\n            token,\n            redirect_url,\n        )\n\n    call_event(manager.customer_created, user)\n    events.customer_account_created_event(user=user)"
+  },
+  {
+   "id": "f:saleor/saleor/account/tasks.py#trigger_send_password_reset_notification",
+   "parent": "f:saleor/saleor/account/tasks.py",
+   "name": "trigger_send_password_reset_notification()",
+   "kind": "job",
+   "summary": "Sends the reset notification, emits ACCOUNT_SET_PASSWORD_REQUESTED or STAFF_SET_PASSWORD_REQUESTED, and stamps last_password_reset_request.",
+   "paths": [
+    "saleor/saleor/account/tasks.py:32"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/notifications.py",
+   "parent": "core.acc.ops",
+   "name": "Account notification payloads",
+   "kind": "module",
+   "summary": "Builds lazy payloads for password reset, set password, account confirmation, email change and account deletion messages and hands them to manager.notify.",
+   "detail": "Payloads include the user (with private metadata blanked), recipient, token, a prepared link with email and token parameters, the channel slug and site context. Staff variants use separate event types.",
+   "paths": [
+    "saleor/saleor/account/notifications.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/notifications.py#send_account_confirmation",
+   "parent": "f:saleor/saleor/account/notifications.py",
+   "name": "send_account_confirmation()",
+   "kind": "function",
+   "summary": "Queues an ACCOUNT_CONFIRMATION notification with a confirmation token and link.",
+   "paths": [
+    "saleor/saleor/account/notifications.py:71"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/notifications.py#send_password_reset_notification",
+   "parent": "f:saleor/saleor/account/notifications.py",
+   "name": "send_password_reset_notification()",
+   "kind": "function",
+   "summary": "Queues an ACCOUNT_PASSWORD_RESET or ACCOUNT_STAFF_RESET_PASSWORD notification with a reset token and link.",
+   "paths": [
+    "saleor/saleor/account/notifications.py:42"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/notifications.py#send_set_password_notification",
+   "parent": "f:saleor/saleor/account/notifications.py",
+   "name": "send_set_password_notification()",
+   "kind": "function",
+   "summary": "Queues a set-password notification for a customer or staff member created by staff.",
+   "paths": [
+    "saleor/saleor/account/notifications.py:180"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/management/commands/createsuperuser.py#Command",
+   "parent": "core.acc.ops",
+   "name": "createsuperuser command",
+   "kind": "job",
+   "summary": "Saleor's copy of Django's createsuperuser: prompts or reads DJANGO_SUPERUSER_* variables, then creates the user through a test fixture helper.",
+   "detail": "It calls dangerously_get_or_create_superuser from saleor/account/tests/fixtures/user.py, whose docstring says it should never be used in production and whose module imports pytest; it also adds the user to a Full Access group holding every permission.",
+   "paths": [
+    "saleor/saleor/account/management/commands/createsuperuser.py:28"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/management/commands/changepassword.py",
+   "parent": "core.acc.ops",
+   "name": "changepassword command",
+   "kind": "job",
+   "summary": "Re-exports Django's changepassword management command.",
+   "paths": [
+    "saleor/saleor/account/management/commands/changepassword.py"
+   ]
+  },
+  {
+   "id": "f:saleor/saleor/account/signals.py#delete_avatar",
+   "parent": "core.acc.ops",
+   "name": "delete_avatar()",
+   "kind": "function",
+   "summary": "post_delete handler that queues deletion of a removed user's avatar file from storage.",
+   "paths": [
+    "saleor/saleor/account/signals.py:4",
+    "saleor/saleor/account/apps.py"
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "from": "f:saleor/saleor/graphql/api.py",
+   "to": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "kind": "calls",
+   "label": "merges account queries into the schema",
+   "evidence": "saleor/saleor/graphql/api.py:93"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/api.py",
+   "to": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "kind": "calls",
+   "label": "merges account mutations into the schema",
+   "evidence": "saleor/saleor/graphql/api.py:120"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "kind": "calls",
+   "label": "registers token_create",
+   "evidence": "saleor/saleor/graphql/account/schema.py:358"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/refresh_token.py#RefreshToken",
+   "kind": "calls",
+   "label": "registers token_refresh",
+   "evidence": "saleor/saleor/graphql/account/schema.py:359"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/verify_token.py#VerifyToken",
+   "kind": "calls",
+   "label": "registers token_verify",
+   "evidence": "saleor/saleor/graphql/account/schema.py:360"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py#ExternalObtainAccessTokens",
+   "kind": "calls",
+   "label": "registers external_obtain_access_tokens",
+   "evidence": "saleor/saleor/graphql/account/schema.py:364"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/request_password_reset.py#RequestPasswordReset",
+   "kind": "calls",
+   "label": "registers request_password_reset",
+   "evidence": "saleor/saleor/graphql/account/schema.py:370"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/account/account_register.py#AccountRegister",
+   "kind": "calls",
+   "label": "registers account_register",
+   "evidence": "saleor/saleor/graphql/account/schema.py:384"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+   "kind": "calls",
+   "label": "registers confirm_account",
+   "evidence": "saleor/saleor/graphql/account/schema.py:372"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/account/account_update.py#AccountUpdate",
+   "kind": "calls",
+   "label": "registers account_update",
+   "evidence": "saleor/saleor/graphql/account/schema.py:385"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/staff/customer_create.py#CustomerCreate",
+   "kind": "calls",
+   "label": "registers customer_create",
+   "evidence": "saleor/saleor/graphql/account/schema.py:395"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/staff/staff_create.py#StaffCreate",
+   "kind": "calls",
+   "label": "registers staff_create",
+   "evidence": "saleor/saleor/graphql/account/schema.py:408"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py#PermissionGroupCreate",
+   "kind": "calls",
+   "label": "registers permission_group_create",
+   "evidence": "saleor/saleor/graphql/account/schema.py:418"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountMutations",
+   "to": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_create.py#CustomerTypeCreate",
+   "kind": "calls",
+   "label": "registers customer_type_create",
+   "evidence": "saleor/saleor/graphql/account/schema.py:401"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "to": "f:saleor/saleor/graphql/account/resolvers.py#resolve_user",
+   "kind": "calls",
+   "label": "resolves user(id, email, externalReference)",
+   "evidence": "saleor/saleor/graphql/account/schema.py:348"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "to": "f:saleor/saleor/graphql/account/resolvers.py#resolve_address",
+   "kind": "calls",
+   "label": "resolves address(id)",
+   "evidence": "saleor/saleor/graphql/account/schema.py:353"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "to": "f:saleor/saleor/graphql/account/resolvers.py",
+   "kind": "calls",
+   "label": "resolves customers, staff and groups",
+   "evidence": "saleor/saleor/graphql/account/schema.py:290"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "to": "f:saleor/saleor/graphql/account/filters.py",
+   "kind": "calls",
+   "label": "filters customers and staff",
+   "evidence": "saleor/saleor/graphql/account/schema.py:30"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "to": "f:saleor/saleor/graphql/account/sorters.py",
+   "kind": "calls",
+   "label": "sorts users and groups",
+   "evidence": "saleor/saleor/graphql/account/schema.py:104"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "to": "f:saleor/saleor/core/search.py",
+   "kind": "calls",
+   "label": "prefix-searches customers",
+   "evidence": "saleor/saleor/graphql/account/schema.py:292"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/schema.py#AccountQueries",
+   "to": "f:saleor/saleor/graphql/account/types.py#User",
+   "kind": "calls",
+   "label": "returns User objects",
+   "evidence": "saleor/saleor/graphql/account/schema.py:235"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/resolvers.py#resolve_user",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "reads",
+   "label": "looks up users by permission scope",
+   "evidence": "saleor/saleor/graphql/account/resolvers.py:97"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/resolvers.py#resolve_address",
+   "to": "f:saleor/saleor/account/models.py#Address",
+   "kind": "reads",
+   "label": "reads the address",
+   "evidence": "saleor/saleor/graphql/account/resolvers.py:247"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/resolvers.py",
+   "to": "f:saleor/saleor/account/models.py#Group",
+   "kind": "reads",
+   "label": "lists permission groups",
+   "evidence": "saleor/saleor/graphql/account/resolvers.py:68"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/types.py#User",
+   "to": "f:saleor/saleor/graphql/account/dataloaders.py",
+   "kind": "calls",
+   "label": "loads events, channels and thumbnails",
+   "evidence": "saleor/saleor/graphql/account/types.py:806"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/types.py",
+   "to": "f:saleor/saleor/graphql/account/utils.py",
+   "kind": "calls",
+   "label": "checks owner or permission per field",
+   "evidence": "saleor/saleor/graphql/account/types.py:31"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/dataloaders.py#UserByEmailLoader",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "reads",
+   "label": "loads active users by email",
+   "evidence": "saleor/saleor/graphql/account/dataloaders.py:161"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/dataloaders.py#AccessibleChannelsByUserIdLoader",
+   "to": "f:saleor/saleor/account/models.py#Group",
+   "kind": "reads",
+   "label": "reads group channel restrictions",
+   "evidence": "saleor/saleor/graphql/account/dataloaders.py:183"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/dataloaders.py#AccessibleChannelsByUserIdLoader",
+   "to": "f:saleor/saleor/channel/models.py",
+   "kind": "reads",
+   "label": "reads channels",
+   "evidence": "saleor/saleor/graphql/account/dataloaders.py:195"
+  },
+  {
+   "from": "f:saleor/saleor/core/auth_backend.py#load_user_from_request",
+   "to": "f:saleor/saleor/graphql/account/dataloaders.py#UserByEmailLoader",
+   "kind": "calls",
+   "label": "finds the token's user by email",
+   "evidence": "saleor/saleor/core/auth_backend.py:140"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/core/mutations.py",
+   "to": "f:saleor/saleor/permission/utils.py#all_permissions_required",
+   "kind": "calls",
+   "label": "checks mutation permissions (all)",
+   "evidence": "saleor/saleor/graphql/core/mutations.py:511"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/core/mutations.py",
+   "to": "f:saleor/saleor/permission/utils.py#one_of_permissions_or_auth_filter_required",
+   "kind": "calls",
+   "label": "checks mutation permissions (any)",
+   "evidence": "saleor/saleor/graphql/core/mutations.py:512"
+  },
+  {
+   "from": "f:saleor/saleor/account/models.py",
+   "to": "x:postgres",
+   "kind": "writes",
+   "label": "stores account tables",
+   "evidence": "saleor/saleor/account/models.py:169"
+  },
+  {
+   "from": "f:saleor/saleor/account/models.py#Address",
+   "to": "f:saleor/saleor/account/validators.py",
+   "kind": "calls",
+   "label": "validates phone numbers",
+   "evidence": "saleor/saleor/account/models.py:37"
+  },
+  {
+   "from": "f:saleor/saleor/account/models.py#User.effective_permissions",
+   "to": "f:saleor/saleor/permission/enums.py#get_permissions",
+   "kind": "calls",
+   "label": "starts from all Saleor permissions",
+   "evidence": "saleor/saleor/account/models.py:297"
+  },
+  {
+   "from": "f:saleor/saleor/account/models.py#User",
+   "to": "f:saleor/saleor/permission/models.py",
+   "kind": "calls",
+   "label": "has_perm asks the auth backends",
+   "evidence": "saleor/saleor/account/models.py:357"
+  },
+  {
+   "from": "f:saleor/saleor/permission/models.py",
+   "to": "f:saleor/saleor/core/auth_backend.py#JSONWebTokenBackend.has_perm",
+   "kind": "calls",
+   "label": "asks each authentication backend",
+   "evidence": "saleor/saleor/permission/models.py:14"
+  },
+  {
+   "from": "f:saleor/saleor/account/events.py",
+   "to": "f:saleor/saleor/account/models.py#CustomerEvent",
+   "kind": "writes",
+   "label": "inserts customer events",
+   "evidence": "saleor/saleor/account/events.py:8"
+  },
+  {
+   "from": "f:saleor/saleor/order/events.py",
+   "to": "f:saleor/saleor/account/events.py",
+   "kind": "calls",
+   "label": "records placed-order events",
+   "evidence": "saleor/saleor/order/events.py:325"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/user_email/tasks.py",
+   "to": "f:saleor/saleor/account/events.py",
+   "kind": "calls",
+   "label": "records reset-link-sent events",
+   "evidence": "saleor/saleor/plugins/user_email/tasks.py:39"
+  },
+  {
+   "from": "f:saleor/saleor/account/utils.py#store_user_address",
+   "to": "f:saleor/saleor/account/models.py#Address",
+   "kind": "writes",
+   "label": "adds the address to the address book",
+   "evidence": "saleor/saleor/account/utils.py:94"
+  },
+  {
+   "from": "f:saleor/saleor/checkout/complete_checkout.py",
+   "to": "f:saleor/saleor/account/utils.py#store_user_address",
+   "kind": "calls",
+   "label": "saves checkout addresses to the account",
+   "evidence": "saleor/saleor/checkout/complete_checkout.py:207"
+  },
+  {
+   "from": "f:saleor/saleor/checkout/complete_checkout.py",
+   "to": "f:saleor/saleor/account/utils.py#retrieve_user_by_email",
+   "kind": "calls",
+   "label": "matches guest checkouts to users",
+   "evidence": "saleor/saleor/checkout/complete_checkout.py:19"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py",
+   "to": "f:saleor/saleor/account/utils.py",
+   "kind": "calls",
+   "label": "bumps users' order counts",
+   "evidence": "saleor/saleor/graphql/order/bulk_mutations/order_bulk_create.py:2517"
+  },
+  {
+   "from": "f:saleor/saleor/account/utils.py#retrieve_user_by_email",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "reads",
+   "label": "case-insensitive email lookup",
+   "evidence": "saleor/saleor/account/utils.py:156"
+  },
+  {
+   "from": "f:saleor/saleor/account/utils.py#send_user_event",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_created",
+   "kind": "calls",
+   "label": "fires customer or staff events",
+   "evidence": "saleor/saleor/account/utils.py:185"
+  },
+  {
+   "from": "f:saleor/saleor/account/utils.py#get_default_customer_type",
+   "to": "f:saleor/saleor/account/models.py#CustomerType",
+   "kind": "reads",
+   "label": "reads the default type",
+   "evidence": "saleor/saleor/account/utils.py:68"
+  },
+  {
+   "from": "f:saleor/saleor/account/utils.py#RequestorAwareContext",
+   "to": "x:postgres",
+   "kind": "reads",
+   "label": "reloads user and app from the replica",
+   "evidence": "saleor/saleor/account/utils.py:35"
+  },
+  {
+   "from": "f:saleor/saleor/account/search.py",
+   "to": "f:saleor/saleor/core/postgres.py",
+   "kind": "calls",
+   "label": "builds weighted search vectors",
+   "evidence": "saleor/saleor/account/search.py:29"
+  },
+  {
+   "from": "f:saleor/saleor/account/search.py",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "writes",
+   "label": "saves search_vector",
+   "evidence": "saleor/saleor/account/search.py:35"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.validate_address",
+   "to": "f:saleor/saleor/account/forms.py",
+   "kind": "calls",
+   "label": "builds the country address form",
+   "evidence": "saleor/saleor/graphql/account/i18n.py:102"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.validate_address",
+   "to": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.can_skip_address_validation",
+   "kind": "calls",
+   "label": "checks skip_validation rights",
+   "evidence": "saleor/saleor/graphql/account/i18n.py:179"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.validate_address",
+   "to": "f:saleor/saleor/account/validators.py",
+   "kind": "calls",
+   "label": "validates the phone number",
+   "evidence": "saleor/saleor/graphql/account/i18n.py:89"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.can_skip_address_validation",
+   "to": "f:saleor/saleor/permission/utils.py#all_permissions_required",
+   "kind": "calls",
+   "label": "requires every listed permission",
+   "evidence": "saleor/saleor/graphql/account/i18n.py:220"
+  },
+  {
+   "from": "f:saleor/saleor/account/forms.py",
+   "to": "f:saleor/saleor/account/i18n.py",
+   "kind": "calls",
+   "label": "picks the form class for the country",
+   "evidence": "saleor/saleor/account/forms.py:17"
+  },
+  {
+   "from": "f:saleor/saleor/account/i18n.py#CountryAwareAddressForm.validate_address",
+   "to": "f:saleor/saleor/account/i18n_valid_address_extension.py",
+   "kind": "calls",
+   "label": "substitutes known name variants",
+   "evidence": "saleor/saleor/account/i18n.py:231"
+  },
+  {
+   "from": "f:saleor/saleor/settings.py",
+   "to": "f:saleor/saleor/account/i18n_rules_override.py",
+   "kind": "configures",
+   "label": "patches i18naddress rules at start-up",
+   "evidence": "saleor/saleor/settings.py:1304"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "to": "f:saleor/saleor/account/throttling.py#authenticate_with_throttling",
+   "kind": "calls",
+   "label": "checks credentials with throttling",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/create_token.py:53"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "to": "f:saleor/saleor/core/jwt.py#create_access_token",
+   "kind": "calls",
+   "label": "signs the access token",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/create_token.py:109"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "to": "f:saleor/saleor/core/jwt.py#create_refresh_token",
+   "kind": "calls",
+   "label": "signs the refresh token with CSRF token",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/create_token.py:110"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/utils.py",
+   "kind": "calls",
+   "label": "checks login mode, makes CSRF token",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/create_token.py:99"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "to": "f:saleor/saleor/core/middleware.py#jwt_refresh_token_middleware",
+   "kind": "triggers",
+   "label": "middleware sets the refreshToken cookie",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/create_token.py:113"
+  },
+  {
+   "from": "f:saleor/saleor/account/throttling.py#authenticate_with_throttling",
+   "to": "f:saleor/saleor/account/utils.py#retrieve_user_by_email",
+   "kind": "calls",
+   "label": "finds the user by email",
+   "evidence": "saleor/saleor/account/throttling.py:48"
+  },
+  {
+   "from": "f:saleor/saleor/account/throttling.py#authenticate_with_throttling",
+   "to": "f:saleor/saleor/core/utils/__init__.py#get_client_ip",
+   "kind": "calls",
+   "label": "reads the client address",
+   "evidence": "saleor/saleor/account/throttling.py:22"
+  },
+  {
+   "from": "f:saleor/saleor/account/throttling.py#authenticate_with_throttling",
+   "to": "f:saleor/saleor/account/throttling.py#get_delay_time",
+   "kind": "calls",
+   "label": "computes the next block",
+   "evidence": "saleor/saleor/account/throttling.py:70"
+  },
+  {
+   "from": "f:saleor/saleor/account/throttling.py",
+   "to": "x:redis",
+   "kind": "writes",
+   "label": "keeps failure counters and blocks in cache",
+   "evidence": "saleor/saleor/account/throttling.py:138"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/refresh_token.py#RefreshToken",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/utils.py",
+   "kind": "calls",
+   "label": "decodes token, checks CSRF, loads user",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/refresh_token.py:104"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/refresh_token.py#RefreshToken",
+   "to": "f:saleor/saleor/core/jwt.py#create_access_token",
+   "kind": "calls",
+   "label": "signs a new access token",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/refresh_token.py:142"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/verify_token.py#VerifyToken",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/utils.py",
+   "kind": "calls",
+   "label": "decodes the token and loads its user",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/verify_token.py:36"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/utils.py",
+   "to": "f:saleor/saleor/core/jwt.py#jwt_decode",
+   "kind": "calls",
+   "label": "verifies the signature",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/utils.py:39"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/utils.py",
+   "to": "f:saleor/saleor/core/jwt.py#get_user_from_payload",
+   "kind": "calls",
+   "label": "matches email and token key",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/utils.py:24"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/deactivate_all_user_tokens.py#DeactivateAllUserTokens",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "writes",
+   "label": "rotates jwt_token_key",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/deactivate_all_user_tokens.py:26"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/request_password_reset.py#RequestPasswordReset",
+   "to": "f:saleor/saleor/account/tasks.py#trigger_send_password_reset_notification",
+   "kind": "triggers",
+   "label": "queues the reset email task",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/request_password_reset.py:104"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/request_password_reset.py#RequestPasswordReset",
+   "to": "f:saleor/saleor/core/utils/url.py#validate_storefront_url",
+   "kind": "calls",
+   "label": "checks the redirect link",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/request_password_reset.py:67"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/set_password.py#SetPassword",
+   "to": "f:saleor/saleor/core/tokens.py#try_generators",
+   "kind": "calls",
+   "label": "checks the reset token",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/set_password.py:94"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/set_password.py#SetPassword",
+   "to": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+   "kind": "calls",
+   "label": "signs the user in afterwards",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/set_password.py:81"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/set_password.py#SetPassword",
+   "to": "f:saleor/saleor/order/utils.py#match_orders_with_new_user",
+   "kind": "calls",
+   "label": "links guest orders on confirmation",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/set_password.py:120"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/set_password.py#SetPassword",
+   "to": "f:saleor/saleor/account/events.py",
+   "kind": "calls",
+   "label": "records PASSWORD_RESET",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/set_password.py:123"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/password_change.py#PasswordChange",
+   "to": "f:saleor/saleor/account/events.py",
+   "kind": "calls",
+   "label": "records PASSWORD_CHANGED",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/password_change.py:75"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/external_authentication_url.py#ExternalAuthenticationUrl",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_authentication_url",
+   "kind": "calls",
+   "label": "runs external_authentication_url on the named plugin",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/external_authentication_url.py:42"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py#ExternalObtainAccessTokens",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_obtain_access_tokens",
+   "kind": "calls",
+   "label": "runs external_obtain_access_tokens on the named plugin",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py:46"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/external_refresh.py#ExternalRefresh",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_refresh",
+   "kind": "calls",
+   "label": "runs external_refresh on the named plugin",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/external_refresh.py:46"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/external_verify.py#ExternalVerify",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_verify",
+   "kind": "calls",
+   "label": "runs external_verify on the named plugin",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/external_verify.py:42"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/external_logout.py#ExternalLogout",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_logout",
+   "kind": "calls",
+   "label": "runs external_logout on the named plugin",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/external_logout.py:37"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_obtain_access_tokens",
+   "to": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "kind": "calls",
+   "label": "dispatches external_obtain_access_tokens to the plugin",
+   "evidence": "saleor/saleor/plugins/manager.py:2782"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_authentication_url",
+   "to": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_authentication_url",
+   "kind": "calls",
+   "label": "dispatches external_authentication_url to the plugin",
+   "evidence": "saleor/saleor/plugins/manager.py:2792"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/manager.py#PluginsManager.external_refresh",
+   "to": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_refresh",
+   "kind": "calls",
+   "label": "dispatches external_refresh to the plugin",
+   "evidence": "saleor/saleor/plugins/manager.py:2802"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/manager.py#PluginsManager.authenticate_user",
+   "to": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.authenticate_user",
+   "kind": "calls",
+   "label": "dispatches authenticate_user to the plugin",
+   "evidence": "saleor/saleor/plugins/manager.py:2809"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py#ExternalObtainAccessTokens",
+   "to": "f:saleor/saleor/core/middleware.py#jwt_refresh_token_middleware",
+   "kind": "triggers",
+   "label": "middleware sets the refresh cookie",
+   "evidence": "saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py:49"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_register.py#AccountRegister",
+   "to": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "kind": "triggers",
+   "label": "queues the finish-registration task",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_register.py:247"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_register.py#AccountRegister",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "writes",
+   "label": "saves the unconfirmed user",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_register.py:220"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_register.py#AccountRegister",
+   "to": "f:saleor/saleor/account/utils.py#get_default_customer_type",
+   "kind": "calls",
+   "label": "assigns the default customer type",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_register.py:240"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_register.py#AccountRegister",
+   "to": "f:saleor/saleor/graphql/channel/utils.py#clean_channel",
+   "kind": "calls",
+   "label": "resolves the notification channel",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_register.py:146"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+   "to": "f:saleor/saleor/core/tokens.py#try_generators",
+   "kind": "calls",
+   "label": "checks the confirmation token",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_account.py:166"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+   "to": "f:saleor/saleor/account/throttling.py#authenticate_with_throttling",
+   "kind": "calls",
+   "label": "checks the password before merging",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_account.py:125"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+   "to": "f:saleor/saleor/order/utils.py#match_orders_with_new_user",
+   "kind": "calls",
+   "label": "merges guest orders",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_account.py:150"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+   "to": "f:saleor/saleor/giftcard/utils.py#assign_user_gift_cards",
+   "kind": "calls",
+   "label": "merges gift cards",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_account.py:151"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_confirmed",
+   "kind": "calls",
+   "label": "emits ACCOUNT_CONFIRMED",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_account.py:201"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/send_confirmation_email.py#SendConfirmationEmail",
+   "to": "f:saleor/saleor/account/notifications.py#send_account_confirmation",
+   "kind": "calls",
+   "label": "re-sends the confirmation email",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/send_confirmation_email.py:105"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_update.py#AccountUpdate",
+   "to": "f:saleor/saleor/graphql/account/mixins.py#AppImpersonateMixin.get_user_instance",
+   "kind": "calls",
+   "label": "resolves self or impersonated customer",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_update.py:94"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_update.py#AccountUpdate",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py#BaseCustomerCreate",
+   "kind": "calls",
+   "label": "cleans names, addresses, attributes",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_update.py:46"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_update.py#AccountUpdate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_updated",
+   "kind": "calls",
+   "label": "emits CUSTOMER_UPDATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_update.py:131"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_address_create.py#AccountAddressCreate",
+   "to": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.validate_address",
+   "kind": "calls",
+   "label": "validates the address",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_address_create.py:88"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_address_create.py#AccountAddressCreate",
+   "to": "f:saleor/saleor/graphql/account/mixins.py#AppImpersonateMixin.get_user_instance",
+   "kind": "calls",
+   "label": "resolves the target user",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_address_create.py:85"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_address_create.py#AccountAddressCreate",
+   "to": "f:saleor/saleor/account/utils.py",
+   "kind": "calls",
+   "label": "trims the book, sets defaults",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_address_create.py:104"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_address_create.py#AccountAddressCreate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.address_created",
+   "kind": "calls",
+   "label": "emits ADDRESS_CREATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_address_create.py:109"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_address_update.py#AccountAddressUpdate",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py#check_can_edit_address",
+   "kind": "calls",
+   "label": "checks ownership via BaseAddressUpdate",
+   "evidence": "saleor/saleor/graphql/account/mutations/base.py:84"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_address_delete.py#AccountAddressDelete",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py",
+   "kind": "calls",
+   "label": "inherits BaseAddressDelete",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_address_delete.py:10"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_set_default_address.py#AccountSetDefaultAddress",
+   "to": "f:saleor/saleor/account/utils.py",
+   "kind": "calls",
+   "label": "changes the default address",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_set_default_address.py:66"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/request_email_change.py#RequestEmailChange",
+   "to": "f:saleor/saleor/core/jwt.py#create_token",
+   "kind": "calls",
+   "label": "signs the email change token",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/request_email_change.py:100"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/request_email_change.py#RequestEmailChange",
+   "to": "f:saleor/saleor/account/notifications.py",
+   "kind": "calls",
+   "label": "queues the change request email",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/request_email_change.py:110"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/request_email_change.py#RequestEmailChange",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_change_email_requested",
+   "kind": "calls",
+   "label": "emits ACCOUNT_CHANGE_EMAIL_REQUESTED",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/request_email_change.py:125"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_email_change.py#ConfirmEmailChange",
+   "to": "f:saleor/saleor/core/jwt.py#jwt_decode",
+   "kind": "calls",
+   "label": "decodes the change token",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_email_change.py:65"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_email_change.py#ConfirmEmailChange",
+   "to": "f:saleor/saleor/account/search.py",
+   "kind": "calls",
+   "label": "re-indexes the user",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_email_change.py:131"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/confirm_email_change.py#ConfirmEmailChange",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_email_changed",
+   "kind": "calls",
+   "label": "emits ACCOUNT_EMAIL_CHANGED",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/confirm_email_change.py:150"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_request_deletion.py#AccountRequestDeletion",
+   "to": "f:saleor/saleor/account/notifications.py",
+   "kind": "calls",
+   "label": "queues the deletion email",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_request_deletion.py:76"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_request_deletion.py#AccountRequestDeletion",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_delete_requested",
+   "kind": "calls",
+   "label": "emits ACCOUNT_DELETE_REQUESTED",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_request_deletion.py:83"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_delete.py#AccountDelete",
+   "to": "f:saleor/saleor/giftcard/utils.py#deactivate_assigned_gift_cards",
+   "kind": "calls",
+   "label": "detaches gift cards first",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_delete.py:92"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_delete.py#AccountDelete",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "writes",
+   "label": "deletes the user",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_delete.py:94"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/account/account_delete.py#AccountDelete",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_deleted",
+   "kind": "calls",
+   "label": "emits ACCOUNT_DELETED",
+   "evidence": "saleor/saleor/graphql/account/mutations/account/account_delete.py:105"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py",
+   "to": "x:celery-broker",
+   "kind": "reads",
+   "label": "runs as Celery tasks",
+   "evidence": "saleor/saleor/account/tasks.py:30"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "to": "f:saleor/saleor/account/search.py",
+   "kind": "calls",
+   "label": "indexes the new user",
+   "evidence": "saleor/saleor/account/tasks.py:91"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "to": "f:saleor/saleor/account/notifications.py#send_account_confirmation",
+   "kind": "calls",
+   "label": "sends the confirmation email",
+   "evidence": "saleor/saleor/account/tasks.py:102"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_confirmation_requested",
+   "kind": "calls",
+   "label": "emits ACCOUNT_CONFIRMATION_REQUESTED",
+   "evidence": "saleor/saleor/account/tasks.py:114"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_created",
+   "kind": "calls",
+   "label": "emits CUSTOMER_CREATED",
+   "evidence": "saleor/saleor/account/tasks.py:121"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "to": "f:saleor/saleor/account/events.py",
+   "kind": "calls",
+   "label": "records ACCOUNT_CREATED",
+   "evidence": "saleor/saleor/account/tasks.py:122"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+   "to": "f:saleor/saleor/account/utils.py#RequestorAwareContext",
+   "kind": "calls",
+   "label": "rebuilds the requestor context",
+   "evidence": "saleor/saleor/account/tasks.py:94"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#trigger_send_password_reset_notification",
+   "to": "f:saleor/saleor/account/notifications.py#send_password_reset_notification",
+   "kind": "calls",
+   "label": "builds the reset notification",
+   "evidence": "saleor/saleor/account/tasks.py:52"
+  },
+  {
+   "from": "f:saleor/saleor/account/tasks.py#trigger_send_password_reset_notification",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_set_password_requested",
+   "kind": "calls",
+   "label": "emits ACCOUNT_SET_PASSWORD_REQUESTED",
+   "evidence": "saleor/saleor/account/tasks.py:73"
+  },
+  {
+   "from": "f:saleor/saleor/account/notifications.py#send_account_confirmation",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.notify",
+   "kind": "calls",
+   "label": "sends NOTIFY_USER ACCOUNT_CONFIRMATION",
+   "evidence": "saleor/saleor/account/notifications.py:94"
+  },
+  {
+   "from": "f:saleor/saleor/account/notifications.py#send_password_reset_notification",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.notify",
+   "kind": "calls",
+   "label": "sends NOTIFY_USER password reset",
+   "evidence": "saleor/saleor/account/notifications.py:68"
+  },
+  {
+   "from": "f:saleor/saleor/account/notifications.py#send_password_reset_notification",
+   "to": "f:saleor/saleor/core/tokens.py",
+   "kind": "calls",
+   "label": "makes the reset token",
+   "evidence": "saleor/saleor/account/notifications.py:48"
+  },
+  {
+   "from": "f:saleor/saleor/account/notifications.py",
+   "to": "f:saleor/saleor/core/notification/utils.py",
+   "kind": "calls",
+   "label": "adds site context to payloads",
+   "evidence": "saleor/saleor/account/notifications.py:3"
+  },
+  {
+   "from": "f:saleor/saleor/account/management/commands/createsuperuser.py#Command",
+   "to": "f:saleor/saleor/account/tests/fixtures/user.py",
+   "kind": "calls",
+   "label": "creates the user via a test fixture helper",
+   "evidence": "saleor/saleor/account/management/commands/createsuperuser.py:224"
+  },
+  {
+   "from": "f:saleor/saleor/account/signals.py#delete_avatar",
+   "to": "f:saleor/saleor/core/tasks.py#delete_from_storage_task",
+   "kind": "triggers",
+   "label": "queues avatar file deletion",
+   "evidence": "saleor/saleor/account/signals.py:6"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_create.py#CustomerCreate",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py#BaseCustomerCreate",
+   "kind": "calls",
+   "label": "cleans the customer input",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_create.py:29"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_create.py#CustomerCreate",
+   "to": "f:saleor/saleor/account/notifications.py#send_set_password_notification",
+   "kind": "calls",
+   "label": "emails a set-password link",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_create.py:167"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_create.py#CustomerCreate",
+   "to": "f:saleor/saleor/account/events.py",
+   "kind": "calls",
+   "label": "records ACCOUNT_CREATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_create.py:128"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_create.py#CustomerCreate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_created",
+   "kind": "calls",
+   "label": "emits CUSTOMER_CREATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_create.py:130"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_create.py#CustomerCreate",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "writes",
+   "label": "saves the customer",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_create.py:79"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/base.py#BaseCustomerCreate",
+   "to": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.validate_address",
+   "kind": "calls",
+   "label": "validates default addresses",
+   "evidence": "saleor/saleor/graphql/account/mutations/base.py:326"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/base.py#BaseCustomerCreate",
+   "to": "f:saleor/saleor/graphql/attribute/utils/attribute_assignment.py",
+   "kind": "calls",
+   "label": "cleans customer attributes",
+   "evidence": "saleor/saleor/graphql/account/mutations/base.py:293"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_update.py#CustomerUpdate",
+   "to": "f:saleor/saleor/account/events.py",
+   "kind": "calls",
+   "label": "records name, email, activation events",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_update.py:93"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_update.py#CustomerUpdate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_updated",
+   "kind": "calls",
+   "label": "emits CUSTOMER_UPDATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_update.py:199"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_delete.py#CustomerDelete",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_deleted",
+   "kind": "calls",
+   "label": "emits CUSTOMER_DELETED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_delete.py:60"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/customer_delete.py#CustomerDelete",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py",
+   "kind": "calls",
+   "label": "guards via CustomerDeleteMixin",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/customer_delete.py:19"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/staff_create.py#StaffCreate",
+   "to": "f:saleor/saleor/graphql/account/utils.py#get_groups_which_user_can_manage",
+   "kind": "calls",
+   "label": "limits groups to the requestor's scope",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/staff_create.py:146"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/staff_create.py#StaffCreate",
+   "to": "f:saleor/saleor/account/notifications.py#send_set_password_notification",
+   "kind": "calls",
+   "label": "emails a set-password link",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/staff_create.py:181"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/staff_create.py#StaffCreate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.staff_created",
+   "kind": "calls",
+   "label": "emits STAFF_CREATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/staff_create.py:209"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/staff_update.py#StaffUpdate",
+   "to": "f:saleor/saleor/graphql/account/utils.py",
+   "kind": "calls",
+   "label": "checks scope and last managers",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/staff_update.py:22"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/staff_update.py#StaffUpdate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.staff_updated",
+   "kind": "calls",
+   "label": "emits STAFF_UPDATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/staff_update.py:202"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/staff_delete.py#StaffDelete",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py#StaffDeleteMixin",
+   "kind": "calls",
+   "label": "runs staff deletion guards",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/staff_delete.py:19"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/staff_delete.py#StaffDelete",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.staff_deleted",
+   "kind": "calls",
+   "label": "emits STAFF_DELETED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/staff_delete.py:61"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/base.py#StaffDeleteMixin",
+   "to": "f:saleor/saleor/graphql/account/utils.py#get_not_manageable_permissions_when_deactivate_or_remove_users",
+   "kind": "calls",
+   "label": "keeps every permission manageable",
+   "evidence": "saleor/saleor/graphql/account/mutations/base.py:577"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/base.py#StaffDeleteMixin",
+   "to": "f:saleor/saleor/graphql/account/utils.py",
+   "kind": "calls",
+   "label": "finds out-of-scope users",
+   "evidence": "saleor/saleor/graphql/account/mutations/base.py:553"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/address_create.py#AddressCreate",
+   "to": "f:saleor/saleor/graphql/account/i18n.py#I18nMixin.validate_address",
+   "kind": "calls",
+   "label": "validates the address",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/address_create.py:22"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/address_create.py#AddressCreate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.address_created",
+   "kind": "calls",
+   "label": "emits ADDRESS_CREATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/address_create.py:72"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/address_update.py#AddressUpdate",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py#check_can_edit_address",
+   "kind": "calls",
+   "label": "checks permission via BaseAddressUpdate",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/address_update.py:12"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/address_delete.py#AddressDelete",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py",
+   "kind": "calls",
+   "label": "inherits BaseAddressDelete",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/address_delete.py:11"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/address_set_default.py#AddressSetDefault",
+   "to": "f:saleor/saleor/account/utils.py",
+   "kind": "calls",
+   "label": "changes the default address",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/address_set_default.py:66"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/staff/user_avatar_update.py#UserAvatarUpdate",
+   "to": "x:object-storage",
+   "kind": "writes",
+   "label": "stores the avatar file",
+   "evidence": "saleor/saleor/graphql/account/mutations/staff/user_avatar_update.py:46"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/bulk_mutations/customer_bulk_update.py#CustomerBulkUpdate",
+   "to": "f:saleor/saleor/graphql/account/i18n.py",
+   "kind": "calls",
+   "label": "validates addresses via I18nMixin",
+   "evidence": "saleor/saleor/graphql/account/bulk_mutations/customer_bulk_update.py:74"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/bulk_mutations/customer_bulk_update.py#CustomerBulkUpdate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_updated",
+   "kind": "calls",
+   "label": "emits CUSTOMER_UPDATED per customer",
+   "evidence": "saleor/saleor/graphql/account/bulk_mutations/customer_bulk_update.py:746"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/bulk_mutations/customer_bulk_delete.py#CustomerBulkDelete",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.customer_deleted",
+   "kind": "calls",
+   "label": "emits CUSTOMER_DELETED per customer",
+   "evidence": "saleor/saleor/graphql/account/bulk_mutations/customer_bulk_delete.py:72"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/bulk_mutations/staff_bulk_delete.py#StaffBulkDelete",
+   "to": "f:saleor/saleor/graphql/account/mutations/base.py#StaffDeleteMixin",
+   "kind": "calls",
+   "label": "runs staff deletion guards",
+   "evidence": "saleor/saleor/graphql/account/bulk_mutations/staff_bulk_delete.py:23"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/bulk_mutations/user_bulk_set_active.py#UserBulkSetActive",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "writes",
+   "label": "updates is_active in one query",
+   "evidence": "saleor/saleor/graphql/account/bulk_mutations/user_bulk_set_active.py:59"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_create.py#CustomerTypeCreate",
+   "to": "f:saleor/saleor/account/models.py#CustomerType",
+   "kind": "writes",
+   "label": "creates the type, moves default",
+   "evidence": "saleor/saleor/graphql/account/mutations/customer_type/customer_type_create.py:69"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_create.py#CustomerTypeCreate",
+   "to": "f:saleor/saleor/account/lock_objects.py",
+   "kind": "calls",
+   "label": "locks customer type rows",
+   "evidence": "saleor/saleor/graphql/account/mutations/customer_type/customer_type_create.py:68"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_update.py#CustomerTypeUpdate",
+   "to": "f:saleor/saleor/account/models.py#CustomerType",
+   "kind": "writes",
+   "label": "updates the type",
+   "evidence": "saleor/saleor/graphql/account/mutations/customer_type/customer_type_update.py:37"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_delete.py#CustomerTypeDelete",
+   "to": "f:saleor/saleor/account/lock_objects.py",
+   "kind": "calls",
+   "label": "locks customer type rows",
+   "evidence": "saleor/saleor/graphql/account/mutations/customer_type/customer_type_delete.py:73"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/customer_type/customer_type_assign_attributes.py#CustomerTypeAssignAttributes",
+   "to": "f:saleor/saleor/attribute/models/__init__.py",
+   "kind": "writes",
+   "label": "assigns attributes",
+   "evidence": "saleor/saleor/graphql/account/mutations/customer_type/customer_type_assign_attributes.py:8"
+  },
+  {
+   "from": "f:saleor/saleor/permission/utils.py#all_permissions_required",
+   "to": "f:saleor/saleor/permission/auth_filters.py",
+   "kind": "calls",
+   "label": "resolves authorization filters",
+   "evidence": "saleor/saleor/permission/utils.py:75"
+  },
+  {
+   "from": "f:saleor/saleor/permission/utils.py#all_permissions_required",
+   "to": "f:saleor/saleor/graphql/utils/__init__.py#get_user_or_app_from_context",
+   "kind": "calls",
+   "label": "gets the requesting user or app",
+   "evidence": "saleor/saleor/permission/utils.py:57"
+  },
+  {
+   "from": "f:saleor/saleor/permission/utils.py#one_of_permissions_or_auth_filter_required",
+   "to": "f:saleor/saleor/permission/auth_filters.py",
+   "kind": "calls",
+   "label": "evaluates filters as alternatives",
+   "evidence": "saleor/saleor/permission/utils.py:46"
+  },
+  {
+   "from": "f:saleor/saleor/permission/enums.py#get_permissions",
+   "to": "x:postgres",
+   "kind": "reads",
+   "label": "reads Permission rows",
+   "evidence": "saleor/saleor/permission/enums.py:178"
+  },
+  {
+   "from": "f:saleor/saleor/permission/management.py#create_permissions",
+   "to": "x:postgres",
+   "kind": "writes",
+   "label": "inserts missing permissions",
+   "evidence": "saleor/saleor/permission/management.py:94"
+  },
+  {
+   "from": "f:saleor/saleor/permission/apps.py",
+   "to": "f:saleor/saleor/permission/management.py#create_permissions",
+   "kind": "triggers",
+   "label": "runs after every migration",
+   "evidence": "saleor/saleor/permission/apps.py:11"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py#PermissionGroupCreate",
+   "to": "f:saleor/saleor/permission/enums.py#get_permissions",
+   "kind": "calls",
+   "label": "turns names into Permission rows",
+   "evidence": "saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py:133"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py#PermissionGroupCreate",
+   "to": "f:saleor/saleor/graphql/account/utils.py",
+   "kind": "calls",
+   "label": "checks out-of-scope permissions",
+   "evidence": "saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py:162"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py#PermissionGroupCreate",
+   "to": "f:saleor/saleor/account/models.py#Group",
+   "kind": "writes",
+   "label": "saves group members, permissions, channels",
+   "evidence": "saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py:87"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py#PermissionGroupCreate",
+   "to": "f:saleor/saleor/plugins/manager.py#PluginsManager.permission_group_created",
+   "kind": "calls",
+   "label": "emits PERMISSION_GROUP_CREATED",
+   "evidence": "saleor/saleor/graphql/account/mutations/permission_group/permission_group_create.py:101"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_update.py#PermissionGroupUpdate",
+   "to": "f:saleor/saleor/graphql/account/utils.py",
+   "kind": "calls",
+   "label": "checks permissions stay manageable",
+   "evidence": "saleor/saleor/graphql/account/mutations/permission_group/permission_group_update.py:17"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/mutations/permission_group/permission_group_delete.py#PermissionGroupDelete",
+   "to": "f:saleor/saleor/graphql/account/utils.py",
+   "kind": "calls",
+   "label": "checks permissions stay manageable",
+   "evidence": "saleor/saleor/graphql/account/mutations/permission_group/permission_group_delete.py:12"
+  },
+  {
+   "from": "f:saleor/saleor/graphql/account/utils.py#get_groups_which_user_can_manage",
+   "to": "f:saleor/saleor/account/models.py#Group",
+   "kind": "reads",
+   "label": "compares group permissions",
+   "evidence": "saleor/saleor/graphql/account/utils.py:128"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin",
+   "to": "f:saleor/saleor/plugins/openid_connect/client.py#OAuth2Client",
+   "kind": "calls",
+   "label": "builds the OAuth session",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:271"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin",
+   "to": "f:saleor/saleor/plugins/openid_connect/dataclasses.py",
+   "kind": "configures",
+   "label": "reads settings into OpenIDConnectConfig",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:176"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "to": "x:openid-provider",
+   "kind": "http",
+   "label": "exchanges the code at the token endpoint",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:324"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "to": "f:saleor/saleor/plugins/openid_connect/utils.py#fetch_jwks",
+   "kind": "calls",
+   "label": "validates the ID token with provider keys",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:337"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "to": "f:saleor/saleor/plugins/openid_connect/utils.py#get_or_create_user_from_payload",
+   "kind": "calls",
+   "label": "finds or creates the user",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:340"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "to": "f:saleor/saleor/plugins/openid_connect/utils.py#assign_staff_to_default_group_and_update_permissions",
+   "kind": "calls",
+   "label": "adds staff to the default group",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:358"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "to": "f:saleor/saleor/plugins/openid_connect/utils.py#create_tokens_from_oauth_payload",
+   "kind": "calls",
+   "label": "mints Saleor tokens",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:369"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+   "to": "f:saleor/saleor/account/utils.py#send_user_event",
+   "kind": "calls",
+   "label": "fires created or updated events",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:367"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_authentication_url",
+   "to": "x:openid-provider",
+   "kind": "http",
+   "label": "builds the provider sign-in link",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:410"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_refresh",
+   "to": "x:openid-provider",
+   "kind": "http",
+   "label": "refreshes provider tokens",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:440"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.authenticate_user",
+   "to": "f:saleor/saleor/plugins/openid_connect/utils.py#get_user_from_oauth_access_token",
+   "kind": "calls",
+   "label": "accepts the provider's access token",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:563"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.authenticate_user",
+   "to": "f:saleor/saleor/core/jwt.py#get_user_from_access_payload",
+   "kind": "calls",
+   "label": "loads users of plugin-issued tokens",
+   "evidence": "saleor/saleor/plugins/openid_connect/plugin.py:550"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#fetch_jwks",
+   "to": "x:openid-provider",
+   "kind": "http",
+   "label": "downloads the key set",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:76"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#fetch_jwks",
+   "to": "x:redis",
+   "kind": "writes",
+   "label": "caches keys for 1 hour",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:96"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#get_user_info",
+   "to": "x:openid-provider",
+   "kind": "http",
+   "label": "calls the user info endpoint",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:131"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#get_user_from_oauth_access_token",
+   "to": "f:saleor/saleor/plugins/openid_connect/utils.py#get_user_info",
+   "kind": "calls",
+   "label": "falls back to user info for opaque tokens",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:213"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#get_or_create_user_from_payload",
+   "to": "f:saleor/saleor/account/models.py#User",
+   "kind": "writes",
+   "label": "creates or claims the user",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:477"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#get_or_create_user_from_payload",
+   "to": "f:saleor/saleor/order/utils.py#match_orders_with_new_user",
+   "kind": "calls",
+   "label": "links guest orders to new users",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:483"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#get_or_create_user_from_payload",
+   "to": "f:saleor/saleor/account/utils.py#get_default_customer_type",
+   "kind": "calls",
+   "label": "assigns the default customer type",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:476"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#create_tokens_from_oauth_payload",
+   "to": "f:saleor/saleor/core/jwt.py#jwt_encode",
+   "kind": "calls",
+   "label": "signs plugin-owned tokens",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:384"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/utils.py#assign_staff_to_default_group_and_update_permissions",
+   "to": "f:saleor/saleor/account/models.py#Group",
+   "kind": "writes",
+   "label": "gets or creates the default group",
+   "evidence": "saleor/saleor/plugins/openid_connect/utils.py:346"
+  },
+  {
+   "from": "f:saleor/saleor/plugins/openid_connect/client.py#OAuth2Client",
+   "to": "f:saleor/saleor/core/http_client.py",
+   "kind": "calls",
+   "label": "uses the hardened HTTP configuration",
+   "evidence": "saleor/saleor/plugins/openid_connect/client.py:11"
+  }
+ ],
+ "flows": [
+  {
+   "id": "flow.core-accounts.staff-sign-in",
+   "name": "A staff member signs in to the dashboard",
+   "summary": "Email and password become a short-lived access token, a refresh cookie and permission checks on every later request.",
+   "steps": [
+    {
+     "node": "x:staff",
+     "text": "A staff member types their email and password on the dashboard's sign-in page."
+    },
+    {
+     "node": "f:saleor-dashboard/src/auth/hooks/useAuthProvider.ts",
+     "text": "The dashboard's auth provider sends the tokenCreate mutation through its GraphQL client."
+    },
+    {
+     "node": "ep:api POST /graphql/",
+     "text": "The request reaches the single GraphQL endpoint of the Saleor API."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/views.py#GraphQLView.handle_query",
+     "text": "Core's GraphQL view executes the operation against the schema assembled from every area."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+     "text": "tokenCreate first refuses if the site has disabled password sign-in, then creates a cross-site request forgery (CSRF) token for the refresh token."
+    },
+    {
+     "node": "f:saleor/saleor/account/throttling.py#authenticate_with_throttling",
+     "text": "The throttle blocks the client address for at least 1 second, finds the user by email and checks the password; failures grow the block up to an hour."
+    },
+    {
+     "node": "f:saleor/saleor/account/models.py#User",
+     "text": "The user must be active, and confirmed when the site requires email confirmation."
+    },
+    {
+     "node": "f:saleor/saleor/core/jwt.py#create_access_token",
+     "text": "Core signs an access token (5 minutes by default) and a refresh token (30 days) that embed the user's jwt_token_key and staff flag."
+    },
+    {
+     "node": "f:saleor/saleor/core/middleware.py#jwt_refresh_token_middleware",
+     "text": "On the way out the middleware sets the refresh token as an http-only refreshToken cookie; the dashboard keeps the access token."
+    },
+    {
+     "node": "f:saleor/saleor/core/auth_backend.py#load_user_from_request",
+     "text": "On every later request the JSON Web Token (JWT) backend verifies the bearer token and checks its token key against the database."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/account/dataloaders.py#UserByEmailLoader",
+     "text": "The user is loaded by email through a per-request dataloader; inactive users are not found."
+    },
+    {
+     "node": "f:saleor/saleor/account/models.py#User.effective_permissions",
+     "text": "Effective permissions are the user's direct permissions plus those of their groups, or every permission for a superuser."
+    },
+    {
+     "node": "f:saleor/saleor/permission/utils.py#all_permissions_required",
+     "text": "Each mutation and protected field checks the required permissions and authorization filters before running."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/account/mutations/authentication/refresh_token.py#RefreshToken",
+     "text": "When the access token expires the dashboard calls tokenRefresh with the cookie and the CSRF token to get a new one."
+    }
+   ]
+  },
+  {
+   "id": "flow.core-accounts.shopper-register",
+   "name": "A shopper registers and confirms their account",
+   "summary": "Registration that never reveals existing emails, a background task that sends the confirmation, and a token that confirms and merges past orders.",
+   "steps": [
+    {
+     "node": "x:shopper",
+     "text": "A shopper fills in the storefront's registration form."
+    },
+    {
+     "node": "x:storefront",
+     "text": "The storefront sends accountRegister with email, password, redirect link and channel."
+    },
+    {
+     "node": "ep:api POST /graphql/",
+     "text": "The mutation arrives at the GraphQL endpoint."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/account/mutations/account/account_register.py#AccountRegister",
+     "text": "The password is validated; a duplicate email is detected but hidden from the response, and a new user is saved unconfirmed with the default customer type."
+    },
+    {
+     "node": "f:saleor/saleor/account/tasks.py#finish_creating_user",
+     "text": "A Celery task does the rest whether or not a user was created, so response times match: it indexes the user and, when confirmation is on, makes a confirmation token."
+    },
+    {
+     "node": "f:saleor/saleor/account/notifications.py#send_account_confirmation",
+     "text": "The confirmation payload, with a link built from the redirect address, email and token, goes to the plugin manager as NOTIFY_USER."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/manager.py#PluginsManager.account_confirmation_requested",
+     "text": "The plugin manager also emits ACCOUNT_CONFIRMATION_REQUESTED and CUSTOMER_CREATED to installed apps."
+    },
+    {
+     "node": "f:saleor/saleor/webhook/transport/asynchronous/transport.py#send_webhook_request_async",
+     "text": "Subscribed apps receive the events as asynchronous webhooks; an email app renders and sends the message."
+    },
+    {
+     "node": "x:smtp",
+     "text": "The confirmation email reaches the shopper through the store's mail server."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/account/mutations/account/confirm_account.py#ConfirmAccount",
+     "text": "The storefront page behind the link calls confirmAccount with the email and token, plus the password when the site requires it before merging."
+    },
+    {
+     "node": "f:saleor/saleor/core/tokens.py#try_generators",
+     "text": "The token is checked against the current and legacy confirmation generators."
+    },
+    {
+     "node": "f:saleor/saleor/order/utils.py#match_orders_with_new_user",
+     "text": "Guest orders and gift cards placed under the same email are linked to the account, and is_confirmed is saved."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/account/mutations/authentication/create_token.py#CreateToken",
+     "text": "The shopper can now sign in with tokenCreate."
+    }
+   ]
+  },
+  {
+   "id": "flow.core-accounts.oidc-sign-in",
+   "name": "Signing in through an OpenID Connect provider",
+   "summary": "The dashboard or storefront hands sign-in to an outside identity provider and gets Saleor tokens owned by the OpenID Connect plugin.",
+   "steps": [
+    {
+     "node": "f:saleor/saleor/graphql/account/mutations/authentication/external_authentication_url.py#ExternalAuthenticationUrl",
+     "text": "The client calls externalAuthenticationUrl with the plugin id and its redirect link."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_authentication_url",
+     "text": "The plugin signs the redirect link into the state and builds the provider's authorization link."
+    },
+    {
+     "node": "x:openid-provider",
+     "text": "The person signs in at the provider, which redirects back with a code and the state."
+    },
+    {
+     "node": "f:saleor/saleor/graphql/account/mutations/authentication/external_obtain_access_tokens.py#ExternalObtainAccessTokens",
+     "text": "The client calls externalObtainAccessTokens with the code and state."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.external_obtain_access_tokens",
+     "text": "The plugin checks the state signature and exchanges the code for tokens at the provider's token endpoint."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/openid_connect/utils.py#fetch_jwks",
+     "text": "The ID token is validated against the provider's key set, fetched and cached for 1 hour."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/openid_connect/utils.py#get_or_create_user_from_payload",
+     "text": "The user is found by provider subject or email, or created as a confirmed customer; a first-time claim disables the old password."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/openid_connect/utils.py#assign_staff_to_default_group_and_update_permissions",
+     "text": "Staff email domains or saleor scopes make the user staff and add them to the default group."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/openid_connect/utils.py#create_tokens_from_oauth_payload",
+     "text": "Saleor signs an access token and refresh token owned by the plugin, embedding the provider's tokens and expiry."
+    },
+    {
+     "node": "f:saleor/saleor/plugins/openid_connect/plugin.py#OpenIDConnectPlugin.authenticate_user",
+     "text": "Later requests carrying those tokens are authenticated by the plugin through core's plugin authentication backend."
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Topo logo export</title>
+<pre id="log">exporting…</pre>
+<script>
+// [source svg, output name, width, height]
+const JOBS = [
+  ["topo-logo-light", "topo-logo-light", 1200, 520], ["topo-logo-light", "topo-logo-light@2x", 2400, 1040],
+  ["topo-logo-dark", "topo-logo-dark", 1200, 520], ["topo-logo-dark", "topo-logo-dark@2x", 2400, 1040],
+  ["topo-wordmark-light", "topo-wordmark-light", 880, 420], ["topo-wordmark-light", "topo-wordmark-light@2x", 1760, 840],
+  ["topo-wordmark-dark", "topo-wordmark-dark", 880, 420], ["topo-wordmark-dark", "topo-wordmark-dark@2x", 1760, 840],
+  ["topo-icon-light", "topo-icon-light-512", 512, 512], ["topo-icon-light", "topo-icon-light-1024", 1024, 1024],
+  ["topo-icon-dark", "topo-icon-dark-512", 512, 512], ["topo-icon-dark", "topo-icon-dark-1024", 1024, 1024],
+  ["topo-icon-light", "icon-192", 192, 192], ["topo-icon-light", "icon-512", 512, 512],
+  ["topo-icon-light", "apple-touch-icon", 180, 180],
+  ["topo-social-light", "topo-social-light", 1280, 640], ["topo-social-dark", "topo-social-dark", 1280, 640],
+  ["favicon-dark", "favicon-16", 16, 16], ["favicon-dark", "favicon-32", 32, 32], ["favicon-dark", "favicon-48", 48, 48],
+];
+const log = document.getElementById("log");
+async function run() {
+  const out = [];
+  for (const [src, name, w, h] of JOBS) {
+    const img = new Image();
+    img.src = `logo/svg/${src}.svg?${Date.now()}`;
+    await img.decode();
+    const c = Object.assign(document.createElement("canvas"), { width: w, height: h });
+    const ctx = c.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob = await new Promise(r => c.toBlob(r, "image/png"));
+    const res = await fetch(`/save/${name}.png`, { method: "POST", body: blob });
+    out.push(`${res.status === 204 ? "ok  " : "FAIL"} ${name}.png ${w}x${h} ${blob.size}B`);
+    log.textContent = out.join("\n");
+  }
+  log.textContent += "\ndone";
+}
+run().catch(e => { log.textContent += "\nerror: " + e; });
+</script>

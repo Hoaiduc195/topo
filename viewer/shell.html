@@ -1,0 +1,236 @@
+<!-- The Topo shell: the theme, the top bar's brand and view switch, and the script that remembers where you
+     were, shared by every Topo page (each map, and any other page built to sit beside one). build.py puts each part
+     into a page in place of its marker (__SHELL_STYLE__ inside the page's style, __SHELL_BAR__ inside its
+     header, __SHELL_SCRIPT__ before its own script), so the pages cannot drift apart. -->
+<!--shell:style-->
+/* ---------- the shell: one theme and one top bar for every Topo page ---------- */
+/* survey paper and its ink: secondary text (--ink-3) keeps 4.5:1 or more on paper and panels in both themes;
+   --contour is the terrain's line color under the boxes */
+:root {
+  --paper: #ecebe4; --paper-2: #e2e0d7; --panel: #fbfaf6; --panel-2: #f2f0ea;
+  --ink: #1a2226; --ink-2: #47524f; --ink-3: #5a6360; --rule: #cdc9bd; --contour: #8a6a43;
+  --accent: #2346cc; --accent-soft: rgb(35 70 204 / .12); --accent-ink: #ffffff; --route: #de4227;
+  --word-hi: #1a2226; --word-lo: #1a2226; --word-fill: #1a2226; --word-pin: #2346cc; --word-glow: none; --word-cliff: none;
+  --live: #1f8f56; --built: #2f66d4; --partial: #c48510; --stub: #87949a; --planned: #87949a; --archived: #a0aaae; --warn: #a8641b;
+  --e-flow: #33434b; --e-net: #b2337c; --e-data: #14805a; --e-life: #a2650e; --e-meta: #87949a; --e-idea: #7650c4;
+  --sys-l: 42%; --tile-a: .1;
+  --shadow: 0 1px 2px rgb(14 30 38 / .08), 0 10px 28px rgb(14 30 38 / .12);
+  --font-label: "Sofia Sans Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Sofia Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --bar-h: 52px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0d1214; --paper-2: #151c1f; --panel: #131a1d; --panel-2: #192226;
+    --ink: #e4e8e6; --ink-2: #a9b3b0; --ink-3: #7f8a87; --rule: #2a3438; --contour: #c2a77c;
+    --accent: #8ea4ff; --accent-soft: rgb(142 164 255 / .16); --accent-ink: #0c1317; --route: #ff6b4d;
+    --word-hi: #c4cfff; --word-lo: #5f78f0; --word-fill: #f3f5fa; --word-pin: #ffffff; --word-glow: drop-shadow(0 0 1.5px rgb(142 164 255 / .7)); --word-cliff: inline;
+    --live: #4fc48b; --built: #7ea4ff; --partial: #e8b04c; --stub: #7d8a90; --planned: #7d8a90; --archived: #5f6c71; --warn: #e0a458;
+    --e-flow: #b6c3c8; --e-net: #ee7cbe; --e-data: #52d09f; --e-life: #e2a44d; --e-meta: #6c7a80; --e-idea: #b29bf2;
+    --sys-l: 66%; --tile-a: .12;
+    --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 12px 32px rgb(0 0 0 / .45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0d1214; --paper-2: #151c1f; --panel: #131a1d; --panel-2: #192226;
+  --ink: #e4e8e6; --ink-2: #a9b3b0; --ink-3: #7f8a87; --rule: #2a3438; --contour: #c2a77c;
+  --accent: #8ea4ff; --accent-soft: rgb(142 164 255 / .16); --accent-ink: #0c1317; --route: #ff6b4d;
+    --word-hi: #c4cfff; --word-lo: #5f78f0; --word-fill: #f3f5fa; --word-pin: #ffffff; --word-glow: drop-shadow(0 0 1.5px rgb(142 164 255 / .7)); --word-cliff: inline;
+  --live: #4fc48b; --built: #7ea4ff; --partial: #e8b04c; --stub: #7d8a90; --planned: #7d8a90; --archived: #5f6c71; --warn: #e0a458;
+  --e-flow: #b6c3c8; --e-net: #ee7cbe; --e-data: #52d09f; --e-life: #e2a44d; --e-meta: #6c7a80; --e-idea: #b29bf2;
+  --sys-l: 66%; --tile-a: .12;
+  --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 12px 32px rgb(0 0 0 / .45);
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+header.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 6; flex: none; height: var(--bar-h);
+  display: flex; align-items: center; gap: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: var(--panel); border-bottom: 1px solid var(--rule);
+  view-transition-name: topo-bar;
+}
+.brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.brand h1 { margin: 0; display: flex; }
+.brand-word { --h: 42px; height: var(--h); width: calc(var(--h) * 2.0326); flex: none; margin-block: -6px; overflow: visible; }
+.word-lines { fill: none; stroke-linejoin: round; stroke-linecap: round; filter: var(--word-glow); }
+.word-lines path { vector-effect: non-scaling-stroke; stroke-width: .8px; stroke: color-mix(in srgb, var(--word-hi) calc(var(--t) * 100%), var(--word-lo)); }
+.word-lines path.idx { stroke-width: 1.25px; }
+/* the cliff lines hugging the T: under a pixel apart at bar size, so light mode leaves the T clear paper */
+.word-lines path.cliff { display: var(--word-cliff); }
+.word-fill { fill: var(--word-fill); }
+.word-pin { fill: var(--word-pin); filter: var(--word-glow); }
+.map-name { min-width: 0; padding-left: 10px; border-left: 1px solid var(--rule); font: 500 14px/1.2 var(--font-body); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.views { flex: none; align-self: stretch; display: flex; gap: 2px; }
+.views a { position: relative; display: flex; align-items: center; padding: 0 10px; font-size: 13.5px; font-weight: 500; color: var(--ink-3); text-decoration: none; white-space: nowrap; }
+.views a:hover { color: var(--ink); }
+.views a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+/* the current view's mark slides to the new view as a page changes */
+.views .ink { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); view-transition-name: topo-view; }
+.views .s { display: none; }
+.stamp { margin-left: auto; font: 500 12px var(--font-body); color: var(--ink-3); white-space: nowrap; }
+/* on a phone the switch is one button that names the current view and opens the others */
+.views-menu { display: none; position: relative; align-self: stretch; min-width: 0; }
+.views-menu summary { list-style: none; display: flex; align-items: center; gap: 5px; height: 100%; padding: 0 6px; cursor: pointer;
+  font: 600 14px var(--font-body); color: var(--ink); white-space: nowrap; }
+.views-menu summary::-webkit-details-marker { display: none; }
+.views-menu summary span { overflow: hidden; text-overflow: ellipsis; }
+.views-menu summary svg { width: 12px; height: 12px; flex: none; color: var(--ink-3); transition: transform .15s; }
+.views-menu[open] summary svg { transform: rotate(180deg); }
+.views-menu .menu { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 210px; display: grid; gap: 1px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; box-shadow: var(--shadow); }
+.views-menu .menu a { padding: 9px 10px; border-radius: 6px; color: var(--ink-2); font-size: 14.5px; text-decoration: none; }
+.views-menu .menu a:hover { background: var(--panel-2); color: var(--ink); }
+.views-menu .menu a[aria-current="page"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+
+/* the theme: follows the system until someone picks light or dark here */
+.theme-btn { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--panel); color: var(--ink-2); cursor: pointer; padding: 0; }
+.theme-btn:hover { border-color: var(--ink-3); color: var(--ink); }
+.theme-btn svg { width: 16px; height: 16px; }
+
+/* moving between pages: the bar stays where it is while the page under it changes */
+@view-transition { navigation: auto; }
+::view-transition-group(*) { animation-duration: .24s; }
+@media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }
+
+@media (max-width: 720px) {
+  :root { --bar-h: 50px; }
+  .views { display: none; }
+  .views-menu { display: block; flex: 0 1 auto; }
+  .bar:has(.views:not([hidden])) .brand h1, .bar:has(.views:not([hidden])) .map-name, .stamp { display: none; }
+  .bar:has(.views:not([hidden])) .brand { flex: none; }
+  .brand { flex: 1; min-width: 0; }
+  .brand h1 { flex: none; }
+  .brand-word { --h: 34px; margin-block: -4px; }
+  /* a map's bar is full on a phone: its theme is in the Legend */
+  .bar:has(.bar-actions) .theme-btn { display: none; }
+}
+<!--shell:bar-->
+<div class="brand">
+  <!-- the wordmark: the Topo logo itself (brand/final_logo.py bar_word), every contour of the word with its
+       wobble. Lines keep fixed screen widths so they stay crisp at bar size; in dark they take the logo's
+       blues by height (--t) and a soft glow, and keep the cliff lines around the T that light mode hides.
+       The export draws the same shapes (TOPO_WORD). -->
+  <h1>
+    <svg class="brand-word" viewBox="183.9 53.9 824.6 405.7" role="img" aria-label="Topo">
+      <g class="word-lines">
+      <path d="M481.4 244l4.8-0.8 4.5 1 5.2 3.5 2.8 4.1 0.9 4.5 -1.3 4.5 -2.3 3 -4.2 2.7 -4.5 0.9 -5.6-0.9 -4.4-2.7 -3.2-4.1 -1.1-3.4 0.9-5.6 2.5-3.4z" style="--t:1.0" class="idx"/>
+      <path d="M685.6 244.2l6.8-0.3 5.7 2 5.8 5.2 2.6 6.2 0.1 5.8 -2.6 6.7 -4.5 5.5 -6.7 4 -6.7 0.7 -6.8-2.1 -5.3-4.6 -3.1-6.9 0.4-7.8 3.1-6.8 4.9-4.5z" style="--t:1.0" class="idx"/>
+      <path d="M880.3 250.3l3.7-0.3 5.5 1.7 3.4 3.5 1.1 3.4 -0.4 4.5 -2 4.5 -3 3.2 -4.5 2 -4.5 0.1 -4.5-1.8 -3.7-3.6 -1.8-4.4 0.3-4.5 1.9-3.4 3.2-2.8z" style="--t:1.0" class="idx"/>
+      <path d="M238.5 106l4.7-0.8 149.6 0 4.5 0.7 2.4 2.1 1.1 4.7 0 34.9 -0.5 3.3 -1.5 1.8 -4.5 2.1 -46.1 0 -2.7 1 -1.5 2.4 -0.2 129.2 0 49.5 -1.2 5.3 -5.3 2.6 -37.1 0 -4.5-0.7 -2.4-2.1 -1.1-4.7 -0.4-179.9 -2.5-2.6 -46.1 0 -5.5-1.2 -1.4-1.8 -1.1-5 0-32.6 1.5-6.7z" style="--t:0.83" class="cliff"/>
+      <path d="M689.5 227.9l5.2 0 6.7 1.4 10.7 5.8 5.5 5.8 2.7 4.5 3.3 12.4 -0.4 6.8 -2 6.7 -3.3 6.7 -5.8 8.4 -7.4 6.4 -5.9 2.6 -6.7 1.2 -6.8-0.2 -5.6-1.3 -6.7-3 -5.6-4.3 -4.8-5.3 -3.4-5.8 -2.1-5.8 -0.9-6.7 2.3-13.5 3.1-6.8 4.6-6.1 5.2-4.2 5.4-2.8z" style="--t:0.83"/>
+      <path d="M475.7 229.3l10.1 0.4 6.8 2.2 5.5 3.1 9.2 8.9 3.7 5.9 1.6 4.6 -0.5 10.2 -5.2 11.2 -4.1 4.7 -4.2 3.1 -9 3.2 -12.4-0.2 -6.8-2.3 -4.3-2.6 -8.2-8.9 -3.7-6.7 -1.8-5.7 -0.3-6.7 1-4.5 5.3-10.1 7.1-6.3z" style="--t:0.83"/>
+      <path d="M882.8 233.8l9.9-0.2 5.6 1.2 5.6 2.5 7.6 6.8 3.4 7.7 0.5 4.5 -1 6.8 -5.8 13.3 -5.9 6.6 -5 2.8 -4.6 1.2 -11.3-0.7 -11.2-5.3 -7.6-7.3 -2.8-4.6 -2.3-6.8 0.5-10.1 2.4-5.5 2.9-3.9 7.6-5.7z" style="--t:0.83"/>
+      <path d="M240.9 100.5l153.8-0.1 5.6 1.4 4.1 4.2 1.2 5.6 0 37.1 -0.9 4.5 -1.9 3.1 -3 2.2 -3.5 0.9 -45.1 0.2 -2 2 -0.6 135.6 0 41.6 -0.9 4.5 -2.8 3.9 -3.1 1.7 -4.5 0.7 -38.2 0 -5.6-0.9 -4.4-3.9 -1.7-6.7 0-174.4 -1.5-2.6 -4.1-1.5 -42.7-0.2 -4.4-1.8 -2.6-2.7 -1.7-6.9 0.1-38.3 1-3.4 2.4-3.1z" style="--t:0.67" class="cliff"/>
+      <path d="M686.7 214.3l8.4-0.6 9 1 9 3 9.8 5.4 7.2 6.4 4.6 6.5 3.3 7.9 2 9 0.3 10.2 -2 10.1 -3.7 9 -6.7 11.1 -5 5.7 -7.6 5.8 -8.2 3.7 -9 2.2 -9 0.6 -11.3-1.2 -10.1-3.6 -7-4.6 -7.6-8.1 -5.4-8.8 -4.6-11.4 -1.6-7.9 0.1-7.9 3.1-12.4 4.4-9 5-6.5 8-6.8 7.4-4.1 5.6-2.2z" style="--t:0.67"/>
+      <path d="M892 214.4l9.7 0.5 7.9 2.2 8.9 4.1 6.7 5 4.5 5.4 4.1 7.8 2.8 9 0.9 6.8 -0.7 7.9 -1.8 5.6 -7.7 15.6 -5 6.7 -6.7 5.6 -4.5 2.4 -6.8 2.4 -9 1.2 -9-0.7 -7.9-2.4 -7.8-4.4 -7.3-5.9 -7.2-7.5 -5.8-8.4 -3.7-9.1 -1.5-9 0.6-6.8 2.8-7.8 4.3-6.7 6.1-6.5 7.9-5.6 6.8-3.2 8.1-2.6z" style="--t:0.67"/>
+      <path d="M463.4 217.2l9.3-0.8 9 0.9 10 2.6 6.8 3 9 6.2 7 6.7 6.3 7.7 4.2 7.9 1.6 6.8 -0.2 7.9 -2.2 10.1 -4.2 10.1 -4.4 6.3 -6 5.5 -8.2 4.9 -8.1 2.8 -7.9 1.3 -11.2-0.3 -7.9-1.8 -8.9-3.6 -8.8-5.5 -5.6-5.4 -5-7 -4.6-9.9 -2.2-9 -0.1-11.3 1.7-7.9 4-9 5.4-7.2 7-6.1 7.5-4z" style="--t:0.67"/>
+      <path d="M234.9 92.5l5.3-1 155.2 0 9 2.2 7 6.3 3 9.3 0.1 40.5 -0.6 4.5 -3.1 6.6 -3.4 3.5 -6.7 3.4 -5.6 0.7 -34.9 0 -2.1 2.1 -0.6 133.3 -0.4 39.4 -2.8 6.8 -4.9 5 -5.7 2.7 -5.6 0.7 -40.5 0 -9-2.2 -7-6.3 -2.5-5.9 -0.6-5.7 0-164.2 -1.6-4.2 -2.6-1.5 -33.7 0 -6.8-1.2 -5.1-2.8 -5-6.1 -2.2-9 0.4-42.7 1.5-4.5 3.1-4.5 4.4-3.6z" style="--t:0.5" class="idx"/>
+      <path d="M896.6 194.8l14.1 0.5 11.2 3.2 11.3 6.2 8.1 6.6 7.1 8.4 5 9.5 3.4 12.5 1.8 13.5 -0.6 7.8 -3.1 9.1 -10.4 21.3 -5.6 7.6 -9.6 7.6 -11.5 5.8 -6.7 2.1 -11.3 1.1 -12.4-1.6 -10.1-3 -9-4.5 -11.2-9.1 -10-10.7 -6.3-9.1 -5.8-13.5 -2.7-13.5 0.8-10.2 3-9 5-9 7.9-9.1 8.9-7.1 10.8-6 12.7-4.5z" style="--t:0.5" class="idx"/>
+      <path d="M688.6 199.3l17 0 14.6 3.9 12.4 7.9 10.5 10.3 7.9 12.4 5.1 14.6 1.1 14.7 -3 14.6 -7.6 18 -4.5 7.7 -5.3 6.7 -13.2 9.9 -15.8 6.1 -9 1.3 -9-0.1 -11.2-1.2 -9-2.1 -12.4-5.5 -14.5-11.6 -2.6 0 -1.3 4.5 0.1 51.8 -2.6 41.6 -1.5 7.9 -3.3 3.9 -4.7 1.5 -3.9-2.5 -1.9-4.8 0.7-23.6 2.6-25.9 -0.6-61.9 0.8-16.8 -1.9-21.4 0.5-6.8 6.1-9.8 6.9-16 5.1-6.6 7.8-7.1 9.3-6.4 8.8-4.3 9.1-2.8z" style="--t:0.5" class="idx"/>
+      <path d="M462 203.8l11.4 0.1 11.3 2.3 12.4 4.6 13.5 7.7 10.2 8.5 10.6 12.7 4.9 9.1 2.8 10.1 0.2 10.2 -2.3 14.6 -3.2 10.1 -5.4 9 -8.8 8.6 -10.2 6.7 -12.3 5.8 -13.5 4.3 -12.4 1.8 -11.3-1.4 -12.3-5.2 -12.7-8 -7.8-7.1 -7.6-10.7 -5.3-12.4 -2.4-10.1 -0.9-12.4 1.8-15.8 3.6-11 4.6-8.1 7.4-8.9 9.1-7 12.4-5.5z" style="--t:0.5" class="idx"/>
+      <path d="M232.6 77.6l8-0.9 157.5 0.1 9 1.9 7.8 4 5.4 4.6 4.8 6.7 3.4 8.9 0.8 6.8 0 39.4 -1.1 9 -3.7 9 -6.6 7.9 -11.2 6.5 -9 1.7 -22.5 0.1 -2.2 1.6 -0.5 2.1 -0.2 134.9 -0.2 21.4 -2.7 10.1 -3.2 5.7 -4.8 5.4 -5.7 4.2 -6.8 3 -10.1 1.6 -41.6 0 -6.8-0.7 -5.6-1.7 -6.7-3.6 -5.4-4.6 -4.8-6.7 -3.4-8.9 -0.8-6.8 0-154.1 -1.6-2.2 -2.1-0.5 -26.9-1 -10.2-4 -6.1-4.7 -5.1-6.4 -3.2-6.7 -1.5-6.8 -0.3-43.8 1.6-10.2 4.5-9 4.8-5.4 6.9-4.9z" style="--t:0.33"/>
+      <path d="M891.2 173.7l13.5-0.7 9 0.9 12.4 2.8 11.1 4.9 12.4 8.3 9.8 8.8 9.1 12.2 7.5 14.7 3 12.3 1.1 21.4 -1.7 10.1 -4.6 10.2 -11.6 19.1 -12.2 13.5 -14 10.7 -11.8 5.8 -12.4 2.8 -14.6-0.3 -16.9-4.6 -15.7-7.4 -12.4-8.8 -14.9-14.3 -8.5-11.3 -7.9-16.9 -4-14.6 0.1-11.2 3.4-12.4 5.7-11.3 7-8.9 11.9-11.1 17.4-12.8 15.3-8z" style="--t:0.33"/>
+      <path d="M684 184.3l17.1-0.7 18 2.3 11.2 3.7 11.6 8.1 14.5 15.4 6.7 9.7 4.7 8.9 6.5 17.1 1.1 7.9 -0.5 10.1 -5.3 20.3 -11.7 23.2 -6.7 9.4 -5.9 6.1 -13.4 9.7 -15.8 6.9 -10.2 2.3 -6.7 0.5 -18-1.8 -22.5-6.1 -3 0.8 -2.2 5.2 0.4 28.1 -2.1 22.5 -0.7 14.7 -2.2 9 -5 9 -7.7 7.1 -5.2 1.9 -4.6 0.3 -9-2.6 -7.2-5.4 -4.8-8.8 -0.9-10.2 1.2-23.6 3.5-28.1 0.4-38.3 -0.9-22.5 0.8-19.1 -2-24.7 2.1-6.8 7.1-11.2 5.7-12.4 4.5-6.7 6.2-6.6 11.4-8.8 12.3-7.2 13.5-5.6z" style="--t:0.33"/>
+      <path d="M453.8 191.7l15.5-0.7 15.8 2.8 14.6 6.6 19.1 11.3 11.9 10.1 7.9 9.8 6.9 12.3 5.1 14.6 0.9 12.4 -3.1 22.5 -3.4 11.3 -6.1 10.4 -8.9 9.3 -16.8 11.2 -14.6 6.8 -15.8 4.7 -15.7 2.4 -11.3-0.4 -12.4-2.9 -11.2-5.4 -13.5-9.2 -11.1-10.4 -9.3-13.1 -5.1-13.5 -2.7-20.3 0.3-15.7 3-15.8 6.1-14.6 10.7-14.7 11.3-10.6 6.5-3.9 9-3.6z" style="--t:0.33"/>
+      <path d="M231.9 62.7l7.5-0.8 160.9 0.2 9 1.7 9 3.6 6.8 4.4 7.5 7.1 7.7 12.4 3.5 13.5 0.3 46.1 -1.3 10.2 -2.6 10.1 1.3 4.4 2 1.9 3.3 1.2 25.9 1.3 16.9 3.5 11.2 5.2 26.8 17.1 13.7 12.3 8.2 10.8 8.8 18 5.4 18 -0.2 15.8 -4.4 25.9 -5.2 11.2 -8.5 12.4 -12.4 12.2 -16 10.4 -18.1 8.5 -21.3 5.9 -19.2 1.5 -12.3-1 -10.2-2.2 -14.5-6.8 -23.5-15.8 -4.3-1 -4.7 3.7 -8 18 -6.5 8.9 -6.4 5.8 -5.8 3.8 -13.6 5 -9 1 -50.7-0.7 -9-2.5 -6.5-3 -7.2-5 -5.8-5.8 -7.7-12.4 -2.8-9 -0.9-6.8 -0.1-141.7 -0.8-1.7 -2-0.9 -13.4-1.1 -7.9-1.9 -9-4.1 -6.7-4.7 -7.3-7.7 -4.9-7.9 -3.1-7.9 -1.7-9 -0.1-47.2 0.9-6.8 2.8-9 5.7-9.9 8-8.4 10.2-6.5z" style="--t:0.17"/>
+      <path d="M895.5 152.8l11.4-0.5 13.5 1.8 11.3 3 12.4 5 11.8 7 14.1 10.5 9.3 9 6.5 9.7 9 19.4 4.1 12.4 1.5 12.3 -0.1 19.2 -1.3 9 -3.8 10.1 -12.5 21.4 -5.8 7.8 -22.9 21.1 -12.5 7.8 -9.1 2.9 -12.3 2.1 -10.2 0.8 -13.5-0.4 -14.6-3.3 -16.8-8.2 -18.1-11.2 -29.9-22.6 -8.7-5.4 -6.7-2.2 -6.8 0.8 -5.6 3.5 -5.1 5.4 -12.7 20.8 -8 10 -14.5 12.7 -10 6.4 -21.3 8.9 -14.7 3.5 -12.3 0.6 -16.9-2.8 -2.9 1 -1.8 4.1 0.2 13.5 -1.9 32.6 -1.8 7.9 -2.9 6.7 -8.3 12.8 -7.4 6.8 -8.8 4.1 -5.7 0.9 -6.7-0.3 -11.3-3.3 -12.3-7.3 -7.3-8 -4.2-7.9 -1.8-5.6 -0.8-11.3 1.7-30.4 3.3-21.3 0.8-37.2 -1-23.6 0.8-21.4 -1.9-23.6 3.7-12.4 19.2-30.6 7-7.7 8.5-7.2 10.2-6.5 16.9-8.8 20.2-6.8 20.3-1.8 24.7 3.8 17.9 6 11.2 7.2 28.1 24.9 8.1 3.8 7.9 0 8.9-3.6 10.1-6.9 37-31.4 10-7.4 16.8-8z" style="--t:0.17"/>
+      </g>
+      <path class="word-fill" d="M247.7 116.6l4.5-0.6 131.6 0 4.5 0.6 1.4 1.2 0.3 20 -0.9 4.5 -1.3 1.4 -51.6 0.3 -2.3 1.1 -0.6 1.6 -0.3 130.2 0 52.9 -0.6 1.9 -1.3 1.4 -2.8 0.9 -19.1 0 -4.5-0.6 -1.4-1.2 -0.3-186.5 -0.3-0.9 -1.4-0.8 -50.6 0 -2-0.6 -1.6-1.3 -1.1-2.8 0-20.1 0.8-2z"/>
+      <circle class="word-pin" cx="687" cy="258.0" r="8"/>
+    </svg>
+  </h1>
+  <span class="map-name" id="map-name" hidden></span>
+</div>
+<nav class="views" id="views" aria-label="Views" hidden></nav>
+<!--shell:script-->
+<script>
+// The shell's switch between views, and a memory of where you were on each page: its address, kept for this
+// tab, so the switch takes you back to the same section, pick or box. A page can keep more with the same
+// store (the map keeps its zoom).
+const TopoShell = (() => {
+  const store = {
+    get: k => { try { return sessionStorage.getItem(k); } catch (_) { return null; } },
+    set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (_) { /* storage is blocked: nothing is kept */ } },
+  };
+  const at = path => 'topo:at:' + path;
+  // the theme someone picked, kept across visits as topo:theme (the map's own store keeps JSON the same way);
+  // System removes the override, so the page follows prefers-color-scheme again
+  const THEMES = ['system', 'light', 'dark'];
+  const ICON = {
+    system: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.6"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/></svg>',
+    light: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>',
+    dark: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.2 10.1A5.6 5.6 0 0 1 5.9 2.8a5.6 5.6 0 1 0 7.3 7.3z"/></svg>',
+  };
+  const theme = {
+    get() { try { const v = JSON.parse(localStorage.getItem('topo:theme')); return THEMES.includes(v) ? v : 'system'; } catch (_) { return 'system'; } },
+    set(t) {
+      if (!THEMES.includes(t)) return;
+      try { if (t === 'system') localStorage.removeItem('topo:theme'); else localStorage.setItem('topo:theme', JSON.stringify(t)); } catch (_) { /* not kept */ }
+      apply(t);
+    },
+  };
+  function apply(t) {
+    if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+    const b = document.getElementById('theme-btn');
+    if (b) {
+      const next = THEMES[(THEMES.indexOf(t) + 1) % 3], name = x => x[0].toUpperCase() + x.slice(1);
+      b.innerHTML = ICON[t]; b.dataset.theme = t;
+      b.title = `Theme: ${name(t)}. Switch to ${name(next)}`; b.setAttribute('aria-label', b.title);
+    }
+  }
+  apply(theme.get());
+  const keep = () => store.set(at(location.pathname), location.hash);
+  addEventListener('pagehide', keep);
+  addEventListener('hashchange', keep);
+  // views: [{label, short, href, current}]; stamp: a line for the bar's right end, such as when it was updated
+  function mount(views, stamp) {
+    const nav = document.getElementById('views');
+    if (Array.isArray(views) && views.length > 1) {
+      const menu = document.createElement('details'), summary = document.createElement('summary'), list = document.createElement('div');
+      menu.className = 'views-menu'; list.className = 'menu';
+      for (const v of views) {
+        const href = v.href + (v.current ? '' : store.get(at(new URL(v.href, location.href).pathname)) || '');
+        const a = document.createElement('a'), l = document.createElement('span'), s = document.createElement('span');
+        l.className = 'l'; l.textContent = v.label; s.className = 's'; s.textContent = v.short || v.label;
+        a.href = href; a.append(l, s);
+        const m = document.createElement('a');
+        m.href = href; m.textContent = v.label;
+        if (v.current) {
+          const ink = document.createElement('span'); ink.className = 'ink';
+          a.setAttribute('aria-current', 'page'); a.append(ink); m.setAttribute('aria-current', 'page');
+          const name = document.createElement('span'); name.textContent = v.short || v.label;
+          summary.append(name);
+          summary.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg>');
+        }
+        nav.append(a); list.append(m);
+      }
+      summary.setAttribute('aria-label', 'Views');
+      menu.append(summary, list);
+      nav.after(menu);
+      nav.hidden = false;
+      // the menu closes on a click outside it, or on Escape
+      document.addEventListener('click', e => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.open) { menu.open = false; summary.focus(); } });
+    }
+    const st = document.getElementById('stamp');
+    if (st && stamp) st.textContent = stamp;
+    const bar = document.querySelector('header.bar');
+    if (bar && !document.getElementById('theme-btn')) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.id = 'theme-btn'; b.className = 'theme-btn';
+      b.addEventListener('click', () => theme.set(THEMES[(THEMES.indexOf(theme.get()) + 1) % 3]));
+      bar.append(b);
+      apply(theme.get());
+    }
+  }
+  return { mount, store, theme };
+})();
+</script>
