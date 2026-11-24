@@ -126,6 +126,14 @@ class Tools(unittest.TestCase):
             '}\n',
         )
         self.repo.write(
+            "srv/client.go",
+            'package main\nfunc call(c *gin.Context, client *http.Client) {\n'
+            '\thttp.Get("https://example.invalid/ping")\n'
+            '\tclient.Post("https://example.invalid/events", "application/json", nil)\n'
+            '\tc.Get("user")\n'
+            '}\n',
+        )
+        self.repo.write(
             "srv/routes_test.go",
             'package main\nfunc TestX() { http.HandleFunc("/ignored", nil) }\n',
         )
@@ -133,13 +141,14 @@ class Tools(unittest.TestCase):
         r = tool("routes.py", self.repo.root, "srv", "--out", out)
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = json.loads(Path(out).read_text())
-        self.assertIn(["ANY", "/health", "srv/nethttp.go:3"], rows)
+        self.assertIn(["GET", "/health", "srv/nethttp.go:3"], rows)
         self.assertIn(["POST", "/webhooks", "srv/nethttp.go:4"], rows)
         self.assertIn(["GET", "/api/v1/orders", "srv/gin_echo.go:5"], rows)
         self.assertIn(["POST", "/api/v1/orders", "srv/gin_echo.go:6"], rows)
         self.assertIn(["GET", "/items/{id}", "srv/chi.go:4"], rows)
         self.assertIn(["DELETE", "/items/{id}", "srv/chi.go:5"], rows)
         self.assertFalse(any(p == "/ignored" for _, p, _ in rows))
+        self.assertFalse(any(loc.startswith("srv/client.go:") for _, _, loc in rows))
 
     def test_brief_catches_double_ownership(self):
         areas = {"map": self.map, "checkout": self.repo.root, "out": os.path.join(self.t, "briefs"),

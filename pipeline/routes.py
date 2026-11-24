@@ -8,7 +8,8 @@ id. It also makes the routes that callers use but no server declares stand out a
 
 Reads FastAPI (APIRouter prefixes and include_router prefixes), Flask (@app.route with methods),
 Express-style JavaScript or TypeScript (router.get('/path', ...)) and Go (net/http HandleFunc,
-Gin/Echo groups, and chi Route blocks). Paths come out as declared, with the router prefix; tests
+Gin/Echo groups, and chi Route blocks; http.Handle and chi Mount are not yet read, and Go Group
+variables are tracked per file by name). Paths come out as declared, with the router prefix; tests
 are skipped. Read the result: a route registered dynamically will not appear.
 """
 import argparse
@@ -65,14 +66,16 @@ def _collect_go(text, rel):
         for hm in GO_HANDLE.finditer(code):
             raw = hm.group(1).strip()
             parts = raw.split(None, 1)
-            if len(parts) == 2 and parts[0].upper() in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+            if len(parts) == 2 and parts[0].upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
                 method, path = parts[0].upper(), parts[1]
             else:
-                method, path = "ANY", raw
+                method, path = "GET", raw
             if path.startswith("/"):
                 rows.append((method, path, f"{rel}:{lineno}"))
         for mm in GO_METHOD.finditer(code):
             var, method, path = mm.groups()
+            if not path.startswith("/"):
+                continue
             prefix = next((p for _, v, p in reversed(route_stack) if v == var), groups.get(var, ""))
             rows.append((method.upper(), _join_path(prefix, path), f"{rel}:{lineno}"))
         depth += code.count("{") - code.count("}")
